@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/vercel-labs/portless/main/schema.json",
+  "name": "tenex",
+  "apps": {
+    "apps/api": { "name": "api.tenex", "appPort": 8787 },
+    "apps/web": { "name": "web.tenex", "appPort": 5173 }
+  }
+}

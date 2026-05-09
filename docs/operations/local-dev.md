@@ -6,6 +6,8 @@ Day-one setup and the most common commands. For why each tool was chosen, see [`
 
 - [Prerequisites](#prerequisites)
 - [First-time setup](#first-time-setup)
+- [Pre-commit hook](#pre-commit-hook)
+- [Stable HTTPS URLs via portless (optional)](#stable-https-urls-via-portless-optional)
 - [Common commands](#common-commands)
 - [Filtering by package](#filtering-by-package)
 - [Troubleshooting](#troubleshooting)
@@ -63,6 +65,26 @@ git commit --no-verify -m "..."
 ```
 
 Use sparingly — CI runs the same gate via `bun run check`, so anything bypassed locally still has to pass on push.
+
+## Stable HTTPS URLs via portless (optional)
+
+[`portless.json`](../../portless.json) at the repo root wires both apps for [vercel-labs/portless](https://github.com/vercel-labs/portless), which proxies named `*.localhost` URLs through HTTPS+HTTP/2 instead of port numbers. After a one-time install, `portless` runs both dev servers and exposes them at:
+
+- `https://web.tenex.localhost` → `apps/web` (vite on :5173)
+- `https://api.tenex.localhost` → `apps/api` (wrangler on :8787)
+
+One-time setup (binds privileged port 443, mutates `/etc/hosts`, and generates and trusts a local CA — sudo will prompt):
+
+```sh
+npm install -g portless
+portless                      # from the repo root; first run does the privileged setup
+```
+
+After that, `portless` (no args) starts both dev servers behind the proxy. Stop with Ctrl+C.
+
+The vite proxy in [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) keeps targeting `http://localhost:8787` directly — that path is unchanged, so the SPA's `/rpc/*` requests still flow through vite to wrangler in-process. portless is purely a friendlier surface for opening the apps in a browser.
+
+`portless` and `bun --filter @app/{api,web} dev` are interchangeable; they bind the same ports (8787/5173) and share the same secret-fetching path through `with-secrets`, so you can pick whichever fits the moment without reconfiguring anything.
 
 ## Common commands
 
