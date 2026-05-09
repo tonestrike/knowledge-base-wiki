@@ -20,13 +20,15 @@ The line: if a skill encodes our domain-specific workflow, it's here. If it's a 
 
 ## tenex-specific skills
 
-_(none yet — populate as we add them)_
+| Skill | What it does | When an agent should invoke it |
+|---|---|---|
+| [`tenex`](../../skills/tenex/SKILL.md) | Entry-point router for any task in this repo. Identifies intent (new project / slice execution / bounded context / procedure / ADR / secret / review / debug) and points at the right how-to. Reminds the agent of always-on rules. | Always, when starting any task in this repo. The skill description triggers on any tenex-touching prompt — agents shouldn't have to be told to invoke it. |
 
-Planned candidates (write the `SKILL.md` files when the patterns harden):
+Planned candidates (promote from how-to to skill if they get used heavily):
 
-- `add-procedure` — guides the agent through writing a contract → use-case → handler → frontend hook for a new oRPC procedure
-- `add-bounded-context` — scaffolds a new `packages/domains/<ctx>/` with the layering, glossary, cspell dict, and a placeholder procedure
-- `glossary-audit` — reads a domain's glossary and reports terms in code that are missing
+- `add-procedure` — currently lives as a how-to at [`docs/how-to/add-procedure.md`](../how-to/add-procedure.md)
+- `add-bounded-context` — at [`docs/how-to/add-bounded-context.md`](../how-to/add-bounded-context.md)
+- `glossary-audit` — reads a domain's glossary and reports terms in code that are missing (no how-to yet)
 - `deploy-checklist` — pre-deploy gate (typecheck + tests + secrets diff + wrangler dry-run)
 
 ## Recommended community skills

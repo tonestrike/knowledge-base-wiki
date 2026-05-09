@@ -45,10 +45,15 @@ Conventions:
 - [Projects](projects/README.md) — multi-PR initiatives with goals, slices, status
 
 ### How-to
+- [Start a new project](how-to/start-a-project.md)
+- [Execute a slice](how-to/execute-slice.md)
 - [Add a new bounded context](how-to/add-bounded-context.md)
 - [Add a new oRPC procedure](how-to/add-procedure.md)
 - [Add a new secret](how-to/add-secret.md)
 - [Add a new ADR](how-to/add-adr.md)
+
+### Agent entry point
+For any task in this repo, agents should invoke the [`tenex`](../skills/tenex/SKILL.md) skill — it routes intent to the right how-to and reminds them of the always-on rules.
 
 ## Reading order for new engineers
 
