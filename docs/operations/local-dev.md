@@ -15,10 +15,13 @@ Day-one setup and the most common commands. For why each tool was chosen, see [`
 | Tool | Version | Install |
 |---|---|---|
 | Bun | ≥ 1.3.0 | `curl -fsSL https://bun.sh/install \| bash` |
+| Node.js | ≥ 22 (pinned in `.nvmrc`) | `nvm install 22 && nvm use 22`, or system install |
 | Cloudflare account | any | sign up at cloudflare.com (only needed for `wrangler deploy`) |
 | Infisical Machine Identity | one per repo | see [`secrets.md`](secrets.md) |
 
 The Infisical CLI ships as a workspace devDep (`@infisical/cli`); no global install required.
+
+> **Node + wrangler:** wrangler's local dev mode (used by `bun --filter @app/api dev`) requires real Node.js to run its ProxyWorker controller channel. Under bun's node-shebang fallback, the controller IPC breaks silently and HTTP requests hang on `:8787`. Make sure `node --version` returns `v22.x` in the shell where you run dev — the lazy-load nvm pattern in `~/.zshrc` only exposes `node` after you've called it once in the session; eager `nvm use` (or `bun run setup`, which does it for you) sidesteps this.
 
 ## First-time setup
 
