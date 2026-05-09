@@ -7,10 +7,17 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./core": "./src/core/index.ts"
+    "./core": "./src/core/index.ts",
+    "./shared": "./src/shared/index.ts",
+    "./events": "./src/events/index.ts",
+    "./ingestion": "./src/ingestion/index.ts",
+    "./wiki": "./src/wiki/index.ts",
+    "./chat": "./src/chat/index.ts",
+    "./verification": "./src/verification/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
@@ -19,6 +26,7 @@
   },
   "devDependencies": {
     "@tooling/tsconfig": "workspace:*",
+    "@types/bun": "^1.2.18",
     "typescript": "^5.7.2"
   }
 }

@@ -1,0 +1,61 @@
+import { oc } from '@orpc/contract';
+import { z } from 'zod';
+import { FolderId, UserId } from '../shared/ids.ts';
+
+export const DriveAuthStartOutput = z.object({
+  authorizationUrl: z.string().url(),
+  state: z.string().min(16),
+});
+
+export const DriveAuthCallbackInput = z.object({
+  code: z.string().min(1),
+  state: z.string().min(1),
+});
+
+export const DriveAuthCallbackOutput = z.object({
+  userId: UserId,
+  scopes: z.array(z.string()),
+});
+
+export const DriveFolder = z.object({
+  driveFolderId: z.string().min(1),
+  name: z.string().min(1),
+  modifiedAt: z.string().datetime(),
+});
+export type DriveFolder = z.infer<typeof DriveFolder>;
+
+export const ListDriveFoldersInput = z.object({
+  parentId: z.string().min(1).optional(),
+  query: z.string().max(200).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const ListDriveFoldersOutput = z.object({
+  folders: z.array(DriveFolder),
+  nextPageToken: z.string().optional(),
+});
+
+export const RegisterFolderInput = z.object({
+  driveFolderId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const RegisterFolderOutput = z.object({
+  folderId: FolderId,
+});
+
+export const driveContract = {
+  authStart: oc.route({ method: 'POST', path: '/drive/auth/start' }).output(DriveAuthStartOutput),
+  authCallback: oc
+    .route({ method: 'POST', path: '/drive/auth/callback' })
+    .input(DriveAuthCallbackInput)
+    .output(DriveAuthCallbackOutput),
+  listFolders: oc
+    .route({ method: 'GET', path: '/drive/folders' })
+    .input(ListDriveFoldersInput)
+    .output(ListDriveFoldersOutput),
+  registerFolder: oc
+    .route({ method: 'POST', path: '/drive/folders' })
+    .input(RegisterFolderInput)
+    .output(RegisterFolderOutput),
+};

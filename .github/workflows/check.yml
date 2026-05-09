@@ -38,6 +38,13 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-
 
       - name: Install dependencies (runs rulesync generate via postinstall)
+        # simple-git-hooks@2.13.1's own postinstall walks the wrong dir under
+        # bun 1.3.x's isolated install layout (looks for package.json at
+        # node_modules/.bun/simple-git-hooks@.../package.json, which bun puts
+        # one level deeper). The repo's own postinstall (`bunx simple-git-hooks`)
+        # runs separately and is for local pre-commit hooks — irrelevant on CI.
+        env:
+          SKIP_INSTALL_SIMPLE_GIT_HOOKS: "1"
         run: bun install --frozen-lockfile
 
       - name: Check (lint · spell · typecheck · test)
