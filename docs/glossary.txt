@@ -112,3 +112,7 @@ globex
 okrs
 pandoc
 eeur
+RØDE
+kbps
+oneline
+checkpointing
