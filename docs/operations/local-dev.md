@@ -46,6 +46,21 @@ If new exports were appended, open a new shell or `source` the rc so the creds p
 
 How to obtain the Machine Identity client ID + secret: see [`secrets.md`](secrets.md#auth-model).
 
+## Pre-commit hook
+
+`bun install`'s postinstall wires a `pre-commit` hook via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks). On every `git commit` the hook runs [`scripts/pre-commit`](../../scripts/pre-commit), which:
+
+1. `biome check --write --staged` — lint + format on the staged files only; auto-fixes are re-staged so they land in the same commit.
+2. `cspell` on staged `.ts` / `.tsx` / `.md` files.
+
+If you need to commit despite the hook (mid-refactor stash, intentional doc-only WIP):
+
+```sh
+git commit --no-verify -m "..."
+```
+
+Use sparingly — CI runs the same gate via `bun run check`, so anything bypassed locally still has to pass on push.
+
 ## Common commands
 
 | Goal | Command |

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# scripts/pre-commit — runs on `git commit`. Bypass with `git commit --no-verify`.
+#
+# Wired via simple-git-hooks (root package.json). The hook keeps lint/spell
+# drift out of commits so CI failures stop being the first signal.
+#
+# What it does:
+#   1. biome check --write --staged on staged files (auto-fixes lint/format).
+#   2. cspell on staged .ts/.tsx/.md files.
+#   3. Re-stages any biome auto-fixes so they land in the same commit.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# 1) biome — fast; --staged scopes to git-staged files only.
+bunx biome check --write --staged --no-errors-on-unmatched
+
+# 2) cspell — only the staged ts/tsx/md files. Empty list short-circuits.
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|md)$' || true)
+if [[ -n "$files" ]]; then
+  # shellcheck disable=SC2086
+  bunx cspell --no-progress --no-must-find-files $files
+fi
+
+# 3) Re-stage any biome auto-fixes against already-staged files so they land
+#    in the same commit. `--again` only re-stages paths already in the index.
+git update-index --again
