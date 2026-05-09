@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 1,
+  "sources": {
+    "vercel/ai": {
+      "requestedRef": "main",
+      "resolvedRef": "d57cf11d0e8d06bb3c2e1bcda89ad6a6a5530793",
+      "resolvedAt": "2026-05-09T23:43:34.452Z",
+      "skills": {
+        "use-ai-sdk": {
+          "integrity": "sha256-2249889eb47ef0f61c4dba4cf2afe01c1c8dd793bb4c24230347c1ab909bb7dd"
+        }
+      }
+    },
+    "dyoshikawa/rulesync": {
+      "requestedRef": "main",
+      "resolvedRef": "a1775cc94f2707ff91c63fd4ca12c63258f3736d",
+      "resolvedAt": "2026-05-09T23:43:36.263Z",
+      "skills": {
+        "rulesync": {
+          "integrity": "sha256-5c8707fbd7e2d2c80bf55e5d49cb1b6888f5733492ad56050c07e27ecaefdea5"
+        }
+      }
+    }
+  }
+}

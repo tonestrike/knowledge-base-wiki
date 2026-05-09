@@ -6,11 +6,49 @@ globs: ["apps/**", ".dev.vars*", "wrangler.toml", "package.json"]
 
 # Secrets — Infisical
 
-Source of truth: one Infisical project `tenex` with envs `dev`, `staging`, `prod`. Folders mirror the monorepo: `/apps/api`, `/apps/web`, `/packages/shared`. Cross-cutting secrets live at `/` and folders use Secret Imports / `--recursive` to inherit.
+Source of truth: one Infisical project `tenex` (workspaceId in `.infisical.json` at the repo root) with envs `dev`, `staging`, `prod`. Folders mirror the monorepo: `/apps/api`, `/apps/web`, `/packages/shared`. Cross-cutting secrets live at `/` and folders use Secret Imports / `--recursive` to inherit.
+
+## Auth model — Machine Identity (the convention)
+
+Each repo gets a per-repo Machine Identity in Infisical, and the contributor exports its credentials in their shell rc with a `_<REPO>` suffix so multiple repos coexist without collision:
+
+```sh
+# in ~/.zshrc (or equivalent)
+export INFISICAL_CLIENT_ID_TENEX=<uuid>
+export INFISICAL_CLIENT_SECRET_TENEX=<hex>
+```
+
+`bun run setup` checks both are present and prompts for whichever is missing. `packages/tooling/scripts/bin/with-secrets` reads them, exchanges them for an `INFISICAL_TOKEN` via `infisical login --method=universal-auth`, and execs the wrapped command under `infisical run --token=<TOKEN>`.
+
+**Agents and ad-hoc scripts should always go through `with-secrets`** (or invoke a package.json script that does):
+
+```sh
+# good — declarative, picks up the right env from package.json
+bun --filter @app/api dev
+
+# good — explicit, the same wrapper, when you need one-off injection
+./packages/tooling/scripts/bin/with-secrets --env=dev --path=/ --recursive -- bun some/script.ts
+
+# fallback — when even with-secrets isn't available (e.g. throwaway worktree
+# whose package.json scripts don't yet route through it), inline the dance:
+TOKEN=$(infisical login --method=universal-auth \
+  --client-id="$INFISICAL_CLIENT_ID_TENEX" \
+  --client-secret="$INFISICAL_CLIENT_SECRET_TENEX" \
+  --plain --silent) && \
+infisical run --token="$TOKEN" \
+  --projectId="$(jq -r .workspaceId .infisical.json)" \
+  --env=dev --path=/ --recursive -- <command>
+```
+
+The `--projectId` flag is required when invoking `infisical run` with `--token` from a subdirectory or a worktree where `.infisical.json` discovery doesn't fire. Pull it from the repo-root `.infisical.json`.
+
+The shell-rc creds (`INFISICAL_CLIENT_ID_TENEX` / `INFISICAL_CLIENT_SECRET_TENEX`) are NOT propagated through `bun run` / turbo by default. `turbo.json`'s `globalPassThroughEnv` lists them so they reach package scripts; if you add a new task that needs them, append it there, don't try to re-export inside the task.
+
+If `INFISICAL_CLIENT_ID_TENEX` is missing from your shell rc but the secret is set, `bun run setup` will prompt for it and `setup` is idempotent — re-run it any time. The Machine Identity ID is visible in the Infisical dashboard under Access Control → Identities.
 
 ## Local dev
 
-Run `infisical login` once. Then:
+Run `infisical login` once (web flow, for the dashboard). Then:
 
 ```sh
 bun --filter @app/api dev      # uses `infisical run --path=/apps/api --recursive` under the hood
