@@ -1,6 +1,6 @@
 # 0001 — Finish scaffolding
 
-**Status:** Done (Slice 6 partial — see slice notes)
+**Status:** Done
 **Started:** 2026-05-09
 **Done:** 2026-05-09
 **Owner:** tonyvantur
@@ -110,7 +110,7 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 6 — End-to-end smoke run
 
-**Status:** Done (commits `4baa801`, `fc03858`, `<pending>`). All four live-smoke checkboxes verified end-to-end after root-cause-fixing the apparent "workerd hang."
+**Status:** Done (commits `4baa801`, `fc03858`, `1c92261`). All four live-smoke checkboxes verified end-to-end after root-cause-fixing the apparent "workerd hang."
 **Why:** Everything typechecks but nothing's been *executed* with real secrets. The wiring could have a runtime bug we wouldn't see at compile time.
 **Done when:**
 - [x] With real `INFISICAL_CLIENT_*_TENEX` exported, `bun --filter @app/api dev` starts wrangler on :8787 — verified, reaches `[wrangler:info] Ready on http://localhost:8787` in ~6s.
