@@ -29,7 +29,7 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 | # | Question | Who decides | By when |
 |---|---|---|---|
 | Q1 | Lefthook vs. simple-git-hooks for pre-commit | tonyvantur | before Slice 4 |
-| Q2 | Where does `apps/web` deploy? Cloudflare Pages, Workers static assets, or somewhere else | tonyvantur (with ADR) | Slice 5 outputs the ADR |
+| Q2 | ~~Where does `apps/web` deploy? Cloudflare Pages, Workers static assets, or somewhere else~~ — Resolved by ADR-0002: Workers Static Assets attached to `apps/api` | tonyvantur (with ADR) | Slice 5 outputs the ADR |
 | Q3 | Do we want CI to also regenerate `bun run rulesync` and fail if drift exists | tonyvantur | before Slice 1 lands |
 
 ## Slices
@@ -95,14 +95,16 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 5 — Web deploy ADR + minimal deploy path
 
+**Status:** Done (commit `9eaac2b`).
 **Why:** `apps/web` builds to `dist/` but goes nowhere. The deploy target is a real architectural decision (where does state live? where does auth land? what's the cost?) that deserves an ADR before we wire anything.
 **Done when:**
-- [ ] `docs/decisions/0002-web-deploy-target.md` written, comparing: Cloudflare Pages, Workers static assets attached to `apps/api`, Vercel
-- [ ] Decision recorded with consequences
-- [ ] `apps/web` `deploy` script wired to the chosen target
-- [ ] `docs/operations/deploy.md` "Deploy web" section updated, TBD removed
+- [x] `docs/decisions/0002-web-deploy-target.md` written, comparing: Cloudflare Pages, Workers static assets attached to `apps/api`, Vercel
+- [x] Decision recorded with consequences
+- [x] `apps/web` `deploy` script wired to the chosen target
+- [x] `docs/operations/deploy.md` "Deploy web" section updated, TBD removed
 **Depends on:** —
 **Estimate:** M
+**Notes:** Decision: Workers Static Assets attached to `apps/api`. Single Worker, single origin in prod (no CORS), single atomic deploy. Wiring scoped to `[env.prod]` in `wrangler.toml` so `wrangler dev` (top-level config) is unaffected by the asset dir possibly not existing locally — Q2 thus resolves without changing the dev flow. `run_worker_first = ["/rpc/*"]` keeps the api Worker handling only its own routes; `not_found_handling = "single-page-application"` makes SPA client-side routing work. The web side has no separate deploy script — `apps/api`'s `deploy` builds web first via `bun --filter @app/web run build` then `wrangler deploy --env=prod`. Resolves Q2.
 
 ### Slice 6 — End-to-end smoke run
 
