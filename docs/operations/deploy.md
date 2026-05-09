@@ -1,12 +1,11 @@
 # Deploy
 
-Production deploys for `apps/api` (Cloudflare Workers) and `apps/web` (Vite static build, deployment target TBD).
+Production deploys for `apps/api` (Cloudflare Workers) and `apps/web` (Vite static build, served by the same Worker as Static Assets — see [ADR-0002](../decisions/0002-web-deploy-target.md)).
 
 ## Table of contents
 
 - [Prerequisites](#prerequisites)
-- [Deploy api](#deploy-api)
-- [Deploy web](#deploy-web)
+- [Deploy](#deploy)
 - [Rolling back](#rolling-back)
 
 ## Prerequisites
@@ -15,17 +14,22 @@ Production deploys for `apps/api` (Cloudflare Workers) and `apps/web` (Vite stat
 - Production secrets in Infisical at `/apps/api` env `prod` (and `/apps/web` for web build-time vars). See [`secrets.md`](secrets.md).
 - A `tenex-api` Worker provisioned (happens automatically on first `wrangler deploy`).
 
-## Deploy api
+## Deploy
+
+One command ships the whole stack:
 
 ```sh
 bun --filter @app/api run deploy
 ```
 
-Steps the script does:
+What the script does:
 
-1. `with-secrets` exchanges `INFISICAL_CLIENT_*_TENEX` for an `INFISICAL_TOKEN`.
-2. `infisical run --env=prod --path=/apps/api --recursive` injects production secrets into the env.
-3. `wrangler deploy` packages and uploads the Worker. Build-time secret references resolve from the env.
+1. Builds web first: `bun --filter @app/web run build` (vite emits to `apps/web/dist/`).
+2. `with-secrets` exchanges `INFISICAL_CLIENT_*_TENEX` for an `INFISICAL_TOKEN`.
+3. `infisical run --env=prod --path=/apps/api --recursive` injects production secrets into the env.
+4. `wrangler deploy --env=prod` packages and uploads the Worker. The `[env.prod.assets]` block in `wrangler.toml` attaches `apps/web/dist/` as Static Assets; `run_worker_first = ["/rpc/*"]` keeps `/rpc/*` on the api Worker, while every other path is served from the asset bundle, with unmatched paths falling back to `index.html` for SPA client-side routing.
+
+In production, web and api share an origin (`tenex-api.workers.dev` or your custom domain). No CORS in prod; no separate web deploy.
 
 Push secrets explicitly to the Worker (alternative to having them at runtime):
 
@@ -33,36 +37,16 @@ Push secrets explicitly to the Worker (alternative to having them at runtime):
 bun --filter @app/api run secrets:push
 ```
 
-This pulls secrets from Infisical prod and uploads them as Worker secrets via `wrangler secret bulk`. Useful if you want a snapshot of secrets bound to a specific Worker version.
-
-## Deploy web
-
-`apps/web` is a Vite SPA. Build:
-
-```sh
-bun --filter @app/web run build
-```
-
-Output lands in `apps/web/dist/`. Deployment target isn't pinned yet — options:
-
-- **Cloudflare Pages.** `bunx wrangler pages deploy apps/web/dist --project-name=tenex-web`
-- **Cloudflare Workers static assets.** Newer pattern, attaches static assets to the api Worker.
-- **Any static host.** Vercel, Netlify, S3 — `dist/` is just static files.
-
-When we settle on one, pin it here and add an ADR.
+This pulls secrets from Infisical prod and uploads them as Worker secrets via `wrangler secret bulk --env=prod`.
 
 ## Rolling back
 
-### Api
-
 ```sh
-bunx wrangler deployments list   # shows recent deploys
-bunx wrangler rollback --message="rolling back to <id>"
+bunx wrangler deployments list --env=prod   # shows recent deploys
+bunx wrangler rollback --env=prod --message="rolling back to <id>"
 ```
 
-### Web
-
-Depends on host. For Cloudflare Pages, the dashboard has a one-click rollback to a previous deployment.
+Rolling back the api also rolls back the web bundle, since both ship in the same Worker version.
 
 ## Pre-deploy checklist (manual for now)
 

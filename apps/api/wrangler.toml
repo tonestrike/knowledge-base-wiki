@@ -30,3 +30,21 @@ ENVIRONMENT = "production"
 [env.dev]
 [env.dev.vars]
 ENVIRONMENT = "development"
+
+# Production: same Worker serves /rpc/* (api) and apps/web/dist (SPA).
+# Per ADR-0002. Scoped to env.prod so `wrangler dev` (top-level config)
+# never touches the assets dir, which may not exist locally.
+[env.prod]
+name = "tenex-api"
+
+[env.prod.vars]
+ENVIRONMENT = "production"
+
+[env.prod.observability]
+enabled = true
+
+[env.prod.assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/rpc/*"]
