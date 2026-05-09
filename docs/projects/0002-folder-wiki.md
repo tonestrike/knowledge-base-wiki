@@ -4,7 +4,7 @@
 **Started:** 2026-05-09
 **Done:** —
 **Owner:** tonyvantur
-**Related:** [design spec](folder-wiki/spec.md), [storyboard](folder-wiki/storyboard.md), [bounded contexts](folder-wiki/contexts/), [0001-finish-scaffolding](0001-finish-scaffolding.md), Tenex FDE take-home brief
+**Related:** [design spec](folder-wiki/spec.md), [storyboard](folder-wiki/storyboard.md), bounded-context glossaries — [`@domain/ingestion`](../../packages/domains/ingestion/glossary.md) · [`@domain/wiki`](../../packages/domains/wiki/glossary.md) · [`@domain/chat`](../../packages/domains/chat/glossary.md) · [`@domain/verification`](../../packages/domains/verification/glossary.md), [0001-finish-scaffolding](0001-finish-scaffolding.md), Tenex FDE take-home brief
 
 ## Goal
 

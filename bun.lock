@@ -18,7 +18,11 @@
       "name": "@app/api",
       "version": "0.0.0",
       "dependencies": {
+        "@domain/chat": "workspace:*",
         "@domain/core": "workspace:*",
+        "@domain/ingestion": "workspace:*",
+        "@domain/verification": "workspace:*",
+        "@domain/wiki": "workspace:*",
         "@orpc/server": "^1.14.2",
         "@package/contracts": "workspace:*",
         "@package/shared-kernel": "workspace:*",
@@ -70,8 +74,68 @@
         "typescript": "^5.7.2",
       },
     },
+    "packages/domains/chat": {
+      "name": "@domain/chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@orpc/server": "^1.14.2",
+        "@package/contracts": "workspace:*",
+        "@package/shared-kernel": "workspace:*",
+        "zod": "^3.24.1",
+      },
+      "devDependencies": {
+        "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
+        "typescript": "^5.7.2",
+      },
+    },
     "packages/domains/core": {
       "name": "@domain/core",
+      "version": "0.0.0",
+      "dependencies": {
+        "@orpc/server": "^1.14.2",
+        "@package/contracts": "workspace:*",
+        "@package/shared-kernel": "workspace:*",
+        "zod": "^3.24.1",
+      },
+      "devDependencies": {
+        "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
+        "typescript": "^5.7.2",
+      },
+    },
+    "packages/domains/ingestion": {
+      "name": "@domain/ingestion",
+      "version": "0.0.0",
+      "dependencies": {
+        "@orpc/server": "^1.14.2",
+        "@package/contracts": "workspace:*",
+        "@package/shared-kernel": "workspace:*",
+        "zod": "^3.24.1",
+      },
+      "devDependencies": {
+        "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
+        "typescript": "^5.7.2",
+      },
+    },
+    "packages/domains/verification": {
+      "name": "@domain/verification",
+      "version": "0.0.0",
+      "dependencies": {
+        "@orpc/server": "^1.14.2",
+        "@package/contracts": "workspace:*",
+        "@package/shared-kernel": "workspace:*",
+        "zod": "^3.24.1",
+      },
+      "devDependencies": {
+        "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
+        "typescript": "^5.7.2",
+      },
+    },
+    "packages/domains/wiki": {
+      "name": "@domain/wiki",
       "version": "0.0.0",
       "dependencies": {
         "@orpc/server": "^1.14.2",
@@ -326,7 +390,15 @@
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
+    "@domain/chat": ["@domain/chat@workspace:packages/domains/chat"],
+
     "@domain/core": ["@domain/core@workspace:packages/domains/core"],
+
+    "@domain/ingestion": ["@domain/ingestion@workspace:packages/domains/ingestion"],
+
+    "@domain/verification": ["@domain/verification@workspace:packages/domains/verification"],
+
+    "@domain/wiki": ["@domain/wiki@workspace:packages/domains/wiki"],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.10.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA=="],
 

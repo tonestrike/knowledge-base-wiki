@@ -1,0 +1,28 @@
+{
+  "name": "@domain/ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./interface": "./src/interface/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@orpc/server": "^1.14.2",
+    "@package/contracts": "workspace:*",
+    "@package/shared-kernel": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tooling/tsconfig": "workspace:*",
+    "@types/bun": "^1.2.18",
+    "typescript": "^5.7.2"
+  }
+}

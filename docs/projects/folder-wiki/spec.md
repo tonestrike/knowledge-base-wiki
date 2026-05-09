@@ -6,9 +6,9 @@
 **Authored via:** `superpowers:brainstorming`
 **Project doc:** [`docs/projects/0002-folder-wiki.md`](../0002-folder-wiki.md)
 **Storyboard:** [`storyboard.md`](storyboard.md)
-**Bounded context drafts:** [`contexts/`](contexts/)
+**Bounded context glossaries:** [`@domain/ingestion`](../../../packages/domains/ingestion/glossary.md) · [`@domain/wiki`](../../../packages/domains/wiki/glossary.md) · [`@domain/chat`](../../../packages/domains/chat/glossary.md) · [`@domain/verification`](../../../packages/domains/verification/glossary.md)
 
-This spec is the **canonical conceptual design**. The slice plan with dependencies, risks, and the project lifecycle lives in `0002-folder-wiki.md` (per the repo's `docs/projects/_template.md` convention). The video plan lives in `storyboard.md`. The per-context vocabulary lives in `contexts/`.
+This spec is the **canonical conceptual design**. The slice plan with dependencies, risks, and the project lifecycle lives in `0002-folder-wiki.md` (per the repo's `docs/projects/_template.md` convention). The video plan lives in `storyboard.md`. The per-context vocabulary lives in each context's `packages/domains/<ctx>/glossary.md`.
 
 ## Table of contents
 
@@ -56,7 +56,7 @@ Cross-domain imports are illegal; coordination via `@package/contracts` (sync) o
 | **chat** | `Conversation` | **`Artifact`** (third `AnswerSegment` kind alongside prose and citation) |
 | **verification** | `LintRun` | — |
 
-Vocabulary drafts in `contexts/`. They will move into `packages/domains/<x>/glossary.md` + `.cspell/glossary.txt` in Phase 1.B (DDD scaffolding) per the project's linguistic-DDD discipline.
+Vocabulary now lives in `packages/domains/<ctx>/glossary.md` + `.cspell/glossary.txt`, enforced by cspell with `addWords: false` per the project's linguistic-DDD discipline.
 
 ### 2.2 Shared types at the contracts seam
 
