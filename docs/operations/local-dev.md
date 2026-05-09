@@ -73,18 +73,39 @@ Use sparingly — CI runs the same gate via `bun run check`, so anything bypasse
 - `https://web.tenex.localhost` → `apps/web` (vite on :5173)
 - `https://api.tenex.localhost` → `apps/api` (wrangler on :8787)
 
-One-time setup (binds privileged port 443, mutates `/etc/hosts`, and generates and trusts a local CA — sudo will prompt):
+Install once:
 
 ```sh
 npm install -g portless
-portless                      # from the repo root; first run does the privileged setup
 ```
 
-After that, `portless` (no args) starts both dev servers behind the proxy. Stop with Ctrl+C.
+The proxy needs port 443 to omit port numbers from URLs, which requires elevated privileges on macOS. Either install it as a launchd service (does the privileged setup once and starts on boot):
 
-The vite proxy in [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) keeps targeting `http://localhost:8787` directly — that path is unchanged, so the SPA's `/rpc/*` requests still flow through vite to wrangler in-process. portless is purely a friendlier surface for opening the apps in a browser.
+```sh
+sudo portless service install
+```
 
-`portless` and `bun --filter @app/{api,web} dev` are interchangeable; they bind the same ports (8787/5173) and share the same secret-fetching path through `with-secrets`, so you can pick whichever fits the moment without reconfiguring anything.
+…or accept the per-session sudo prompt:
+
+```sh
+sudo portless proxy start
+```
+
+If you'd rather skip sudo entirely, portless falls back to port 1355 and the URLs become `https://web.tenex.localhost:1355` (functional but uglier).
+
+Run dev through it from the repo root:
+
+```sh
+portless                # starts vite + wrangler under the proxy via turbo
+```
+
+Stop with Ctrl+C. Use `portless list` to inspect active routes, `portless proxy stop` to stop the daemon.
+
+`turbo.json`'s `globalPassThroughEnv` allows `INFISICAL_CLIENT_ID_TENEX` and `INFISICAL_CLIENT_SECRET_TENEX` through to the dev tasks; without that allowlist, turbo (which portless invokes when the workspace has multiple packages) strips arbitrary env vars and `with-secrets` can't authenticate.
+
+The vite proxy in [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) targets `http://127.0.0.1:8787` (explicit IPv4) and Vite itself binds `127.0.0.1` — both pinned to IPv4 because portless connects on IPv4 and Vite's default `localhost` resolution prefers IPv6 on Node 22+, which causes a 502 from portless.
+
+`portless` and `bun --filter @app/{api,web} dev` are interchangeable; both bind the same ports (8787/5173) and share the same `with-secrets` path, so you can pick whichever fits the moment without reconfiguring anything.
 
 ## Common commands
 
