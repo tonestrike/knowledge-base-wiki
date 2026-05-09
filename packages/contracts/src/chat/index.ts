@@ -10,4 +10,5 @@ export const chatContract = {
 
 export * from './answers.ts';
 export * from './conversations.ts';
+export * from './mocks.ts';
 export * from './turns.ts';

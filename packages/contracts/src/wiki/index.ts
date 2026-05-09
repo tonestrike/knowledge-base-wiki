@@ -9,5 +9,6 @@ export const wikiContract = {
 };
 
 export * from './compile.ts';
+export * from './mocks.ts';
 export * from './pages.ts';
 export * from './wikis.ts';

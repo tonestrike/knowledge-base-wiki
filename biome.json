@@ -11,6 +11,7 @@
       "**/*.tsbuildinfo",
       "**/.claude/plugins/cache",
       "**/.claude/worktrees",
+      "**/mockServiceWorker.js",
       "CLAUDE.md",
       "AGENTS.md"
     ]

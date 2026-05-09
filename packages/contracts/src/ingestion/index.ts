@@ -10,4 +10,5 @@ export const ingestionContract = {
 
 export * from './drive.ts';
 export * from './events.ts';
+export * from './mocks.ts';
 export * from './sources.ts';
