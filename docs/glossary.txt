@@ -74,3 +74,14 @@ wallclock
 subrequest
 Shiki
 strikethrough
+comparisontable
+linechart
+barchart
+keymetric
+wikischema
+pagetype
+schemainferrer
+schemainferred
+indexbuilder
+sparkline
+metacharacters

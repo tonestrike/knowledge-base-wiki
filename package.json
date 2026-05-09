@@ -7,6 +7,7 @@
   "workspaces": ["apps/*", "packages/*", "packages/domains/*", "packages/tooling/*"],
   "scripts": {
     "postinstall": "bunx --bun rulesync generate",
+    "setup": "./scripts/setup",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "check": "bun run lint && bun run spell && bun run typecheck && bun run test",

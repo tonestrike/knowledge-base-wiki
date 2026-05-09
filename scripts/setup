@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# scripts/setup — first-run developer setup for tenex.
+#
+# Idempotent. Re-runs detect existing state and skip work that's already done.
+#
+# Steps:
+#   1. Verify bun >= 1.3.0
+#   2. bun install (also runs `rulesync generate` via postinstall)
+#   3. Ensure INFISICAL_CLIENT_ID_TENEX + INFISICAL_CLIENT_SECRET_TENEX are
+#      exported in your shell rc (default ~/.zshrc; override with SETUP_SHELL_RC=).
+#      If both are already exported there, the prompt is skipped entirely.
+#   4. Smoke-test the Infisical Machine Identity end-to-end via with-secrets.
+#   5. Run `bun run check`.
+#
+# After first run, open a new shell (or `source` your shell rc) so the exports
+# persist across sessions.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SHELL_RC="${SETUP_SHELL_RC:-$HOME/.zshrc}"
+WITH_SECRETS="$REPO_ROOT/apps/api/node_modules/.bin/with-secrets"
+
+step() { printf '\n[step] %s\n' "$*"; }
+ok()   { printf '[ok]   %s\n' "$*"; }
+skip() { printf '[skip] %s\n' "$*"; }
+warn() { printf '[warn] %s\n' "$*" >&2; }
+fail() { printf '[fail] %s\n' "$*" >&2; exit 1; }
+
+# Returns 0 if $1 (current) is >= $2 (minimum), per `sort -V`.
+version_at_least() {
+  [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" == "$2" ]]
+}
+
+# If $rc has `export VAR=...`, eval the most recent matching line so the
+# variable lands in the current process env. Used to bring exports already
+# present in the rc into a fresh shell that hasn't sourced it yet.
+load_export_from_rc() {
+  local rc="$1" var="$2" line
+  [[ -f "$rc" ]] || return 0
+  line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
+  [[ -n "$line" ]] && eval "$line"
+}
+
+APPENDED_TO_RC=0
+
+ensure_export() {
+  local var="$1" prompt="$2" silent="$3" value
+  if grep -qE "^export ${var}=" "$SHELL_RC"; then
+    skip "$var already exported in $SHELL_RC"
+    [[ -z "${!var:-}" ]] && load_export_from_rc "$SHELL_RC" "$var"
+    return 0
+  fi
+  if [[ "$silent" == "silent" ]]; then
+    read -r -s -p "$prompt" value
+    printf '\n'
+  else
+    read -r -p "$prompt" value
+  fi
+  [[ -n "$value" ]] || fail "empty value for $var"
+  printf '\nexport %s=%q\n' "$var" "$value" >> "$SHELL_RC"
+  export "$var=$value"
+  APPENDED_TO_RC=1
+  ok "$var appended to $SHELL_RC"
+}
+
+cd "$REPO_ROOT"
+
+# 1) bun version
+step "Verify bun >= 1.3.0"
+command -v bun >/dev/null || fail "bun not found on PATH. Install: curl -fsSL https://bun.sh/install | bash"
+BUN_VERSION="$(bun --version)"
+version_at_least "$BUN_VERSION" "1.3.0" || fail "bun $BUN_VERSION is too old; need >= 1.3.0"
+ok "bun $BUN_VERSION"
+
+# 2) deps
+step "bun install"
+bun install
+ok "deps installed"
+
+# 3) Infisical Machine Identity creds
+step "Configure Infisical Machine Identity creds in $SHELL_RC"
+if [[ ! -f "$SHELL_RC" ]]; then
+  touch "$SHELL_RC"
+  warn "$SHELL_RC did not exist; created it"
+fi
+ensure_export INFISICAL_CLIENT_ID_TENEX     "Infisical Machine Identity client ID: " plain
+ensure_export INFISICAL_CLIENT_SECRET_TENEX "Infisical Machine Identity client secret (input hidden): " silent
+
+# 4) auth smoke test
+step "Smoke-test Infisical Machine Identity"
+[[ -x "$WITH_SECRETS" ]] || fail "with-secrets bin missing at $WITH_SECRETS — bun install may have failed"
+"$WITH_SECRETS" --env=dev --path=/apps/api --recursive -- true >/dev/null
+ok "auth + secret fetch ok"
+
+# 5) full check
+step "Run bun run check"
+bun run check
+ok "check passed"
+
+printf '\n[done] First-run setup complete.\n'
+if [[ "$APPENDED_TO_RC" -eq 1 ]]; then
+  printf '       New exports were added to %s. Open a new shell or run: source %s\n' "$SHELL_RC" "$SHELL_RC"
+fi

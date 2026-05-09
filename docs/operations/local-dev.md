@@ -25,25 +25,26 @@ The Infisical CLI ships as a workspace devDep (`@infisical/cli`); no global inst
 ```sh
 git clone <repo>
 cd tenex
-bun install                        # runs `rulesync generate` via postinstall —
-                                   # CLAUDE.md, AGENTS.md, .claude/, .codex/, .agents/
-                                   # appear locally (gitignored; .rulesync/ is the source)
+bun run setup
 ```
 
-Then export the Infisical Machine Identity creds in `~/.zshrc` (one-time):
+`setup` is idempotent. It:
+
+1. Verifies `bun >= 1.3.0`.
+2. Runs `bun install` (which fans out `rulesync generate` via `postinstall` — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, `.agents/` appear locally; gitignored, with `.rulesync/` as the source of truth).
+3. Detects whether `INFISICAL_CLIENT_ID_TENEX` and `INFISICAL_CLIENT_SECRET_TENEX` are already exported in `~/.zshrc`. If both are present, it skips the prompt; otherwise it prompts for the missing one(s) and appends `export` lines to the rc.
+4. Smoke-tests the Machine Identity by exchanging the creds for a token via `with-secrets` and pulling secrets from `/apps/api`.
+5. Runs `bun run check`.
+
+To target a different shell rc (e.g. `~/.bashrc`), set `SETUP_SHELL_RC` before running:
 
 ```sh
-export INFISICAL_CLIENT_ID_TENEX=<universal-auth-client-id>
-export INFISICAL_CLIENT_SECRET_TENEX=<universal-auth-client-secret>
+SETUP_SHELL_RC=~/.bashrc bun run setup
 ```
 
-Verify everything works:
+If new exports were appended, open a new shell or `source` the rc so the creds persist.
 
-```sh
-bun run check
-```
-
-`check` runs lint + spell + typecheck + test. Should be clean.
+How to obtain the Machine Identity client ID + secret: see [`secrets.md`](secrets.md#auth-model).
 
 ## Common commands
 
