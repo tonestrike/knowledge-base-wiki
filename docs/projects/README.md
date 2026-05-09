@@ -26,6 +26,7 @@ Projects are the **active** things; ADRs are the **historical** record of why pr
 | # | Title | Status | Started | Owner |
 |---|---|---|---|---|
 | [0001](0001-finish-scaffolding.md) | Finish scaffolding | Active | 2026-05-09 | tonyvantur |
+| [0002](0002-folder-wiki.md) | folder-wiki | Active | 2026-05-09 | tonyvantur |
 
 When you add a project, append a row here. Status: `Planned` | `Active` | `Done` | `Abandoned`.
 
