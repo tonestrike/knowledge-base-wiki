@@ -1,0 +1,9 @@
+{
+  "name": "@tooling/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "with-secrets": "./bin/with-secrets"
+  },
+  "files": ["bin"]
+}

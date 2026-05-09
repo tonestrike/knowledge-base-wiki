@@ -1,0 +1,58 @@
+# dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# build output
+dist/
+build/
+out/
+.next/
+.vinxi/
+.tanstack/
+.turbo/
+.wrangler/
+
+# bun
+bun-debug.log*
+
+# typescript
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+.dev.vars
+
+# infisical session/token cache (ensure no creds get committed)
+.infisical-token
+.infisical/auth.json
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# os
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# cache
+.cache/
+.eslintcache
+.cspellcache
+
+# ai-tool runtime (machine-local plugin caches)
+.claude/plugins/cache/
+# Note: AGENTS.md, CLAUDE.md, and .agents/.claude/.codex memories are GENERATED
+# by `bun run rulesync` from .rulesync/. They are committed so teammates without
+# rulesync installed can still read them.

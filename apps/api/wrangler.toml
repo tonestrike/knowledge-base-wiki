@@ -1,0 +1,32 @@
+#:schema https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json
+name = "tenex-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Observability
+[observability]
+enabled = true
+
+# Local dev defaults to .dev.vars for secrets
+# Production secrets: `bun --filter @app/api run secrets:put` after authoring .dev.vars
+
+[vars]
+ENVIRONMENT = "production"
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "tenex"
+# database_id = "TODO"
+
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "TODO"
+
+# [[r2_buckets]]
+# binding = "STORAGE"
+# bucket_name = "tenex"
+
+[env.dev]
+[env.dev.vars]
+ENVIRONMENT = "development"

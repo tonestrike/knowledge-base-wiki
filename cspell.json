@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "node_modules/**",
+    "dist/**",
+    ".turbo/**",
+    ".wrangler/**",
+    ".next/**",
+    "*.tsbuildinfo",
+    "bun.lock",
+    ".claude/plugins/cache/**",
+    "CLAUDE.md",
+    "AGENTS.md"
+  ],
+  "dictionaryDefinitions": [
+    {
+      "name": "tenex-shared",
+      "path": "./docs/glossary.txt",
+      "addWords": false
+    },
+    {
+      "name": "core-glossary",
+      "path": "./packages/domains/core/.cspell/glossary.txt",
+      "addWords": false
+    }
+  ],
+  "dictionaries": ["tenex-shared"],
+  "import": ["@cspell/dict-typescript/cspell-ext.json"],
+  "overrides": [
+    {
+      "filename": "packages/domains/core/**",
+      "dictionaries": ["tenex-shared", "core-glossary"]
+    }
+  ],
+  "words": []
+}

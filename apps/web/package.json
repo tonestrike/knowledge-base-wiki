@@ -1,0 +1,31 @@
+{
+  "name": "@app/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "with-secrets --env=dev --path=/apps/web --recursive -- vite",
+    "build": "with-secrets --env=prod --path=/apps/web --recursive -- vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@orpc/client": "^1.14.2",
+    "@orpc/contract": "^1.14.2",
+    "@orpc/tanstack-query": "^1.14.2",
+    "@tanstack/react-query": "^5.62.16",
+    "@package/contracts": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tooling/scripts": "workspace:*",
+    "@tooling/tsconfig": "workspace:*",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

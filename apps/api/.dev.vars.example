@@ -1,0 +1,6 @@
+# Local-development secrets for `wrangler dev`.
+# Copy to .dev.vars (gitignored) and fill in values.
+# For production: `bun --filter @tenex/api run secrets:put` uploads everything in .dev.vars.
+
+# AUTH_SECRET=
+# DATABASE_URL=

@@ -1,0 +1,6 @@
+health
+ping
+echoed
+heartbeat
+liveness
+diagnostic
