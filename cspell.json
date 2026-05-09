@@ -32,6 +32,26 @@
       "name": "core-glossary",
       "path": "./packages/domains/core/.cspell/glossary.txt",
       "addWords": false
+    },
+    {
+      "name": "ingestion-glossary",
+      "path": "./packages/domains/ingestion/.cspell/glossary.txt",
+      "addWords": false
+    },
+    {
+      "name": "wiki-glossary",
+      "path": "./packages/domains/wiki/.cspell/glossary.txt",
+      "addWords": false
+    },
+    {
+      "name": "chat-glossary",
+      "path": "./packages/domains/chat/.cspell/glossary.txt",
+      "addWords": false
+    },
+    {
+      "name": "verification-glossary",
+      "path": "./packages/domains/verification/.cspell/glossary.txt",
+      "addWords": false
     }
   ],
   "dictionaries": ["tenex-shared"],
@@ -40,6 +60,22 @@
     {
       "filename": "packages/domains/core/**",
       "dictionaries": ["tenex-shared", "core-glossary"]
+    },
+    {
+      "filename": "packages/domains/ingestion/**",
+      "dictionaries": ["tenex-shared", "ingestion-glossary"]
+    },
+    {
+      "filename": "packages/domains/wiki/**",
+      "dictionaries": ["tenex-shared", "wiki-glossary"]
+    },
+    {
+      "filename": "packages/domains/chat/**",
+      "dictionaries": ["tenex-shared", "chat-glossary"]
+    },
+    {
+      "filename": "packages/domains/verification/**",
+      "dictionaries": ["tenex-shared", "verification-glossary"]
     }
   ],
   "words": []
