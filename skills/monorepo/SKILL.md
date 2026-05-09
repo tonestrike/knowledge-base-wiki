@@ -1,11 +1,11 @@
 ---
-name: tenex
-description: Use as the entry point whenever the user is starting any task in the tenex monorepo — planning a new project, executing a slice of an existing project, adding a bounded context, adding an oRPC procedure, adding a secret, writing an ADR, or reviewing code. Trigger on phrases like "in tenex", "let's work on", "plan a project", "implement slice", "add a procedure", "add a context", "add an ADR", "add a secret", or any request that touches files under /Users/tonyvantur/Development/projects/tenex/.
+name: monorepo
+description: Use as the entry point whenever the user is starting any task in this monorepo — planning a new project, executing a slice of an existing project, adding a bounded context, adding an oRPC procedure, adding a secret, writing an ADR, or reviewing code. Trigger on phrases like "in this repo", "in tenex", "let's work on", "plan a project", "implement slice", "add a procedure", "add a context", "add an ADR", "add a secret", or any request that touches files under /Users/tonyvantur/Development/projects/tenex/.
 ---
 
-# tenex — work entry point
+# monorepo — work entry point
 
-This skill is the front door for any task in the tenex repo. It routes intent to the right workflow and reminds you of always-on rules. When you invoke it, you are committing to following the routing below — don't improvise.
+This skill is the front door for any task in this repo. It routes intent to the right workflow and reminds you of always-on rules. When you invoke it, you are committing to following the routing below — don't improvise.
 
 ## Step 1 — Identify intent
 

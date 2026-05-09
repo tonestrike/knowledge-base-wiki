@@ -22,7 +22,7 @@ The line: if a skill encodes our domain-specific workflow, it's here. If it's a 
 
 | Skill | What it does | When an agent should invoke it |
 |---|---|---|
-| [`tenex`](../../skills/tenex/SKILL.md) | Entry-point router for any task in this repo. Identifies intent (new project / slice execution / bounded context / procedure / ADR / secret / review / debug) and points at the right how-to. Reminds the agent of always-on rules. | Always, when starting any task in this repo. The skill description triggers on any tenex-touching prompt — agents shouldn't have to be told to invoke it. |
+| [`monorepo`](../../skills/monorepo/SKILL.md) | Entry-point router for any task in this repo. Identifies intent (new project / slice execution / bounded context / procedure / ADR / secret / review / debug) and points at the right how-to. Reminds the agent of always-on rules. | Always, when starting any task in this repo. The skill description triggers on any in-repo prompt — agents shouldn't have to be told to invoke it. |
 
 Planned candidates (promote from how-to to skill if they get used heavily):
 

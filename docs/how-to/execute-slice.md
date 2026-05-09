@@ -1,6 +1,6 @@
 # How to execute a slice
 
-When a slice of an existing project doc is ready to ship, this is the workflow. If you're routed here from the `tenex` skill, follow the steps verbatim.
+When a slice of an existing project doc is ready to ship, this is the workflow. If you're routed here from the `monorepo` skill, follow the steps verbatim.
 
 ## Table of contents
 

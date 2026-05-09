@@ -2,7 +2,7 @@
 
 When the work is bigger than a single PR and worth tracking explicitly, it gets a project doc under `docs/projects/`. This how-to describes the process from "I want to build X" to "the project doc is committed and ready for slice execution."
 
-If you're routed here from the `tenex` skill, follow the steps verbatim.
+If you're routed here from the `monorepo` skill, follow the steps verbatim.
 
 ## Table of contents
 

@@ -53,7 +53,7 @@ Conventions:
 - [Add a new ADR](how-to/add-adr.md)
 
 ### Agent entry point
-For any task in this repo, agents should invoke the [`tenex`](../skills/tenex/SKILL.md) skill — it routes intent to the right how-to and reminds them of the always-on rules.
+For any task in this repo, agents should invoke the [`monorepo`](../skills/monorepo/SKILL.md) skill — it routes intent to the right how-to and reminds them of the always-on rules.
 
 ## Reading order for new engineers
 
