@@ -17,16 +17,23 @@ This is the cross-context glossary and context map. It does NOT replace per-cont
 | Context | Path | Owns terms about |
 |---|---|---|
 | core | `packages/domains/core/` | health, ping, cross-cutting diagnostic primitives |
+| ingestion | `packages/domains/ingestion/` | Drive `Folder`s, `Source`s, `Manifest`s, `Extraction`s, `Outline`s, `Span`s, `Connector`s |
+| wiki | `packages/domains/wiki/` | `Wiki`, `WikiPage` (Concept/Summary/Answer/**Index**), `WikiSchema`, `PageType`, `Relation`, `Backlink`, `Citation`, `Claim`, `CompileRun` |
+| chat | `packages/domains/chat/` | `Conversation`, `Turn`, `Question`, `Answer`, `AnswerSegment`, `Artifact`, `CitationChip` |
+| verification | `packages/domains/verification/` | `LintRun`, `LintFinding`, `Verdict`, `Correction`, `Audit` |
 
-(Add new contexts here as they're introduced.)
+Bold terms are third-leap additions (adaptive `WikiSchema` and generative `Artifact` answers).
 
 ## Cross-references
 
 When the same word means different things in different contexts, list both meanings here:
 
-| Word | Context A | Context B |
-|---|---|---|
-| _(none yet)_ | | |
+| Word | ingestion | wiki | chat | verification |
+|---|---|---|---|---|
+| Page | PDF/Slide page (1-indexed integer) | `WikiPage` (markdown page) | — | — |
+| Source | Raw fetched immutable record | Citation provenance reference | — | — |
+| Compile | — | The operation producing a `Wiki` | — | — |
+| Claim | — | A cited assertion in a `WikiPage` | — | The audit subject (same identity as wiki) |
 
 ## Adding a term
 
