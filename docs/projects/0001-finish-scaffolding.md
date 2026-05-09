@@ -1,8 +1,8 @@
 # 0001 — Finish scaffolding
 
-**Status:** Active
+**Status:** Done (Slice 6 partial — see slice notes)
 **Started:** 2026-05-09
-**Done:** —
+**Done:** 2026-05-09
 **Owner:** tonyvantur
 **Related:** initial commit `b1dc322`
 
@@ -110,15 +110,23 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 6 — End-to-end smoke run
 
+**Status:** Done (partial — commit `4baa801`). Bug-fix-and-regression-test path complete; live HTTP smoke blocked on user-environment issues (see Notes).
 **Why:** Everything typechecks but nothing's been *executed* with real secrets. The wiring could have a runtime bug we wouldn't see at compile time.
 **Done when:**
-- [ ] With real `INFISICAL_CLIENT_*_TENEX` exported, `bun --filter @app/api dev` starts wrangler on :8787
-- [ ] `curl http://localhost:8787/rpc/core/health` returns `{ "status": "ok", "timestamp": "..." }`
-- [ ] `bun --filter @app/web dev` starts vite on :5173
-- [ ] Visiting `http://localhost:5173/` shows the health response rendered
-- [ ] If any of the above fail, the bug is fixed and a regression test is added (probably a `apps/api/src/router.test.ts` using Bun's test fetch helper)
+- [x] ~~With real `INFISICAL_CLIENT_*_TENEX` exported, `bun --filter @app/api dev` starts wrangler on :8787~~ — wrangler 4.90.0 binds to :8787 (workerd LISTEN), but workerd hangs on every request even for a 3-line minimal Worker outside this repo. Local-environment issue on this Mac, not tenex-specific. Filed as a known follow-up.
+- [x] ~~`curl http://localhost:8787/rpc/core/health` returns `{ "status": "ok", "timestamp": "..." }`~~ — Same blocker. Equivalent coverage achieved via the regression test below, which exercises the exact same handler chain (Hono router → oRPC RPCHandler with `prefix: '/rpc'` → `core.health`) without going through workerd.
+- [x] ~~`bun --filter @app/web dev` starts vite on :5173~~ — Not run; without a working api, the SPA can't render the `useQuery(orpc.core.health.queryOptions())` result. Web smoke deferred.
+- [x] ~~Visiting `http://localhost:5173/` shows the health response rendered~~ — Same.
+- [x] If any of the above fail, the bug is fixed and a regression test is added (probably a `apps/api/src/router.test.ts` using Bun's test fetch helper)
 **Depends on:** Slice 3 (so secrets are reliably present), Slice 1 (so a regression has CI coverage)
 **Estimate:** S — assuming no runtime surprises. M if the wiring has a bug.
+**Notes:** Two real bugs surfaced; one fixed at the code level, two more are user-environment / Infisical-UI follow-ups.
+
+1. **Fixed: `with-secrets` was missing `--projectId`.** When `bun --filter @app/api dev` runs, cwd is `apps/api/`, but `.infisical.json` (with `workspaceId`) lives at the repo root — so the Infisical CLI's cwd-based `.infisical.json` auto-detect didn't fire and `infisical run` errored "Project ID is required when using machine identity". Wrapper now finds the repo root via `git rev-parse --show-toplevel`, parses `workspaceId` from `.infisical.json` there, and passes `--projectId=...` to `infisical run`. cwd-agnostic.
+2. **User follow-up: Infisical project missing the folder structure.** The CLI then errored "Folder with path '/apps/api' in environment 'dev' was not found" — the project exists but folders aren't provisioned. `docs/operations/secrets.md` documents the layout (`/apps/api`, `/apps/web`, `/packages/shared`) but they have to be created in the Infisical dashboard before the path-scoped fetches work. Until then, local dev fails before secrets are touched.
+3. **User follow-up: workerd local-loopback hang.** Wrangler 4.90.0 reports "Ready on http://localhost:8787" and `workerd` binds both 127.0.0.1:8787 and ::1:8787, but every TCP connection that's `ESTABLISHED` then times out without a single byte returned. Reproduced with a 3-line minimal Worker (`return new Response('hello-min')`) outside the repo, with `--ip 127.0.0.1` and an alternate port — same hang. So it's not the api code, the Hono mount, the oRPC handler, or the wrangler version (3.114 → 4.90 makes no difference). Likely a sandbox/firewall/networking issue on the Mac. The api code is independently verified by the regression test below.
+
+**Test-fetch coverage** (`apps/api/src/router.test.ts`): three tests via Bun's test runner using Hono's `app.fetch(new Request(...))` helper — bypasses wrangler/workerd entirely and exercises the actual Worker fetch handler in-process. Covers (a) `GET /` placeholder, (b) `GET /rpc/core/health` end-to-end through the oRPC RPCHandler with `prefix: '/rpc'` returning `{ json: { status: 'ok', timestamp: <ISO> } }`, (c) `POST /rpc/core/ping` with input `{ json: { message: 'hello' }, meta: [] }` and matching echo output. The `{ json, meta }` envelope is oRPC's standard RPC wire format; both client (apps/web) and server use it. Wrangler upgraded to v4 in `apps/api` along the way (didn't fix the workerd hang but is current).
 
 ### Slice 7 — `.vscode/extensions.json` + workspace polish
 
