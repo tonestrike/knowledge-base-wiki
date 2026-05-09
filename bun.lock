@@ -65,6 +65,7 @@
       },
       "devDependencies": {
         "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
         "typescript": "^5.7.2",
       },
     },
