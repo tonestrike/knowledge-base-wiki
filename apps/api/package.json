@@ -18,6 +18,10 @@
     "@orpc/server": "^1.14.2",
     "@package/contracts": "workspace:*",
     "@domain/core": "workspace:*",
+    "@domain/ingestion": "workspace:*",
+    "@domain/wiki": "workspace:*",
+    "@domain/chat": "workspace:*",
+    "@domain/verification": "workspace:*",
     "@package/shared-kernel": "workspace:*",
     "hono": "^4.6.14",
     "zod": "^3.24.1"

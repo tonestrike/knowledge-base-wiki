@@ -18,7 +18,11 @@
       "name": "@app/api",
       "version": "0.0.0",
       "dependencies": {
+        "@domain/chat": "workspace:*",
         "@domain/core": "workspace:*",
+        "@domain/ingestion": "workspace:*",
+        "@domain/verification": "workspace:*",
+        "@domain/wiki": "workspace:*",
         "@orpc/server": "^1.14.2",
         "@package/contracts": "workspace:*",
         "@package/shared-kernel": "workspace:*",
