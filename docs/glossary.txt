@@ -52,3 +52,5 @@ lintrun
 summarypage
 backlink
 Backlink
+Ashby
+wordlists
