@@ -110,7 +110,7 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 6 — End-to-end smoke run
 
-**Status:** Done (partial — commit `4baa801`, follow-up at `<pending>`). Bug-fix-and-regression-test path complete; api and web dev servers both start green; HTTP smoke against the api still blocked by a local workerd-loopback hang (separate from this codebase). See Notes.
+**Status:** Done (partial — commits `4baa801`, `fc03858`). Bug-fix-and-regression-test path complete; api and web dev servers both start green; HTTP smoke against the api still blocked by a local workerd-loopback hang (separate from this codebase). See Notes.
 **Why:** Everything typechecks but nothing's been *executed* with real secrets. The wiring could have a runtime bug we wouldn't see at compile time.
 **Done when:**
 - [x] With real `INFISICAL_CLIENT_*_TENEX` exported, `bun --filter @app/api dev` starts wrangler on :8787 — verified end-to-end after Infisical folders provisioned (Bug #2 below). Reaches `[wrangler:info] Ready on http://localhost:8787` in ~6s.
