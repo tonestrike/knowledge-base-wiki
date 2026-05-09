@@ -116,14 +116,16 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 7 — `.vscode/extensions.json` + workspace polish
 
+**Status:** Done (commit `5041054`).
 **Why:** Smallest leverage item, but the IDE experience is part of "scaffold a teammate can pick up cold."
 **Done when:**
-- [ ] `.vscode/extensions.json` recommends biome, cspell, cloudflare workers types
-- [ ] `.vscode/settings.json` sets biome as default formatter, format on save on
-- [ ] `.github/PULL_REQUEST_TEMPLATE.md` with: summary, what changed, how tested, related project / ADR
-- [ ] `CODEOWNERS` set to `* @tonestrike`
+- [x] `.vscode/extensions.json` recommends biome, cspell, cloudflare workers types
+- [x] `.vscode/settings.json` sets biome as default formatter, format on save on
+- [x] `.github/PULL_REQUEST_TEMPLATE.md` with: summary, what changed, how tested, related project / ADR
+- [x] `CODEOWNERS` set to `* @tonestrike`
 **Depends on:** —
 **Estimate:** S
+**Notes:** Interpreted "cloudflare workers types" as "extensions that improve the Workers DX" — added `tamasfe.even-better-toml` (for `wrangler.toml`) and `oven.bun-vscode` (for the runtime). No first-party Cloudflare TS-types extension exists; `@cloudflare/workers-types` is picked up by the TS LSP automatically. CODEOWNERS placed at `.github/CODEOWNERS` (groups with workflows + PR template). Biome's auto-format reflowed the `cSpell.enableFiletypes` array in `settings.json` on first lint pass. Five incidental words from `docs/projects/folder-wiki/spec.md` (evals, wallclock, subrequest, Shiki, strikethrough) added to shared glossary in the same commit — same precedent as Slice 1's `dcb09f5` (Ashby, wordlists).
 
 ## Dependencies
 
