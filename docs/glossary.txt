@@ -68,3 +68,9 @@ rovodev
 dyoshikawa
 jsonc
 hostable
+tamasfe
+evals
+wallclock
+subrequest
+Shiki
+strikethrough
