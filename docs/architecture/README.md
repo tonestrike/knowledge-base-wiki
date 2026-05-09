@@ -76,13 +76,14 @@ Browser                  Cloudflare Edge
 
 ## Why these choices
 
-Decisions worth remembering:
+Decisions worth remembering — full reasoning in [ADR-0001](../decisions/0001-stack-choice.md):
 
 - **Bun + Turborepo** over pnpm + Nx: faster, simpler, native TS execution, no compile step for internal packages.
 - **Biome** over ESLint + Prettier: one tool, much faster, no config sprawl.
 - **Hono** over Express/Fastify: native to Cloudflare Workers, edge-first.
 - **oRPC** over tRPC: contract-first, OpenAPI-compatible, supports MCP/AI tool generation.
 - **Cloudflare Workers** over Lambda/Vercel: latency, simpler deploy, generous free tier.
+- **Infisical** over Doppler / 1Password CLI: open-source, Machine Identities for CI, multi-project free tier.
 - **Domain-driven design (linguistic-first)** over layered/feature-folder: language clarity is the leverage point; folder structure reinforces it.
 - **Package-per-bounded-context** over folder-per-context: turborepo's import boundary IS the DDD boundary; the compiler enforces it.
 

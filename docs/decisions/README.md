@@ -32,7 +32,7 @@ A finished project often produces ADRs as a side effect (the decisions made alon
 
 | # | Title | Date | Status |
 |---|---|---|---|
-| _(none yet)_ | | | |
+| [0001](0001-stack-choice.md) | Stack choice | 2026-05-09 | Accepted |
 
 When you add an ADR, append a row here.
 

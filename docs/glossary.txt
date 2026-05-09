@@ -67,3 +67,4 @@ qwencode
 rovodev
 dyoshikawa
 jsonc
+hostable
