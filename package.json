@@ -18,8 +18,8 @@
     "test": "turbo run test",
     "spell": "cspell '**/*.{ts,tsx,md}' --no-progress",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
-    "rulesync": "rulesync generate --targets agentsmd,claudecode,codexcli --features rules,mcp",
-    "rulesync:watch": "rulesync watch --targets agentsmd,claudecode,codexcli --features rules,mcp"
+    "rulesync": "bunx --bun rulesync generate --targets agentsmd,claudecode,codexcli --features rules,mcp",
+    "rulesync:watch": "bunx --bun rulesync watch --targets agentsmd,claudecode,codexcli --features rules,mcp"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
