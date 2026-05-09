@@ -41,6 +41,9 @@ Conventions:
 ### Decisions
 - [ADRs](decisions/README.md) — Architecture Decision Records, one per non-obvious choice
 
+### Active work
+- [Projects](projects/README.md) — multi-PR initiatives with goals, slices, status
+
 ### How-to
 - [Add a new bounded context](how-to/add-bounded-context.md)
 - [Add a new oRPC procedure](how-to/add-procedure.md)

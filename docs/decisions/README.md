@@ -18,6 +18,16 @@ Write one when:
 
 Don't write one for trivia (file naming, code style — that lives in `.rulesync/rules/`).
 
+## ADR vs. Project vs. How-to
+
+Easy to conflate; the distinction:
+
+- **ADR** (here) — *why* we made a decision. Historical, immutable once accepted (supersede with a new ADR).
+- **Project** ([`../projects/`](../projects/README.md)) — *what* we're actively doing. Living until done.
+- **How-to** ([`../how-to/`](../how-to/)) — *how* to repeatedly perform a task. Procedure.
+
+A finished project often produces ADRs as a side effect (the decisions made along the way).
+
 ## Index
 
 | # | Title | Date | Status |
