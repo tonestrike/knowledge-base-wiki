@@ -46,9 +46,10 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 - [x] Workflow status is green on the initial passing commit
 - [ ] ~~Branch protection on `main` requires the workflow to pass before merge~~ — **Blocked by GitHub free tier**: branch protection on private repos requires GitHub Pro. CI still runs on every PR/push as a visible signal; merging red is technically possible but discouraged. Revisit if/when repo goes public or upgrades.
 **Depends on:** Q3 resolved (Yes)
-**Notes:** Required two follow-up commits during implementation:
+**Notes:** Required follow-up work during and after implementation:
 1. `ab2f1a4` — wrap rulesync with `bunx --bun` because GitHub's `ubuntu-latest` ships Node 20 but rulesync uses `fs.globSync` (Node 22+). Forcing bun runtime sidesteps the Node version dependency entirely.
 2. `dcb09f5` — add `Ashby`, `wordlists` to shared glossary (caught by the cspell rule running through `bun run check` on `0002-folder-wiki.md`). Real example of the discipline working as designed.
+3. `6926e42` — major architectural correction: upgraded rulesync 0.69.0 → 8.15.1 (full multi-harness support — 27 native targets, skills/subagents/commands as first-class features, declarative remote-skill imports with `rulesync.lock` SHA-256 integrity). Migrated to: `.rulesync/` is the only committed source of truth; all generated outputs (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, `.agents/`, `.mcp.json`) are gitignored and produced locally via the `postinstall` script running `rulesync generate`. The earlier "rulesync drift gate" CI step is therefore removed (redundant when generated content isn't in git + postinstall regenerates on every install). This is the design that scales to arbitrary new harnesses (Cursor, Cline, Windsurf, Gemini CLI, OpenCode, …) via a one-line `rulesync.jsonc` `targets` change.
 
 ### Slice 2 — ADR-0001: stack decisions
 
