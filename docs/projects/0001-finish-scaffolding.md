@@ -28,7 +28,7 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 | # | Question | Who decides | By when |
 |---|---|---|---|
-| Q1 | Lefthook vs. simple-git-hooks for pre-commit | tonyvantur | before Slice 4 |
+| Q1 | ~~Lefthook vs. simple-git-hooks for pre-commit~~ — Resolved: simple-git-hooks (per Slice 4) | tonyvantur | before Slice 4 |
 | Q2 | ~~Where does `apps/web` deploy? Cloudflare Pages, Workers static assets, or somewhere else~~ — Resolved by ADR-0002: Workers Static Assets attached to `apps/api` | tonyvantur (with ADR) | Slice 5 outputs the ADR |
 | Q3 | Do we want CI to also regenerate `bun run rulesync` and fail if drift exists | tonyvantur | before Slice 1 lands |
 
@@ -84,14 +84,16 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 4 — Pre-commit hook
 
+**Status:** Done (commit `4e5938a`).
 **Why:** Catches lint/format/spell drift before the push, not just at CI. Cheap insurance; biome + cspell are fast enough that the hook is unnoticeable.
 **Done when:**
-- [ ] Q1 resolved (lefthook vs. simple-git-hooks)
-- [ ] Hook runs: `biome check --write --staged`, `cspell` on staged `.ts/.tsx/.md` files
-- [ ] Hook is installed automatically by `bun install` (postinstall) so teammates don't need a separate step
-- [ ] `docs/operations/local-dev.md` mentions the hook + how to bypass it (`--no-verify`) when intentional
+- [x] Q1 resolved (lefthook vs. simple-git-hooks) — picked simple-git-hooks
+- [x] Hook runs: `biome check --write --staged`, `cspell` on staged `.ts/.tsx/.md` files
+- [x] Hook is installed automatically by `bun install` (postinstall) so teammates don't need a separate step
+- [x] `docs/operations/local-dev.md` mentions the hook + how to bypass it (`--no-verify`) when intentional
 **Depends on:** Q1
 **Estimate:** S
+**Notes:** Resolves Q1 via user prompt mid-slice (auto-mode classifier correctly blocked the unilateral `bun add -D simple-git-hooks` because Q1 was explicitly the user's call). `scripts/pre-commit` is bash and not biome's `--changed` mode (which works against a base branch) because pre-commit operates on the staged set. `git update-index --again` re-stages biome's auto-fixes so they land in the same commit; without it, fixes would only show up in working tree. Empty staged list short-circuits cspell via `--no-must-find-files`. Postinstall now chains `bunx --bun rulesync generate && bunx simple-git-hooks` — a single `bun install` after clone produces all rulesync outputs + installs the hook. Hook self-tested by running its own commit through itself: passed.
 
 ### Slice 5 — Web deploy ADR + minimal deploy path
 
