@@ -8,7 +8,17 @@ export function CompileTheater() {
   const events = useCompileStream();
   const schemaEvent = events.find((e) => e.kind === 'SchemaInferred');
   const drafted = events.filter((e) => e.kind === 'PageDrafted');
-  const sources = events.filter((e) => e.kind === 'CompileStarted');
+  const compileStarted = events.find((e) => e.kind === 'CompileStarted');
+  // CompileStarted carries sourceCount; expand it into N source cards so the
+  // "cards fly across with layoutId" moment (spec §4.3 #2) actually shows N
+  // cards. Real per-Source events land in 2.A.
+  const sourceCards =
+    compileStarted && compileStarted.kind === 'CompileStarted'
+      ? Array.from({ length: compileStarted.sourceCount }, (_, i) => ({
+          id: `${compileStarted.compileRunId}-${i}`,
+          name: `Source ${i + 1}`,
+        }))
+      : [];
 
   return (
     <section className="mt-8 space-y-6">
@@ -29,12 +39,8 @@ export function CompileTheater() {
       <div className="grid grid-cols-3 gap-6">
         <AgentLane name="Sources">
           <AnimatePresence>
-            {sources.map((s) => (
-              <SourceCard
-                key={s.compileRunId}
-                id={s.compileRunId}
-                name={`${s.sourceCount} sources`}
-              />
+            {sourceCards.map((s) => (
+              <SourceCard key={s.id} id={s.id} name={s.name} />
             ))}
           </AnimatePresence>
         </AgentLane>
