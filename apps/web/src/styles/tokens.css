@@ -1,0 +1,29 @@
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 35 92% 50%;
+    --accent-foreground: 26 83% 14%;
+    --border: 215 20% 84%;
+    --input: 215 20% 84%;
+    --ring: 35 92% 50%;
+
+    --verdict-supported: 158 64% 42%;
+    --verdict-unsupported: 32 95% 50%;
+    --verdict-contradicted: 350 83% 58%;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 16% 70%;
+    --accent: 35 92% 50%;
+    --accent-foreground: 26 83% 14%;
+    --border: 215 20% 28%;
+    --input: 215 20% 28%;
+    --ring: 35 92% 50%;
+  }
+}

@@ -1,0 +1,27 @@
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  .prose-magazine {
+    @apply font-serif text-[18px] leading-[1.7];
+    max-width: 60ch;
+  }
+
+  .span-shimmer {
+    text-decoration: underline wavy hsl(var(--accent));
+    text-underline-offset: 4px;
+    text-decoration-thickness: 2px;
+  }
+
+  .span-shimmer:hover {
+    animation: shimmer 1.4s ease-in-out;
+  }
+}
