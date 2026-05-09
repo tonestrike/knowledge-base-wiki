@@ -15,6 +15,7 @@ export const ContentHash = z
   .string()
   .regex(/^[a-z0-9]+:[a-f0-9]+$/, 'content hash must be `<algo>:<hex>`');
 export type ContentHash = z.infer<typeof ContentHash>;
+export const contentHash = (s: string): ContentHash => ContentHash.parse(s);
 
 export const Span = z.object({
   sourceId: SourceId,
