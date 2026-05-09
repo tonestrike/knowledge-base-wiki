@@ -106,3 +106,8 @@ renderable
 segs
 workerd
 toplevel
+financials
+fundraise
+globex
+okrs
+pandoc
