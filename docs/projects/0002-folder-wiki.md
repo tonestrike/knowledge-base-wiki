@@ -4,174 +4,229 @@
 **Started:** 2026-05-09
 **Done:** —
 **Owner:** tonyvantur
-**Related:** [storyboard](folder-wiki/storyboard.md), [bounded contexts](folder-wiki/contexts/), [0001-finish-scaffolding](0001-finish-scaffolding.md), Tenex FDE take-home brief
+**Related:** [design spec](folder-wiki/spec.md), [storyboard](folder-wiki/storyboard.md), [bounded contexts](folder-wiki/contexts/), [0001-finish-scaffolding](0001-finish-scaffolding.md), Tenex FDE take-home brief
 
 ## Goal
 
-Submit the Tenex Forward Deployed Engineer take-home: a deployed *Compile a Folder into an LLM Wiki* product, a public GitHub repo with a clear `README.md`, and a 10–20 min unlisted YouTube video — implementing Andrej Karpathy's LLM-Wiki pattern (April 2026) with a span-verifying lint loop that addresses the pattern's known hallucination critique.
+Submit the Tenex Forward Deployed Engineer take-home: a deployed *Compile a Folder into an LLM Wiki* product, a public GitHub repo with a clear `README.md`, and a 10–20 min unlisted YouTube video — implementing Andrej Karpathy's LLM-Wiki pattern (April 2026) with **three creative leaps** in service of one client promise: knowledge you can trust.
+
+1. **Adaptive wiki schema** — the *shape* of knowledge is generated per folder (typed PageTypes + Relations).
+2. **Generative artifact answers** — the *retrieval UI* adapts to the question (interactive React components).
+3. **Span-verifying lint loop** — every claim is provably grounded; Verifier runs on a different model family from the Compiler to defeat self-grading bias.
+
+Canonical conceptual design: [`folder-wiki/spec.md`](folder-wiki/spec.md). Demo plan: [`folder-wiki/storyboard.md`](folder-wiki/storyboard.md).
 
 ## Why now
 
-The take-home is the gate for FDE candidacy. Karpathy's LLM-Wiki gist is one month old; the trajectory-awareness it demonstrates is freshest right now. The submission brief explicitly grades "understanding of LLMs and their trajectory" — implementing this specific pattern, plus addressing its publicly-known weakness in production, is the most-direct demonstration available. The Better-Perplexity prompt was the runner-up; rejected because folder-wiki rewards taste over spectacle, which lands harder for an engineering hire.
+The take-home is the gate for FDE candidacy. Karpathy's LLM-Wiki gist is one month old; the trajectory-awareness it demonstrates is freshest right now. The submission brief explicitly grades "understanding of LLMs and their trajectory" — implementing this specific pattern + addressing its publicly-known weakness + extending it with two further leaps (adaptive schema, generative artifact answers) is the most-direct demonstration available.
 
-Concrete trigger: assignment is in flight; submission link is waiting.
+Concrete trigger: assignment is in flight; submission link is waiting. Presentation framing is *as if pitching to a client*, not as an engineering deep-dive (per [`folder-wiki/spec.md`](folder-wiki/spec.md) §1).
 
 ## Out of scope
 
-- **OpenAI Realtime / voice mode.** Tempting, but the lint loop is the reliability differentiator and voice doesn't make the demo more convincing.
-- **Graph view of backlinks.** Obsidian-style; nice-to-have. Cut unless it earns its place in a demo moment.
+- **OpenAI Realtime / voice mode.** Tempting, but the three leaps already cover technical, presentation, and reliability surfaces; voice doesn't earn its complexity.
+- **Graph view of backlinks.** Obsidian-style; cut unless it earns its place in a demo moment.
 - **Multi-folder workspaces and cross-folder linking.** Single Folder per Wiki for v1.
-- **Auto-update when the Drive folder changes** (Drive webhooks + incremental compile). Manual re-compile is fine for demo.
-- **Vector embeddings as the retrieval substrate.** The wiki *is* the index — agentic search reads it directly. We acknowledge the scaling ceiling (~100 docs in context) in the trade-offs section of the video, but don't build a hybrid for v1.
+- **Auto-update on Drive folder change** (webhooks + incremental compile). Manual re-compile is fine for demo.
+- **Vector embeddings as the retrieval substrate.** The wiki *is* the index — agentic search reads it directly. ~100-doc context-fit ceiling acknowledged in the video's trade-offs section.
 - **Multi-tenant isolation, per-org workspaces, abuse rate limits.** Single-user OAuth is sufficient for the demo.
-- **Generative-UI artifact protocol** (the Better-Perplexity vision). The wiki *is* the artifact in this project.
+- **Embeddings-as-fallback hybrid.** Production move; called out in trade-offs.
 
 ## Open questions
 
+Q1–Q4 resolved in [`folder-wiki/spec.md`](folder-wiki/spec.md) Appendix A:
+
+| # | Question | Resolution |
+|---|---|---|
+| Q1 | Where do `Span` / `Citation` live? | Zod schemas in `@package/contracts`, re-exported per context. |
+| Q2 | Is `chat` its own package? | Yes — `Conversation` has durable persistence. |
+| Q3 | Are `AnswerPage`s a `WikiPage` subtype? | Yes — alongside Concept / Summary / **Index**. |
+| Q4 | Verifier model? | Opus 4.7 (different family from Sonnet to defeat self-grading bias). |
+
+Still pending:
+
 | # | Question | Who decides | By when |
 |---|---|---|---|
-| Q1 | Where do `Span` and `Citation` value objects physically live? Likely Zod schemas at the `@package/contracts` seam, re-exported by each context's contract. | architect blueprint (Slice 1) | Slice 1 |
-| Q2 | Is `chat` its own package, or a thin context-aware orchestration layer over `wiki`? Litmus: do `Conversation`/`Turn` aggregates need durable persistence (probably yes). | architect blueprint (Slice 1) | Slice 1 |
-| Q3 | Are `AnswerPage`s a `WikiPage` subtype or a separate aggregate? Currently modeled as a subtype; revisit if invariants meaningfully diverge. | architect blueprint (Slice 1) | Slice 1 |
-| Q4 | Verifier model selection: must differ from Compiler model to avoid self-grading bias. Which model? | architect blueprint (Slice 1) | Slice 1 |
-| Q5 | Where does `apps/web` deploy for the live link? Inherits from `0001` Slice 5 (web deploy ADR). | tonyvantur | before Slice 9 |
-| Q6 | Drive auth: single-user OAuth (sufficient for demo) vs per-user. Default single-user; revisit only if it costs us a demo moment. | tonyvantur | Slice 4 |
-| Q7 | Does compile latency at ~20 docs feel responsive (< 60s end-to-end)? Risk-spike result drives a model-selection retread if not. | Slice 2 result | Slice 2 |
+| Q5 | Where does `apps/web` deploy for the live link? Inherits from `0001` Slice 5 (web deploy ADR). | tonyvantur | before Phase 4 |
+| Q6 | Drive auth: single-user OAuth (sufficient for demo) vs per-user. Default single-user. | tonyvantur | Slice 2.A |
+| Q7 | Does compile latency at ~20 docs feel responsive (< 60s end-to-end)? Risk-spike result drives a model-selection retread if not. | Slice 1.A result | Slice 1.A |
 
 ## Slices
 
-### Slice 1 — Architecture blueprint
+13 atomic slices organized contract-first to maximize parallelism. Phase 0 is gating; Phase 1 runs 3 in parallel; Phase 2 runs 5 in parallel; Phase 3 and Phase 4 are sequential. Detailed conceptual design at [`folder-wiki/spec.md`](folder-wiki/spec.md).
 
-**Why:** Move 3 of the planning sequence. Resolves Q1–Q4, locks the agent topology, the storage layer (D1 / R2 / KV / Durable Objects), the streaming protocol (SSE for compile events, WebSocket via Durable Object for chat), and the per-context oRPC contract surface. Briefed by the storyboard + bounded-context drafts; produced by `feature-dev:code-architect`; **read and decided by us, not handed off to "go build it."**
+```
+Phase 0   0.1 Contract spike (gating; authored together)
+Phase 1   1.A Risk spike   ‖   1.B DDD scaffolding   ‖   1.C UI bootstrap
+Phase 2   2.A ingest  ‖  2.B wiki+Schema  ‖  2.C chat+Artifact  ‖  2.D verify  ‖  2.E web UI
+Phase 3   3.1 mock-swap + e2e   →   3.2 demo curation
+Phase 4   4.1 deploy            →   4.2 record   →   4.3 submit
+```
+
+### Phase 0 — gating contract spike
+
+#### Slice 0.1 — Contract spike
+
+**Why:** Quality of contracts at this stage determines whether Phase 2 fans out cleanly. **Authored together** — synthesis stays here, not delegated.
 **Done when:**
-- [ ] `docs/projects/folder-wiki/architecture.md` exists, covering: agent topology (planner / researcher / drafter / linker / synthesizer / verifier — what each does, what tools each gets, what model), storage layer (D1 schema sketch, R2 layout, KV usage, DO usage), streaming protocol per procedure, per-context oRPC contract surface (procedure shapes, not full schemas), citation rendering pipeline (Span → PDF.js highlight), lint-loop trigger and cadence, and recommended slice plan
-- [ ] Q1–Q4 resolved with rationale
-- [ ] Diagrams (mermaid) for the agent topology and the data flow
-- [ ] Risks called out specific to the architecture (e.g., DO connection limits at peak chat concurrency)
+- [ ] Per-context oRPC contracts (`ingestion`, `wiki`, `chat`, `verification`) defined in `packages/contracts/src/<context>/`
+- [ ] Shared types as Zod schemas at the seam: `Span`, `Citation`, `Claim`, `WikiSchema`, `PageType`, `Relation`, `Artifact`, `AnswerSegment`
+- [ ] Domain event schemas: `SourceIngested`, `SchemaInferred`, `CompileFinished`, `AnswerProduced`, `CorrectionAccepted`
+- [ ] Mock fixtures per procedure (deterministic happy-path data) so the web app and per-context tests can run before implementations exist
+- [ ] Generated TypeScript clients consumed by `apps/web`
+- [ ] `bun run check` passes
 **Depends on:** —
-**Estimate:** M
 
-### Slice 2 — Risk spike: 5-PDF compile (throwaway)
+### Phase 1 — three parallel tracks (use `superpowers:dispatching-parallel-agents`)
 
-**Why:** Validates the two technical risks (Drive ingest latency at folder-scale; per-doc compile cost) before we sink real architecture work into a path that doesn't fly. Throwaway code; the only output we keep is a one-page risk report appended to `architecture.md`.
+#### Slice 1.A — Risk spike (throwaway)
+
+**Why:** Validate Drive ingest latency + per-doc compile cost before sinking real work into a path that doesn't fly.
 **Done when:**
-- [ ] 5 real PDFs from a Drive folder ingested via the GoogleDriveConnector spike
-- [ ] Each PDF compiled into one ConceptPage and one SummaryPage with at least one Citation each
-- [ ] Localhost render of the wiki tree
-- [ ] Measured: per-doc compile latency, total tokens, USD cost
-- [ ] Risk report appended to `architecture.md` with go/no-go on the chosen models
-**Depends on:** Slice 1 (model selection from architecture)
-**Estimate:** S — assuming no surprises. M if Drive scopes need verification or compile is dramatically slower than projected.
+- [ ] Drive auth happy path with my dev Google account
+- [ ] 5 PDFs from a Drive folder ingested + quick SchemaInfer → typed ConceptPages
+- [ ] Measured: per-doc latency, tokens, USD cost, span-citation accuracy
+- [ ] Risk report appended to `folder-wiki/spec.md` §5 with go/no-go on chosen models
+**Depends on:** Slice 0.1
 
-### Slice 3 — Bounded context scaffolding
+#### Slice 1.B — DDD scaffolding
 
-**Why:** Promote the four bounded-context drafts from `docs/projects/folder-wiki/contexts/` into real packages with the project's standard layout. Per the linguistic-DDD discipline in `.claude/memories/domain-driven.md`, glossaries land before code.
+**Why:** Per the linguistic-DDD discipline in `.claude/memories/domain-driven.md`, glossaries land before code. Promotes the four context drafts into real packages.
 **Done when:**
-- [ ] `packages/domains/{ingestion,wiki,chat,verification}/` created, each with `package.json`, `tsconfig.json`, `glossary.md`, `.cspell/glossary.txt`, `src/{domain,application,infrastructure,interface}/`
-- [ ] Glossary content from the drafts is moved into each context's `glossary.md`; cspell wordlists into `.cspell/glossary.txt`
-- [ ] `cspell.json` updated with four new `dictionaryDefinitions` and four `overrides` (one per context path)
-- [ ] `docs/ubiquitous-language.md` context map updated with the four new rows + cross-references
-- [ ] `docs/projects/folder-wiki/contexts/` removed (drafts retired into the canonical location)
-- [ ] `bun run check` passes (lint + spell + typecheck + test)
-**Depends on:** Slice 1
-**Estimate:** S
+- [ ] `packages/domains/{ingestion,wiki,chat,verification}/` created with `package.json`, `tsconfig.json`, `glossary.md`, `.cspell/glossary.txt`, `src/{domain,application,infrastructure,interface}/`
+- [ ] Glossary content from drafts moved into each context's `glossary.md` (with third-leap additions: `WikiSchema`, `PageType`, `Relation`, `IndexPage`, `Artifact`)
+- [ ] `cspell.json` updated with four new dictionary definitions and four overrides
+- [ ] `docs/ubiquitous-language.md` context map updated with four new rows
+- [ ] `docs/projects/folder-wiki/contexts/` removed (drafts retired into canonical location)
+- [ ] `bun run check` passes
+**Depends on:** Slice 0.1
 
-### Slice 4 — ingestion: Drive auth + Source aggregate
+#### Slice 1.C — UI bootstrap
 
-**Why:** Everything downstream needs Sources to compile from. First real domain code; sets the pattern for the other contexts.
+**Why:** Web UI must be buildable against contract mocks in parallel with Phase 2 backends. Bootstrap the design system before any component lands.
 **Done when:**
-- [ ] GSuite OAuth (single-user) wired; refresh-token persistence in D1
-- [ ] `GoogleDriveConnector` (infrastructure) implements a connector port (domain)
-- [ ] `Source` aggregate, `Manifest`, `Span` value object, `Outline` value object
-- [ ] `extractSource` use-case handles PDF, Doc, Sheet, Slide → text + outline + page images
-- [ ] R2 layout for source binaries; D1 schema for source metadata
-- [ ] Procedures (oRPC): `ingestion.connectDrive`, `ingestion.listFolders`, `ingestion.ingestFolder`
-- [ ] Tests: `Span` content-hash invariants, OAuth refresh, ingest-idempotency
-**Depends on:** Slice 1, Slice 3
-**Estimate:** L
+- [ ] `shadcn/ui` initialized; Tailwind config with project tokens (colors, typography, spacing, motion per spec §4.2)
+- [ ] Storybook (or `/design-system` route) up
+- [ ] Component skeletons rendered against contract mocks: `WikiPage` magazine layout, `CompileTheater` lanes, `CitationChip` + flight, `LintRibbon`, `ArtifactRegistry` shell, `SpanShimmer`
+- [ ] Empty / loading / error states named and rendered for each surface
+**Depends on:** Slice 0.1
 
-### Slice 5 — wiki: Compile pipeline (no UI yet)
+### Phase 2 — five parallel implementation tracks (use `superpowers:subagent-driven-development`)
 
-**Why:** The core LLM-Wiki pattern. Sources + planner → researchers → drafter → linker → Wiki. End-to-end functional; UI follows in Slice 6.
+#### Slice 2.A — ingestion
+
+**Why:** Everything downstream needs Sources.
 **Done when:**
-- [ ] `Wiki`, `WikiPage` (Concept/Summary/Answer subtypes), `Backlink`, `Citation`, `Claim` aggregates and value objects
-- [ ] `compileFolder` use-case orchestrates the agent topology defined in `architecture.md`
-- [ ] `CompileEvent` stream emitted via SSE
-- [ ] D1 schema for the wiki graph; KV for in-flight compile-run state
-- [ ] Procedures: `wiki.compileFolder`, `wiki.getWiki`, `wiki.getWikiPage`, `wiki.streamCompileEvents`
-- [ ] Cross-context: subscribes to ingestion's `SourceIngested` event for incremental compile triggers (out of scope for v1 — record the wiring, don't drive it)
-- [ ] Tests: golden-file test on a fixed 5-doc fixture asserting the wiki structure is deterministic enough
-**Depends on:** Slice 4
-**Estimate:** L
+- [ ] `GoogleDriveConnector` (production)
+- [ ] `Source` aggregate + `Manifest` + `Span` + `Outline` value objects
+- [ ] `extractSource` use-case for PDF, Doc, Sheet, Slide → text + outline + page images
+- [ ] R2 layout per spec §3.2; D1 schema for `sources`, `folders`, `oauth_tokens`
+- [ ] Procedures: `connectDrive`, `listFolders`, `ingestFolder`, `streamIngestEvents`
+- [ ] Tests: `Span` content-hash invariants, OAuth refresh, ingest idempotency
+**Depends on:** Slices 0.1, 1.B
 
-### Slice 6 — wiki UI: browse, cite, live trace
+#### Slice 2.B — wiki (with adaptive schema)
 
-**Why:** Demo Moment 1 (live compile) and Moment 2 (cross-doc Q&A with span-jumping citations) hinge on this UI. Without it, the demo is a JSON dump.
+**Why:** The core LLM-Wiki pattern + the third leap (adaptive schema).
 **Done when:**
-- [ ] Web app page tree shows ConceptPages and SummaryPages with backlinks
-- [ ] Citation chips rendered inline on every Claim
-- [ ] PDF.js viewer modal opens to the right page with the cited Span highlighted
-- [ ] Live compile trace pane renders `CompileEvent`s in real time
-- [ ] Loading and empty states are not embarrassing
-- [ ] Visual polish bar: matches the design quality the FDE evaluator is looking for. **No half-built UI ships in the demo.**
-**Depends on:** Slice 5
-**Estimate:** L
+- [ ] `SchemaInferrer` agent (Sonnet 4.6) reads first 5–10 Sources, emits `WikiSchema`
+- [ ] Compile pipeline: `Planner` → `Researcher`s → `Drafter` → `Linker` → `IndexBuilder`
+- [ ] Aggregates / value objects: `Wiki`, `WikiPage` (subtypes: Concept / Summary / Answer / **Index**), `WikiSchema`, `PageType`, `Relation`, `Backlink`, `Citation`, `Claim`, `CompileRun`, `CompileEvent`
+- [ ] `CompileRunDO` orchestrates the multi-minute compile + SSE fan-out
+- [ ] D1 schema for `wikis`, `wiki_pages`, `backlinks`, `claims`, `citations`, `compile_runs`
+- [ ] Procedures: `compileFolder`, `streamCompileEvents`, `getWiki`, `getSchema`, `getWikiPage`
+- [ ] Subscribes to `SourceIngested` (incremental compile wired but not driven in v1)
+- [ ] Tests: golden-file deterministic-enough wiki structure on a 5-doc fixture; one IndexPage per PageType
+**Depends on:** Slices 0.1, 1.B
 
-### Slice 7 — chat: Q&A over the Wiki
+#### Slice 2.C — chat (with Generative artifact answers)
 
-**Why:** Demo Moment 2. Researcher reads the wiki, Synthesizer composes Answer with span-anchored Citations, AnswerSegments stream into the UI.
+**Why:** Demo Moment 2 + the second leap (artifact answers).
 **Done when:**
-- [ ] `Conversation`, `Turn`, `Question`, `Answer`, `AnswerSegment`, `CitationChip` aggregates and value objects
-- [ ] Durable Object per Conversation for streaming state
-- [ ] Researcher + Synthesizer agents (model picks per architecture)
-- [ ] Procedures: `chat.openConversation`, `chat.ask` (returns DO WebSocket URL), `chat.list`
-- [ ] UI: chat pane right of the wiki; AnswerSegments stream in order; Citation chips clickable; follow-ups work
-- [ ] Tests: golden-file Q&A against the fixture wiki; agent doesn't fabricate citations (asserted by hash check on every emitted `Citation.span`)
-**Depends on:** Slice 5
-**Estimate:** L
+- [ ] Aggregates / value objects: `Conversation`, `Turn`, `Question`, `Answer`, `AnswerSegment` (prose / citation / **artifact**), `CitationChip`
+- [ ] `Researcher` + `Synthesizer` agents (Haiku 4.5 / Sonnet 4.6 per spec §2.4)
+- [ ] **Closed Artifact component registry**: `ComparisonTable | Timeline | LineChart | BarChart | KeyMetric | CodeBlock | Quote | Markdown`
+- [ ] Synthesizer's structured-output schema enforces the registry
+- [ ] `ConversationDO` with WebSocket for `AnswerSegment` streaming
+- [ ] D1 schema for `conversations`, `turns`
+- [ ] Procedures: `openConversation`, `ask`, `streamAnswer`, `list`
+- [ ] Tests: hard cross-doc question against fixture wiki returns ≥1 Artifact + ≥3 Citations; hash check on every emitted `Citation.span` (no fabrication)
+**Depends on:** Slices 0.1, 1.B
 
-### Slice 8 — verification: lint loop
+#### Slice 2.D — verification (lint loop)
 
-**Why:** Demo Moment 3 — the reliability story. Without this, we're indistinguishable from any other RAG demo.
+**Why:** Demo Moment 3 + the primary leap (reliability).
 **Done when:**
-- [ ] `LintRun`, `LintFinding`, `Verdict` (`supported|unsupported|contradicted`), `Correction` aggregates and value objects
-- [ ] `Verifier` agent (model differs from Compiler per Q4)
+- [ ] Aggregates / value objects: `LintRun`, `LintFinding`, `Verdict` (`supported|unsupported|contradicted`), `Correction`
+- [ ] `Verifier` agent (**Opus 4.7** — different family from Sonnet)
 - [ ] `lintWiki` use-case: extract Claims → fetch cited Spans → issue Verdicts → propose Corrections
-- [ ] Procedures: `verification.lintWiki`, `verification.streamLintEvents`, `verification.applyCorrection`
-- [ ] UI: per-page lint badge; per-Claim flag overlay with the cited Span next to the Claim text; "Apply correction" button
-- [ ] Trigger: subscribes to wiki's `CompileFinished` event for automatic post-compile lint; manual trigger also works
-- [ ] Determinism check: planted contradiction in the demo fixture is caught on ≥10/10 runs
-**Depends on:** Slice 5
+- [ ] `LintRunDO` orchestrates concurrent per-Claim verification (cap 6 parallel)
+- [ ] D1 schema for `lint_runs`, `lint_findings`
+- [ ] Procedures: `lintWiki`, `streamLintEvents`, `applyCorrection`
+- [ ] Subscribes to `CompileFinished` for auto-trigger; daily Cron Trigger for sampling pass
+- [ ] Determinism check: planted contradiction in fixture caught on ≥10/10 runs
+**Depends on:** Slices 0.1, 1.B
 
-**Estimate:** L
+#### Slice 2.E — web UI implementation against mocks
 
-### Slice 9 — Demo curation, polish, deploy
-
-**Why:** The video is the deliverable. Everything before this is in service of three minutes of screen time per moment.
+**Why:** Phase-2 parallelism payoff. UI fully polished against contract mocks before backend lands.
 **Done when:**
-- [ ] Demo folder curated: ~20 docs (PDF / Doc / Sheet / slide deck mix), with one **planted contradiction** subtle enough to look real but deterministic enough that the lint catches it
-- [ ] Compile of the demo folder feels responsive (target < 60s; informed by Slice 2 spike)
-- [ ] Chat answer streams within 2s of asking on the demo questions
-- [ ] PDF.js span-highlight tested end-to-end on every demo citation
-- [ ] Public `README.md` covers: what it is, how to run locally, how to test, deployed link, video link
-- [ ] Deployed: `apps/api` to Cloudflare Workers, `apps/web` to whatever target Q5 lands on
-- [ ] Production-safe: secrets via Infisical → wrangler; no `.dev.vars` committed
-**Depends on:** Slices 4–8, Q5 resolved
-**Estimate:** M
+- [ ] All six spectacular elements (spec §4.3) implemented and animated
+- [ ] Routes: `/` (folder picker), `/wiki/:wikiId` (browse), `/wiki/:wikiId/page/:pageId` (read), `/chat/:conversationId` (chat)
+- [ ] Empty / loading / error states for every surface, screenshot-grade
+- [ ] Visual diff snapshot tests pass on the design system stories
+- [ ] Demo flow runs end-to-end against contract mocks with full polish
+**Depends on:** Slices 0.1, 1.C
 
-### Slice 10 — Record + submit
+### Phase 3 — integration + curation
 
-**Why:** The actual deliverable.
+#### Slice 3.1 — Mock-swap + end-to-end testing
+
+**Why:** Test of contract quality. The "<5 min to integrate" promise from §1 is verified here.
 **Done when:**
-- [ ] Backup recording of Moments 1, 2, 3 captured separately (in case live demo fails on the day)
-- [ ] Cold-open phrasing rehearsed (no script; brief explicitly says "be yourself")
-- [ ] 10–20 min video recorded, covering: product demo (≤ half), tech stack, architectural decisions, technical trade-offs (per the brief's required structure)
-- [ ] Uploaded to YouTube as **unlisted**
-- [ ] Public GitHub repo URL confirmed accessible
-- [ ] Deployed live link confirmed accessible
-- [ ] Submission completed via Ashby link
-**Depends on:** Slice 9
-**Estimate:** S — assuming Slice 9 left no fires.
+- [ ] Contract mocks replaced with real implementations across `apps/web`
+- [ ] End-to-end against a real Drive folder works
+- [ ] Citation flight against real PDF.js sources works
+- [ ] Lint catches the planted contradiction deterministically (≥10/10)
+- [ ] Latency feels responsive (target < 60s compile end-to-end; ≤ 2s first chat token)
+**Depends on:** Phase 2 complete
+
+#### Slice 3.2 — Demo curation
+
+**Why:** The demo folder is the test fixture for the video.
+**Done when:**
+- [ ] ~20 board-governance docs in a curated Drive folder
+- [ ] One subtle planted contradiction (deterministic catch by lint)
+- [ ] Compile cadence tuned (parallel Researcher fan-out, KV cache warmups)
+- [ ] Cold-open phrasing rehearsed (no script per the brief)
+**Depends on:** Slice 3.1
+
+### Phase 4 — deploy + record + submit
+
+#### Slice 4.1 — Deploy
+
+**Done when:**
+- [ ] `apps/api` deployed to Cloudflare Workers (`wrangler deploy`)
+- [ ] `apps/web` deployed (per `0001` Slice 5 ADR)
+- [ ] Production secrets via Infisical → `wrangler secret bulk`
+- [ ] Custom domain or `workers.dev` URL confirmed accessible
+**Depends on:** Phase 3 complete, Q5 resolved
+
+#### Slice 4.2 — Record
+
+**Done when:**
+- [ ] Backup recordings of Moments 1, 2, 3 captured separately
+- [ ] 10–20 min main video covering brief sections (product demo ≤ half, tech stack, architectural decisions, trade-offs)
+- [ ] Uploaded to YouTube as unlisted
+**Depends on:** Slice 4.1
+
+#### Slice 4.3 — Submit
+
+**Done when:**
+- [ ] Public GitHub repo with README pitch deck (run/test instructions, deployed link, video link)
+- [ ] Deployed link confirmed accessible
+- [ ] Submission completed via Ashby
+**Depends on:** Slice 4.2
 
 ## Dependencies
 
@@ -200,19 +255,17 @@ Internal:
 
 ## Notes
 
-Suggested order, given dependencies:
+The 13 slices are organized contract-first for maximum parallelism. Phase 0 is gating; everything inside a phase runs in parallel.
 
-1. **Slice 1** — Architecture blueprint (briefs `feature-dev:code-architect`; we synthesize)
-2. **Slice 2** — Risk spike (throwaway; in parallel with reading Slice 1 output)
-3. **Slice 3** — Bounded context scaffolding (mechanical; clears `bun run check` quickly)
-4. **Slice 4** — ingestion (foundational; everything else needs Sources)
-5. **Slice 5** — wiki compile pipeline (the core)
-6. **Slice 6** — wiki UI (Demo Moments 1 + 2 enabled)
-7. **Slice 7** — chat (Demo Moment 2 fully enabled)
-8. **Slice 8** — verification (Demo Moment 3 enabled)
-9. **Slice 9** — Demo curation + deploy
-10. **Slice 10** — Record + submit
+**Parallelism toolchain:**
+- Phase 1 fan-out: `superpowers:dispatching-parallel-agents` (3 concurrent agents on disjoint scopes)
+- Phase 2 fan-out: `superpowers:subagent-driven-development` (5 concurrent slice-implementer agents)
+- Phase 3 / 4: sequential, but Phase 3.1 mock-swap should feel near-instant if Phase 0 contracts were tight
 
-Total estimate: ~7–10 days of focused work. Each slice is its own PR. Slices 6, 7, 8 each contain real frontend work and may want pairing with `pr-review-toolkit:code-reviewer` and `feature-dev:code-explorer` for surface area.
+**Per-slice review:** `pr-review-toolkit:review-pr` on every slice PR; `pr-review-toolkit:silent-failure-hunter` and `pr-review-toolkit:type-design-analyzer` on contract-touching slices (0.1, 1.B, 2.A–2.D).
 
-The video is the deliverable. Every architectural decision is graded by whether it makes one of the three Demo Moments more convincing on screen. If a slice's "Done when" doesn't connect to a Moment, demote it.
+**Per-context glossary discipline:** Phase 1.B updates `cspell.json` with `addWords:false` per context; any new term in Phase 2 requires editing the glossary in the same PR — agents are briefed with this rule.
+
+**Time framing.** Per project memory `feedback-time-framing.md`: do not size in weeks/days. Ambition over hours; the 13 slices fit the day's wallclock when run with the recommended parallelism.
+
+**Forcing function.** Every architectural decision is graded by whether it makes one of the three Demo Moments more convincing as a client pitch (per `take-home-direction.md` memory). If a slice's "Done when" doesn't connect to a Moment, demote it.
