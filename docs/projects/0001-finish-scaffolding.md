@@ -67,18 +67,20 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 3 — First-run setup script
 
+**Status:** Done (commit `64fba47`).
 **Why:** Day-one setup is documented but manual. Six environment vars across two tools, easy to skip a step. A script eliminates the "did I do step 4?" failure mode.
 **Done when:**
-- [ ] `scripts/setup` (or `bun run setup`) walks the user through:
+- [x] `scripts/setup` (or `bun run setup`) walks the user through:
   1. Verify bun ≥ 1.3.0
   2. `bun install`
   3. Prompt for `INFISICAL_CLIENT_ID_TENEX` + `INFISICAL_CLIENT_SECRET_TENEX`, append `export` lines to the user's chosen shell config (`~/.zshrc` default), with confirmation
   4. Run `with-secrets` end-to-end against the Machine Identity to confirm auth works
   5. Run `bun run check` — fail loudly if anything's red
-- [ ] Script is idempotent (re-running is safe)
-- [ ] `docs/operations/local-dev.md` "First-time setup" section becomes "run `bun run setup`"
+- [x] Script is idempotent (re-running is safe)
+- [x] `docs/operations/local-dev.md` "First-time setup" section becomes "run `bun run setup`"
 **Depends on:** —
 **Estimate:** M
+**Notes:** Idempotence in step 3 works in two layers: (a) `grep -qE "^export VAR="` against the chosen rc skips the prompt entirely if a line is already there; (b) when the rc has the export but the script's parent shell hasn't sourced it, the matching line is `eval`'d into the current process env so step 4's smoke test succeeds. `with-secrets` is reached via `apps/api/node_modules/.bin/with-secrets` because the bin is workspace-scoped (only the `apps/*` packages depend on `@tooling/scripts`); no need to add a root devDep just for setup. Smoke test runs `with-secrets --env=dev --path=/apps/api --recursive -- true` — exercises both auth (Machine Identity → token exchange) and secret fetch (`infisical run` resolves the path). `SETUP_SHELL_RC` env var lets non-zsh users target a different rc. Append uses `printf '%q'` so values with shell metacharacters are quoted safely. Incidental cspell hits from `docs/projects/folder-wiki/` (comparisontable, linechart, barchart, keymetric, wikischema, pagetype, schemainferrer, schemainferred, indexbuilder, sparkline) folded into shared glossary in the same commit, mirroring Slice 1 / Slice 7 precedent.
 
 ### Slice 4 — Pre-commit hook
 
