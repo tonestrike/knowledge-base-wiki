@@ -53,15 +53,17 @@ Concrete trigger: zero days of code on top of the scaffold; a CI green badge on 
 
 ### Slice 2 — ADR-0001: stack decisions
 
+**Status:** Done (commit `d22f799`).
 **Why:** The reasoning behind bun + turbo + Hono + oRPC + Cloudflare + Infisical + DDD-with-cspell lives only in the conversation that scaffolded this. Once that conversation closes, future-me has the code but not the why.
 **Done when:**
-- [ ] `docs/decisions/0001-stack-choice.md` exists, following the template
-- [ ] Captures: bun (vs pnpm), biome (vs ESLint+Prettier), Hono (vs Express/Fastify), oRPC (vs tRPC), Cloudflare Workers (vs Lambda/Vercel), Infisical (vs Doppler/1Password CLI), DDD with linguistic-first discipline (vs feature folders)
-- [ ] Each section follows: Context → Options considered → Decision → Consequences
-- [ ] Links from `docs/architecture/README.md` "Why these choices" section
-- [ ] Index row added to `docs/decisions/README.md`
+- [x] `docs/decisions/0001-stack-choice.md` exists, following the template
+- [x] Captures: bun (vs pnpm), biome (vs ESLint+Prettier), Hono (vs Express/Fastify), oRPC (vs tRPC), Cloudflare Workers (vs Lambda/Vercel), Infisical (vs Doppler/1Password CLI), DDD with linguistic-first discipline (vs feature folders)
+- [x] Each section follows: Context → Options considered → Decision → Consequences
+- [x] Links from `docs/architecture/README.md` "Why these choices" section
+- [x] Index row added to `docs/decisions/README.md`
 **Depends on:** —
 **Estimate:** M (writing time, not thinking time — most of the thinking is already done)
+**Notes:** Multi-decision ADR (one file, seven sub-decisions sharing the C/O/D/C shape) was the right call vs. seven separate ADRs — the picks are tightly coupled (Bun ↔ Biome speed; Hono ↔ Workers; oRPC ↔ contract-first DDD), and splitting them would force readers to chase cross-references. Single cspell hit during verification: `hostable` → added to `docs/glossary.txt` (cross-cutting, not domain-specific).
 
 ### Slice 3 — First-run setup script
 
