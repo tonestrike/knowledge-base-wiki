@@ -53,6 +53,19 @@ yarn-error.log*
 
 # ai-tool runtime (machine-local plugin caches)
 .claude/plugins/cache/
-# Note: AGENTS.md, CLAUDE.md, and .agents/.claude/.codex memories are GENERATED
-# by `bun run rulesync` from .rulesync/. They are committed so teammates without
-# rulesync installed can still read them.
+
+# rulesync-generated outputs — .rulesync/ is the only source of truth.
+# Run `bun run rulesync` after clone (and after editing anything under .rulesync/).
+CLAUDE.md
+AGENTS.md
+.mcp.json
+.claude/rules/
+.claude/skills/
+.codex/rules/
+.codex/skills/
+.codex/config.toml
+.agents/rules/
+.agents/skills/
+.agents/memories/
+.claude/memories/
+.codex/memories/

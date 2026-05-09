@@ -54,3 +54,16 @@ backlink
 Backlink
 Ashby
 wordlists
+agentsmd
+agentsskills
+claudecode
+codexcli
+geminicli
+opencode
+copilotcli
+deepagents
+factorydroid
+qwencode
+rovodev
+dyoshikawa
+jsonc

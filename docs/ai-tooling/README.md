@@ -38,7 +38,7 @@ Running `bun run rulesync` regenerates:
 | `.agents/memories/*.md` | shared, referenced by both |
 | `.mcp.json` | Claude Code MCP loader |
 
-These files are **committed** (so teammates without rulesync can still read them) but they should never be hand-edited — edit `.rulesync/` and regenerate.
+These files are **NOT committed** — `.rulesync/` is the only source of truth in git. They appear locally after `bun install` (a `postinstall` script runs `rulesync generate`). Never hand-edit them; edits don't survive the next regenerate.
 
 ## How agents discover tenex's rules
 

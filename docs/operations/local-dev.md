@@ -25,7 +25,9 @@ The Infisical CLI ships as a workspace devDep (`@infisical/cli`); no global inst
 ```sh
 git clone <repo>
 cd tenex
-bun install
+bun install                        # runs `rulesync generate` via postinstall —
+                                   # CLAUDE.md, AGENTS.md, .claude/, .codex/, .agents/
+                                   # appear locally (gitignored; .rulesync/ is the source)
 ```
 
 Then export the Infisical Machine Identity creds in `~/.zshrc` (one-time):

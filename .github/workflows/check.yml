@@ -37,21 +37,8 @@ jobs:
           key: turbo-${{ runner.os }}-${{ hashFiles('bun.lock', 'turbo.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
           restore-keys: turbo-${{ runner.os }}-
 
-      - name: Install dependencies
+      - name: Install dependencies (runs rulesync generate via postinstall)
         run: bun install --frozen-lockfile
 
       - name: Check (lint · spell · typecheck · test)
         run: bun run check
-
-      - name: Rulesync drift gate
-        run: |
-          bun run rulesync
-          if ! git diff --exit-code; then
-            echo ""
-            echo "ERROR: rulesync drift detected."
-            echo "The following generated files differ from what .rulesync/ sources produce:"
-            git diff --name-only
-            echo ""
-            echo "Fix: run 'bun run rulesync' locally and commit the result."
-            exit 1
-          fi

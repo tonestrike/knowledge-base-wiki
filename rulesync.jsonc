@@ -1,0 +1,32 @@
+// rulesync configuration — single source of truth for AI-tool config.
+//
+// Adding a new harness is a one-line change to "targets". Adding a new
+// content type is a one-line change to "features". Per-rule and per-skill
+// frontmatter can narrow targets via `targets: ["claudecode"]` etc.
+//
+// Lockfile (rulesync.lock) tracks declarative sources for remote skills.
+{
+  // Tools whose config files we generate.
+  // Matrix of supported targets at https://github.com/dyoshikawa/rulesync.
+  // To add e.g. cursor: append "cursor" and re-run `bun run rulesync`.
+  "targets": ["claudecode", "codexcli", "agentsmd", "agentsskills"],
+
+  // Content types we author under .rulesync/.
+  // Add "subagents" when we author any; "commands" when we author any.
+  "features": ["rules", "mcp", "skills"],
+
+  // Declarative remote skill imports. Each entry is resolved to a commit
+  // SHA on `rulesync install` and tracked in rulesync.lock with a SHA-256
+  // integrity hash.
+  //
+  // Example (uncomment to enable mattpocock's grill-me skill, pinned):
+  // "sources": [
+  //   {
+  //     "type": "github",
+  //     "repo": "mattpocock/skills",
+  //     "ref": "main",
+  //     "skills": ["grill-me", "grill-with-docs", "tdd", "diagnose"]
+  //   }
+  // ]
+  "sources": []
+}

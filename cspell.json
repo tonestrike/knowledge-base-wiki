@@ -12,7 +12,15 @@
     "bun.lock",
     ".claude/plugins/cache/**",
     "CLAUDE.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    ".mcp.json",
+    ".claude/rules/**",
+    ".claude/skills/**",
+    ".codex/rules/**",
+    ".codex/skills/**",
+    ".codex/config.toml",
+    ".agents/rules/**",
+    ".agents/skills/**"
   ],
   "dictionaryDefinitions": [
     {

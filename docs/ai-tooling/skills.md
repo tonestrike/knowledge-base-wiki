@@ -1,6 +1,6 @@
 # Skills inventory
 
-Skills are reusable agent capabilities defined as a directory with a `SKILL.md` (Agent Skills spec). They live in [`skills/`](../../skills/) at the repo root. `.claude/skills/` and `.codex/skills/` are symlinks to `skills/`, so both Claude Code and Codex auto-discover the same files.
+Skills are reusable agent capabilities defined as a directory with a `SKILL.md` (Agent Skills spec). They live under [`.rulesync/skills/`](../../.rulesync/skills/) and are emitted to every target listed in `rulesync.jsonc` via `bun run rulesync`. Currently that means `.claude/skills/`, `.codex/skills/`, and `.agents/skills/` (the last is the cross-tool `agentsskills` fallback for harnesses that don't have native skill support).
 
 ## Table of contents
 
@@ -33,13 +33,25 @@ Planned candidates (promote from how-to to skill if they get used heavily):
 
 ## Recommended community skills
 
-The most reputable non-Anthropic skill collection is **`mattpocock/skills`** (67.8k★, daily commits). To install:
+The most reputable non-Anthropic skill collection is **`mattpocock/skills`** (67.8k★, daily commits). Don't copy by hand — pin them via `rulesync.jsonc` `sources`:
 
-```sh
-npx skills@latest add mattpocock/skills
+```jsonc
+// rulesync.jsonc
+{
+  "sources": [
+    {
+      "type": "github",
+      "repo": "mattpocock/skills",
+      "ref": "main",
+      "skills": ["grill-me", "grill-with-docs", "tdd", "diagnose", "to-prd", "to-issues", "improve-codebase-architecture", "git-guardrails-claude-code"]
+    }
+  ]
+}
 ```
 
-This drops the pack into a temp dir; cherry-pick into `skills/` at the repo root. Recommended subset for a TypeScript-heavy DDD repo:
+Then `bun run rulesync:install` resolves to a commit SHA + writes `rulesync.lock`; `bun run rulesync` emits the imported skills alongside ours. Refresh with `bunx --bun rulesync install --update`. CI uses `bun run rulesync:install:frozen` to fail on upstream drift.
+
+Recommended subset for a TypeScript-heavy DDD repo:
 
 | Skill | What it does | Why we want it |
 |---|---|---|
@@ -56,7 +68,7 @@ Skip the rest of Pocock's pack: `caveman` (compression mode), `zoom-out`, `proto
 
 ## Authoring a new skill
 
-1. Create `skills/<name>/SKILL.md` with frontmatter:
+1. Create `.rulesync/skills/<name>/SKILL.md` with frontmatter:
    ```markdown
    ---
    name: <name>
@@ -68,7 +80,17 @@ Skip the rest of Pocock's pack: `caveman` (compression mode), `zoom-out`, `proto
    <body — instructions, examples, scripts, references>
    ```
 2. Optionally add scripts, examples, or supporting files in the same directory.
-3. Both Claude Code and Codex pick it up automatically (no rebuild step).
+3. Run `bun run rulesync` to fan the skill out to every target in `rulesync.jsonc`.
 4. Add a row to the [tenex-specific skills](#tenex-specific-skills) table above with **what it does** and **when an agent should invoke it**.
 
 The trigger description is the most important field — it's what the agent reads when deciding whether to use the skill. Be specific about the situation, not the steps.
+
+To narrow a skill to specific tools, use frontmatter:
+
+```yaml
+---
+name: claude-only-skill
+targets: ["claudecode"]            # emits only to .claude/skills/, not codex/agents
+description: "..."
+---
+```
