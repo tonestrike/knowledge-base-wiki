@@ -17,16 +17,18 @@
 
   // Declarative remote skill imports. Each entry is resolved to a commit
   // SHA on `rulesync install` and tracked in rulesync.lock with a SHA-256
-  // integrity hash.
-  //
-  // Example (uncomment to enable mattpocock's grill-me skill, pinned):
-  // "sources": [
-  //   {
-  //     "type": "github",
-  //     "repo": "mattpocock/skills",
-  //     "ref": "main",
-  //     "skills": ["grill-me", "grill-with-docs", "tdd", "diagnose"]
-  //   }
-  // ]
-  "sources": []
+  // integrity hash. `bun run rulesync:install` fetches into
+  // .rulesync/skills/.curated/<name>/, then `bun run rulesync` re-emits to
+  // every target's skills directory.
+  "sources": [
+    // Vercel's official AI SDK skill — generateObject / streamObject /
+    // streamText conventions, provider switching, prompt caching primitives.
+    // Drives the Phase 2 backend infrastructure layers under
+    // packages/domains/<ctx>/infrastructure/.
+    { "source": "vercel/ai", "skills": ["use-ai-sdk"] },
+
+    // rulesync's own skill — how to manage .rulesync/, targets, features,
+    // and declarative sources.
+    { "source": "dyoshikawa/rulesync", "skills": ["rulesync"] }
+  ]
 }

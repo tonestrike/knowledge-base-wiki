@@ -288,6 +288,25 @@ Every state is named, designed, and screenshot-grade. No half-built surfaces.
 | Compile cost at 20 docs blows budget | Low–Medium | Medium | Haiku for high-volume Researcher + Linker + IndexBuilder; Sonnet only for Drafter + Synthesizer + SchemaInferrer; Opus only for Verifier. |
 | GSuite Drive scope verification stalls | Low | Medium | Use my dev account's user-tier consent screen; one tester is sufficient for demo. |
 
+### 5.1.1 Risk-spike outcomes (Phase 1.A, 2026-05-09)
+
+Spike branch (`spike/1.A-risk-spike`, never merged) measured the live happy path on a 5-PDF fixture (Berkshire Hathaway shareholder letters 2020–2024). Stack: `googleapis` 144 + OAuth desktop client + `pdfjs-dist` 4.10 + Vercel AI SDK 6 + `@openrouter/ai-sdk-provider` 2.9 routed at `https://openrouter.ai/api`.
+
+| Risk | Outcome | Recommendation |
+|---|---|---|
+| Drive auth viability | OAuth happy path completed end-to-end with `drive.readonly` scope on dev account; folder list returns under 1 s once the Drive API is enabled on the GCP project. | Ship single-user OAuth in v1. The redirect URI `http://127.0.0.1:8765/callback` works for the desktop / one-shot CLI flow; the deployed app uses `https://api.tenex.localhost/auth/google/callback` (portless) in dev and the Workers domain in prod. |
+| Per-doc compile latency (5 PDFs, sequential Drafter + per-claim Verifier ×3 each + 10× planted determinism) | 176.5 s wallclock total: schema 12 s, 5 drafts averaging 16 s each, 30 verify calls averaging 3 s each. | Parallelize Drafter fan-out in 2.A — target <60 s end-to-end on 20 docs. Per-claim Verifier already parallel-safe (no inter-claim dependency). |
+| Token cost per 5-PDF compile | $0.6951 total — schema $0.060, 5 drafts $0.124, 25 in-run verifies + 10 planted-determinism verifies $0.511. Per-PDF amortized: $0.139. | Linear scaling forecast for 20 PDFs is ~$2.80, well under the $5 ceiling. Haiku for Researcher / Linker / IndexBuilder in Phase 2.A keeps the marginal cost flat as N grows. |
+| Span-citation accuracy through PDF.js extraction | 20 / 20 sampled spans round-tripped exactly (`text.slice(span.start, span.end) === span.text`) across all 5 PDFs. | Reuse the same extractor pattern in 2.A; freeze on `pdfjs-dist` 4.10. The legacy `pdfjs-dist/legacy/build/pdf.mjs` build is what works under Bun. |
+| Verifier-on-Opus determinism on planted contradiction | **10 / 10 caught.** Verifier with `claude-opus-4-7` at `temperature: 0` returned `verdict: "contradicted"` on every run of the NRR=110% / cited span says 105% pair. | Pin model + temperature in production. Deviation budget: if Phase-2 monitoring sees fewer than 10/10 on the same probe, widen the cited-text window before changing models. Cost at this rate is ~$0.027 per Verifier call; 1 lint pass over a 20-claim wiki is ~$0.55. |
+
+Implementation notes that propagated forward from the spike (also captured in commit messages on the spike branch):
+- The Anthropic SDK's prefill-`{` trick to force JSON output is **rejected by OpenRouter's Opus 4.7 endpoint** (Bedrock returns 400 "Provider returned error"); rely on Vercel AI SDK's `generateObject` instead, which uses tool-call structured output under the hood.
+- Bedrock rejects JSON-Schema `minItems`/`maxItems` values other than 0 or 1; encode array length constraints in the prompt + `.refine()` post-validation, not in the Zod schema metadata.
+- Phase 2's domain `infrastructure/` layers should adopt Vercel AI SDK + `@openrouter/ai-sdk-provider` rather than raw `@anthropic-ai/sdk` — the spike proves the path and the JSON-parsing failure modes the SDK abstracts away cost real time to debug otherwise.
+
+Raw run output (per-call latency + token + USD table, schema, claims, verdicts) is in `scripts/spike/out/report.md` on the spike branch; the branch itself is deleted post-merge of this append.
+
 ### 5.2 What we deliberately did NOT specify (left to the implementer)
 
 - **Per-procedure Zod schemas.** Contract shapes described in prose here; full Zod schemas are a Phase-0 deliverable.
