@@ -11,17 +11,38 @@
   }
 
   .prose-magazine {
-    @apply font-serif text-[18px] leading-[1.7];
+    @apply font-serif text-[18px] leading-[1.7] text-foreground;
     max-width: 60ch;
   }
 
+  .prose-magazine p {
+    @apply mt-4;
+  }
+
+  /* Scoped shimmer — only the cited run inside a prose segment carries
+     the wavy underline + sweep. Hovering reveals provenance without
+     drowning the paragraph (spec §4.3 #6). */
   .span-shimmer {
     text-decoration: underline wavy hsl(var(--accent));
     text-underline-offset: 4px;
     text-decoration-thickness: 2px;
+    transition: text-decoration-color 200ms ease-out;
   }
 
   .span-shimmer:hover {
     animation: shimmer 1.4s ease-in-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .span-shimmer {
+      animation: none !important;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

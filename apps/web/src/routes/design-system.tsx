@@ -1,5 +1,6 @@
 import { mockTurn } from '@package/contracts/chat';
-import type { Artifact, ArtifactKind } from '@package/contracts/shared';
+import type { Artifact, ArtifactKind, Citation } from '@package/contracts/shared';
+import { citationId, sourceId } from '@package/contracts/shared';
 import { mockLintFinding, mockUnsupportedFinding } from '@package/contracts/verification';
 import { mockWikiPage } from '@package/contracts/wiki';
 import type { ReactNode } from 'react';
@@ -11,8 +12,10 @@ import { EmptyState } from '../components/states/empty.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
 import { NoResultsState } from '../components/states/no-results.tsx';
+import { ThemeToggle } from '../components/theme-toggle.tsx';
 import { Button } from '../components/ui/button.tsx';
 import { WikiPageView } from '../components/wiki-page/wiki-page.tsx';
+import { useLiveMode } from '../lib/live-mode.tsx';
 
 const ARTIFACT_KINDS: ArtifactKind[] = [
   'ComparisonTable',
@@ -25,6 +28,18 @@ const ARTIFACT_KINDS: ArtifactKind[] = [
   'Markdown',
 ];
 
+const FIXTURE_CITATION: Citation = {
+  id: citationId('aaaaaaaa-1111-4222-8333-444444444444'),
+  label: 'Q3 minutes, p.4',
+  span: {
+    sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
+    byteRange: { start: 1240, end: 1410 },
+    contentHash: 'sha256:fixtureq3boardminutes',
+  },
+};
+
+const FIXTURE_DEMO_RUN_ID = '33333333-2222-4333-8444-555555555555';
+
 interface Section {
   name: string;
   node: ReactNode;
@@ -32,7 +47,10 @@ interface Section {
 
 const sections: Section[] = [
   { name: 'WikiPage (magazine layout)', node: <WikiPageView page={mockWikiPage()} /> },
-  { name: 'CompileTheater', node: <CompileTheater /> },
+  {
+    name: 'CompileTheater (six lanes + schema reveal + flying source cards + emerging pages)',
+    node: <CompileTheater compileRunId={FIXTURE_DEMO_RUN_ID} />,
+  },
   {
     name: 'AnswerSegment — full streamed turn (prose + table + citation chip + span shimmer)',
     node: (
@@ -41,6 +59,17 @@ const sections: Section[] = [
           <AnswerSegmentView key={`seg-${i}-${seg.kind}`} segment={seg} />
         ))}
       </div>
+    ),
+  },
+  {
+    name: 'Span shimmer — span-anchored cited run inside a prose segment',
+    node: (
+      <AnswerSegmentView
+        segment={{
+          kind: 'prose',
+          text: 'Q3 NRR landed at [[cite:aaaaaaaa-1111-4222-8333-444444444444]]110%[[/cite]], four points above the [[cite:aaaaaaaa-1111-4222-8333-444444444444]]106% target[[/cite]].',
+        }}
+      />
     ),
   },
   {
@@ -84,16 +113,33 @@ const sections: Section[] = [
 ];
 
 export function DesignSystemRoute() {
+  const { live, setLive } = useLiveMode();
   return (
     <main className="mx-auto max-w-6xl space-y-16 px-6 py-12">
-      <header>
-        <h1 className="font-serif text-4xl">Design system</h1>
-        <p className="mt-2 text-muted-foreground">
-          Live render of every spectacular element against contract mocks.
-        </p>
-        <p className="mt-2 font-mono text-xs text-muted-foreground">
-          Closed registry kinds: {Object.keys(ArtifactRegistry).sort().join(', ')}
-        </p>
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="font-serif text-4xl tracking-tight">Design system</h1>
+          <p className="mt-2 text-muted-foreground">
+            Live render of every spectacular element against contract mocks.
+          </p>
+          <p className="mt-2 font-mono text-xs text-muted-foreground">
+            Closed registry kinds: {Object.keys(ArtifactRegistry).sort().join(', ')}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              checked={live}
+              onChange={(e) => setLive(e.target.checked)}
+              className="accent-accent"
+            />
+            <span className="font-mono uppercase tracking-widest">
+              {live ? 'live SSE' : 'static gallery'}
+            </span>
+          </label>
+          <ThemeToggle />
+        </div>
       </header>
       {sections.map((s) => (
         <section key={s.name}>
@@ -108,10 +154,7 @@ export function DesignSystemRoute() {
 }
 
 function ArtifactDemo({ kind }: { kind: ArtifactKind }) {
-  const fixture = findArtifactFixture(kind);
-  if (!fixture) {
-    return <p className="text-sm text-muted-foreground">(no fixture; populate in 2.C mocks)</p>;
-  }
+  const fixture = findArtifactFixture(kind) ?? synthesizeFixture(kind);
   return <ArtifactView artifact={fixture} />;
 }
 
@@ -121,4 +164,117 @@ function findArtifactFixture(kind: ArtifactKind): Artifact | undefined {
     if (seg.kind === 'artifact' && seg.artifact.kind === kind) return seg.artifact;
   }
   return undefined;
+}
+
+/**
+ * Minimal fallbacks for kinds the contract mocks don't yet exercise. Keeps
+ * the gallery exhaustive (eight kinds × at least one fixture each) so the
+ * snapshot story doesn't regress when the registry is extended.
+ */
+function synthesizeFixture(kind: ArtifactKind): Artifact {
+  const citations = [FIXTURE_CITATION];
+  switch (kind) {
+    case 'Timeline':
+      return {
+        kind: 'Timeline',
+        props: {
+          events: [
+            { at: '2026-01-15', label: 'Plan circulated', description: 'Board reads pre-read.' },
+            { at: '2026-02-03', label: 'Decision approved', citationId: FIXTURE_CITATION.id },
+            { at: '2026-03-12', label: 'EMEA rollout begins' },
+          ],
+        },
+        citations,
+      };
+    case 'LineChart':
+      return {
+        kind: 'LineChart',
+        props: {
+          xLabel: 'Quarter',
+          yLabel: 'NRR (%)',
+          series: [
+            {
+              name: 'Actual',
+              points: [
+                { x: 'Q1', y: 101 },
+                { x: 'Q2', y: 105 },
+                { x: 'Q3', y: 110, citationId: FIXTURE_CITATION.id },
+              ],
+            },
+            {
+              name: 'Target',
+              points: [
+                { x: 'Q1', y: 102 },
+                { x: 'Q2', y: 104 },
+                { x: 'Q3', y: 106 },
+              ],
+            },
+          ],
+        },
+        citations,
+      };
+    case 'BarChart':
+      return {
+        kind: 'BarChart',
+        props: {
+          xLabel: 'Region',
+          yLabel: 'Pipeline ($M)',
+          bars: [
+            { x: 'NA', y: 12.4 },
+            { x: 'EMEA', y: 8.1, citationId: FIXTURE_CITATION.id },
+            { x: 'APAC', y: 4.6 },
+          ],
+        },
+        citations,
+      };
+    case 'KeyMetric':
+      return {
+        kind: 'KeyMetric',
+        props: {
+          label: 'Q3 NRR',
+          value: '110%',
+          delta: '+4 pts',
+          trend: 'up',
+          citationId: FIXTURE_CITATION.id,
+        },
+        citations,
+      };
+    case 'CodeBlock':
+      return {
+        kind: 'CodeBlock',
+        props: {
+          language: 'typescript',
+          source: 'export const NRR = 1.10; // [[cite: Q3 minutes, p.4]]\n',
+        },
+        citations,
+      };
+    case 'Quote':
+      return {
+        kind: 'Quote',
+        props: {
+          text: 'EMEA expansion is approved with a $2M budget cap.',
+          attribution: 'Board minutes, Q3',
+          citationId: FIXTURE_CITATION.id,
+        },
+        citations,
+      };
+    case 'Markdown':
+      return {
+        kind: 'Markdown',
+        props: {
+          body: '## Decision\n\nApproved EMEA expansion with a **$2M budget cap**.\n\n- Board reviewed Q3 plan\n- 9 of 11 directors voted yes',
+        },
+        citations,
+      };
+    default:
+      // ComparisonTable already comes from mockTurn(); fall through to a minimal table.
+      return {
+        kind: 'ComparisonTable',
+        props: {
+          columns: ['Metric', 'Value'],
+          rows: [{ cells: [{ value: 'Q3 NRR' }, { value: '110%' }] }],
+        },
+        citations,
+      };
+  }
 }
