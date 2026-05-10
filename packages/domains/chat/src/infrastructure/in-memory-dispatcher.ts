@@ -99,9 +99,27 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
   }): Promise<void> => {
     const key = subscribeKey(args.conversationId, args.turnId);
     try {
-      const { findings } = await researchQuestion(deps, {
+      // Emit AnswerStarted + ResearchStarted up front so the UI can flip
+      // into the "Researcher running" state immediately (the LLM call
+      // below blocks for several seconds — without these the user sees a
+      // blank chat with no progress).
+      emit(key, { kind: 'AnswerStarted', turnId: args.turnId });
+      emit(key, {
+        kind: 'ResearchStarted',
+        turnId: args.turnId,
+        model: 'anthropic/claude-sonnet-4.6',
+      });
+
+      const { findings, pages } = await researchQuestion(deps, {
         wikiId: args.wikiId,
         question: args.question,
+      });
+
+      emit(key, {
+        kind: 'ResearchCompleted',
+        turnId: args.turnId,
+        candidatePageCount: pages.length,
+        findingCount: findings.length,
       });
 
       // SF-CHAT-2: if the Turn vanished between `ask` insert and dispatcher
@@ -114,11 +132,20 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
         );
       }
 
+      emit(key, {
+        kind: 'SynthesisStarted',
+        turnId: args.turnId,
+        model: 'anthropic/claude-sonnet-4.6',
+      });
+
       let working: Turn = turn;
       for await (const evt of synthesizeAnswer(
         { synthesizer: deps.synthesizer, sourceHashes: deps.sourceHashes },
         { turnId: args.turnId, question: args.question, findings },
       )) {
+        // Skip the use-case's own AnswerStarted — we already fired one
+        // before research kicked off.
+        if (evt.kind === 'AnswerStarted') continue;
         emit(key, evt);
         if (evt.kind === 'AnswerSegment') {
           working = Turn.appendSegment(working, evt.segment);
