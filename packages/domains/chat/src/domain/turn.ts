@@ -27,7 +27,13 @@ export const Turn = {
     });
   },
   finish(t: Turn, at: string): Turn {
-    if (t.finishedAt) return t;
+    // SF-CHAT-11: finishing twice is a state-machine bug (the dispatcher only
+    // emits one AnswerFinished). Throwing surfaces it through the outer catch
+    // as AnswerFailed instead of silently no-oping and leaving the second
+    // finishedAt timestamp lost.
+    if (t.finishedAt) {
+      throw new Error(`Turn ${t.id} already finished at ${t.finishedAt}`);
+    }
     return Object.freeze({ ...t, finishedAt: at });
   },
 };

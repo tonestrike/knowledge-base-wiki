@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AnswerEvent } from '@package/contracts/chat';
-import { citationId, sourceId, turnId } from '@package/contracts/shared';
+import { citationId, contentHash, sourceId, turnId } from '@package/contracts/shared';
 import type { Citation } from '@package/contracts/shared';
 import type { Synthesizer, SynthesizerEvent } from './ports.ts';
 import { synthesizeAnswer } from './synthesize-answer.ts';
@@ -13,7 +13,7 @@ const citation = (id: string): Citation => ({
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start: 0, end: 50 },
-    contentHash: 'sha256:abc',
+    contentHash: contentHash('sha256:abc'),
   },
 });
 

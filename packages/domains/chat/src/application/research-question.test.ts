@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { citationId, sourceId, wikiId, wikiPageId } from '@package/contracts/shared';
+import { citationId, contentHash, sourceId, wikiId, wikiPageId } from '@package/contracts/shared';
 import type { Citation } from '@package/contracts/shared';
 import type { Researcher, WikiReader } from './ports.ts';
 import { researchQuestion } from './research-question.ts';
@@ -14,7 +14,7 @@ const cit: Citation = {
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start: 0, end: 50 },
-    contentHash: 'sha256:abc',
+    contentHash: contentHash('sha256:abc'),
   },
 };
 

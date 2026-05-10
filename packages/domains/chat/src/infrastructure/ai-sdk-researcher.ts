@@ -56,6 +56,11 @@ export interface AiSdkResearcherOptions {
  * are already present in the candidate pages. The use-case
  * `researchQuestion` re-validates the citation ids before they reach the
  * Synthesizer.
+ *
+ * SF-CHAT-5: every short-circuit branch (no candidates, unknown page id,
+ * empty citations) logs a structured warning so the operator can spot
+ * "Researcher returned 0 findings" in production logs without re-running
+ * the prompt locally.
  */
 export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher => ({
   async research(input: ResearcherInput): Promise<ResearcherOutput> {
@@ -65,7 +70,14 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
       limit: opts.candidateLimit ?? 8,
     });
 
-    if (candidates.length === 0) return { pages: [], findings: [] };
+    if (candidates.length === 0) {
+      console.warn('[chat.ai-sdk-researcher] empty findings: no candidate pages', {
+        wikiId: input.wikiId,
+        question: input.question,
+        candidateLimit: opts.candidateLimit ?? 8,
+      });
+      return { pages: [], findings: [] };
+    }
 
     const result = await generateObject({
       model: opts.model,
@@ -82,16 +94,41 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
     const findings: ResearcherOutput['findings'] = [];
     for (const f of result.object.findings) {
       const page = byPageId.get(f.wikiPageId as WikiPageId);
-      if (!page) continue;
+      if (!page) {
+        console.warn('[chat.ai-sdk-researcher] dropping finding with unknown page id', {
+          wikiId: input.wikiId,
+          question: input.question,
+          unknownPageId: f.wikiPageId,
+          candidatePageIds: [...byPageId.keys()],
+        });
+        continue;
+      }
       const cites = f.citationIds
         .map((id) => page.citations.find((c) => c.id === id))
         .filter((c): c is NonNullable<typeof c> => Boolean(c));
-      if (cites.length === 0) continue;
+      if (cites.length === 0) {
+        console.warn('[chat.ai-sdk-researcher] dropping finding with no resolvable citations', {
+          wikiId: input.wikiId,
+          question: input.question,
+          wikiPageId: f.wikiPageId,
+          requestedCitationIds: f.citationIds,
+          availableCitationIds: page.citations.map((c) => c.id),
+        });
+        continue;
+      }
       findings.push({
         wikiPageId: page.id,
         quoteText: f.quoteText,
         citationIds: f.citationIds,
         citations: cites,
+      });
+    }
+    if (findings.length === 0) {
+      console.warn('[chat.ai-sdk-researcher] empty findings: model returned 0 usable findings', {
+        wikiId: input.wikiId,
+        question: input.question,
+        candidatePageCount: candidates.length,
+        modelFindingCount: result.object.findings.length,
       });
     }
     return { pages: candidates, findings };

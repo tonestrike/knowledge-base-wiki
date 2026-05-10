@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { citationId, sourceId } from '@package/contracts/shared';
+import { citationId, contentHash, sourceId } from '@package/contracts/shared';
 import type { Citation } from '@package/contracts/shared';
 import { createMemorySourceHashVerifier } from './verify-citation.ts';
 
@@ -8,13 +8,13 @@ const sliceHash = async (s: string): Promise<string> =>
     .map((c) => c.charCodeAt(0).toString(16))
     .join('')}`;
 
-const cit = (start: number, end: number, contentHash: string): Citation => ({
+const cit = (start: number, end: number, hash: string): Citation => ({
   id: citationId('aaaaaaaa-1111-4222-8333-444444444444'),
   label: 'fixture',
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start, end },
-    contentHash,
+    contentHash: contentHash(hash),
   },
 });
 
@@ -33,7 +33,7 @@ describe('createMemorySourceHashVerifier', () => {
       readSourceText: async () => 'hello world',
       sha256Hex: sliceHash,
     });
-    const out = await verifier.verify(cit(0, 5, 'sha256:wrong'));
+    const out = await verifier.verify(cit(0, 5, 'sha256:deadbeef'));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toMatch(/hash mismatch/);
   });

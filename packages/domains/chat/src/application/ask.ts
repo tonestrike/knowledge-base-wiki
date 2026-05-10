@@ -1,5 +1,6 @@
 import { type ConversationId, type TurnId, turnId } from '@package/contracts/shared';
 import { Turn } from '../domain/turn.ts';
+import { ConversationNotFoundError } from './errors.ts';
 import type { ChatDeps } from './ports.ts';
 
 export async function ask(
@@ -7,7 +8,7 @@ export async function ask(
   input: { conversationId: ConversationId; question: string },
 ): Promise<{ turnId: TurnId }> {
   const c = await deps.conversations.findById(input.conversationId);
-  if (!c) throw new Error(`Conversation not found: ${input.conversationId}`);
+  if (!c) throw new ConversationNotFoundError(input.conversationId);
 
   const id = turnId(deps.newId());
   const turn = Turn.start({

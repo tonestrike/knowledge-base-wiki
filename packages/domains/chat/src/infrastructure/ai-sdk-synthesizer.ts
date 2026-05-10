@@ -77,7 +77,17 @@ export interface AiSdkSynthesizerOptions {
   temperature?: number;
   /** Defaults to 4000. */
   maxTokens?: number;
+  /** Optional model identifier for log lines (e.g. 'anthropic/claude-sonnet-4.6'). */
+  modelName?: string;
 }
+
+const errorId = (): string => {
+  const r =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return r.slice(0, 8);
+};
 
 /**
  * Bridge `streamObject({ output: 'array' })` into the domain's `Synthesizer`
@@ -88,25 +98,55 @@ export interface AiSdkSynthesizerOptions {
  * No Anthropic prefill; no `minItems`/`maxItems` other than 0/1 in the
  * schema. The constraints live in the prompt and in the post-stream
  * `Artifact.safeParse(...)` in the use-case.
+ *
+ * SF-CHAT-4: errors thrown by `streamObject` (or its element iterator) are
+ * caught at the adapter boundary, logged with `errorId`, model name, and the
+ * number of segments emitted so far, then re-thrown so the use-case's outer
+ * catch can shape them into an `AnswerFailed` event with the same correlation
+ * id.
  */
 export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesizer => ({
   async *stream(input: SynthesizerInput): AsyncIterable<SynthesizerEvent> {
-    const result = streamObject({
-      model: opts.model,
-      output: 'array',
-      schema: RawSegmentSchema,
-      schemaName: 'AnswerSegments',
-      schemaDescription: 'An ordered list of AnswerSegments composing the Answer.',
-      system: opts.systemPrompt ?? SYSTEM_PROMPT,
-      prompt: `Question: ${input.question}\n\nFindings:\n${renderFindings(input)}`,
-      temperature: opts.temperature ?? 0.4,
-      maxTokens: opts.maxTokens ?? 4000,
-    });
+    let result: ReturnType<typeof streamObject<z.infer<typeof RawSegmentSchema>>>;
+    try {
+      result = streamObject({
+        model: opts.model,
+        output: 'array',
+        schema: RawSegmentSchema,
+        schemaName: 'AnswerSegments',
+        schemaDescription: 'An ordered list of AnswerSegments composing the Answer.',
+        system: opts.systemPrompt ?? SYSTEM_PROMPT,
+        prompt: `Question: ${input.question}\n\nFindings:\n${renderFindings(input)}`,
+        temperature: opts.temperature ?? 0.4,
+        maxTokens: opts.maxTokens ?? 4000,
+      });
+    } catch (err) {
+      const id = errorId();
+      console.error('[chat.ai-sdk-synthesizer] streamObject construction failed', {
+        errorId: id,
+        modelName: opts.modelName,
+        err:
+          err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
+      });
+      throw err;
+    }
 
     let index = 0;
-    for await (const element of result.elementStream) {
-      yield { kind: 'segment', index, segment: toRawSegment(element) };
-      index += 1;
+    try {
+      for await (const element of result.elementStream) {
+        yield { kind: 'segment', index, segment: toRawSegment(element) };
+        index += 1;
+      }
+    } catch (err) {
+      const id = errorId();
+      console.error('[chat.ai-sdk-synthesizer] elementStream threw', {
+        errorId: id,
+        modelName: opts.modelName,
+        segmentsEmitted: index,
+        err:
+          err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
+      });
+      throw err;
     }
   },
 });

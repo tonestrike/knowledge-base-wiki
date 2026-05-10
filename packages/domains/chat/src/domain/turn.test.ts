@@ -43,7 +43,7 @@ describe('Turn', () => {
     expect(() => Turn.appendSegment(t, { kind: 'prose', text: 'c' })).toThrow(/finished/);
   });
 
-  it('finish is idempotent', () => {
+  it('throws when finishing a Turn twice (SF-CHAT-11)', () => {
     let t = Turn.start({
       id: tid,
       conversationId: cid,
@@ -51,7 +51,6 @@ describe('Turn', () => {
       createdAt: '2026-05-09T12:00:00.000Z',
     });
     t = Turn.finish(t, '2026-05-09T12:00:01.000Z');
-    const t2 = Turn.finish(t, '2026-05-09T12:00:02.000Z');
-    expect(t2.finishedAt).toBe('2026-05-09T12:00:01.000Z');
+    expect(() => Turn.finish(t, '2026-05-09T12:00:02.000Z')).toThrow(/already finished/);
   });
 });
