@@ -34,7 +34,9 @@ const FIXTURE_CITATION: Citation = {
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start: 1240, end: 1410 },
-    contentHash: contentHash('sha256:abcdef0123456789'),
+    contentHash: contentHash(
+      'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+    ),
   },
 };
 

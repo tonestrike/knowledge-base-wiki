@@ -26,23 +26,35 @@ export interface DomainEventMap {
     reason: 'fetch' | 'extract' | 'storage' | 'persist' | 'unknown';
     message: string;
   };
-  // 2.B — cross-context fan-out target for the verification pass.
+  // CompileFinished — wiki context emits when a CompileRun completes;
+  // verification subscribes to auto-trigger a LintRun for the affected Wiki.
+  // pageCount surfaces alongside finishedAt so downstream consumers can size
+  // the lint run without a follow-up read.
   CompileFinished: {
     compileRunId: string;
     wikiId: string;
+    finishedAt: string;
     pageCount: number;
   };
-  // Placeholder shapes for v1.1 — subscribers register against these names
-  // today as loud stubs (see wiki/cross-context-subscriptions.ts SF9). The
-  // shapes will firm up when chat (2.C) and verification (2.D) land their
-  // producer slices.
-  AnswerProduced: {
-    answerId: string;
-    sessionId: string;
+  LintRunFinished: {
+    lintRunId: string;
+    wikiId: string;
+    finishedAt: string;
+    findingCount: number;
   };
+  LintRunFailed: {
+    lintRunId: string;
+    wikiId: string;
+    failureMessage: string;
+    failedAt: string;
+  };
+  // CorrectionAccepted — emitted when a user applies a Correction; wiki
+  // context's handler patches the WikiPage paragraph (eventually consistent).
   CorrectionAccepted: {
-    claimId: string;
-    correctedClaimText: string;
+    lintFindingId: string;
+    wikiPageId: string;
+    replacementText: string;
+    acceptedAt: string;
   };
 }
 
