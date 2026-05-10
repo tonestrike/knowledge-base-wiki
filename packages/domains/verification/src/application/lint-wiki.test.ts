@@ -183,6 +183,26 @@ describe('lintWiki', () => {
     await lintWiki(r.deps, { lintRunId: lid, wikiId: wid });
     expect(r.emitted.map((e) => e.kind)).toEqual(['LintRunStarted', 'LintRunFinished']);
   });
+
+  it('isolates per-claim audit failures: one bad claim becomes one finding, the run finishes', async () => {
+    let call = 0;
+    const r = fakeRuntime(buildClaims(3), async () => {
+      call += 1;
+      if (call === 2) throw new Error('verifier blew up');
+      return { verdict: 'supported', evidenceText: 'ok' };
+    });
+    const out = await lintWiki(r.deps, { lintRunId: lid, wikiId: wid });
+    expect(r.inserted).toHaveLength(3);
+    expect(out.totalClaims).toBe(3);
+    // The failed audit becomes an unsupported finding (with synthetic
+    // Correction) rather than aborting the run. The final run is finished.
+    const finalRun = r.runUpdates.at(-1);
+    expect(finalRun?.status).toBe('finished');
+    expect(out.unsupportedCount).toBe(1);
+    const audited = r.emitted.filter((e) => e.kind === 'ClaimAudited');
+    expect(audited).toHaveLength(3);
+    expect(r.emitted.at(-1)?.kind).toBe('LintRunFinished');
+  });
 });
 
 // Type-check helpers above use these so biome doesn't trim them.
