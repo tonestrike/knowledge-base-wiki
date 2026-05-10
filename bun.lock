@@ -135,6 +135,7 @@
         "@orpc/server": "^1.14.2",
         "@package/contracts": "workspace:*",
         "@package/shared-kernel": "workspace:*",
+        "pdfjs-dist": "^4.10.38",
         "zod": "^3.24.1",
       },
       "devDependencies": {
@@ -178,6 +179,7 @@
       "version": "0.0.0",
       "devDependencies": {
         "@tooling/tsconfig": "workspace:*",
+        "@types/bun": "^1.2.18",
         "typescript": "^5.7.2",
       },
     },

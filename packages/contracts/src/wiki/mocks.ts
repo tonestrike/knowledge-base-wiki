@@ -2,6 +2,7 @@ import {
   citationId,
   claimId,
   compileRunId,
+  contentHash,
   folderId,
   sourceId,
   wikiId,
@@ -65,7 +66,7 @@ export const mockWikiPage = (overrides: Partial<WikiPage> = {}): WikiPage => ({
           span: {
             sourceId: SRC,
             byteRange: { start: 1240, end: 1410 },
-            contentHash: 'sha256:fixtureq3boardminutes',
+            contentHash: contentHash('sha256:fb1c4e3a7b0a4dabcdef'),
           },
         },
       ],
@@ -78,7 +79,7 @@ export const mockWikiPage = (overrides: Partial<WikiPage> = {}): WikiPage => ({
       span: {
         sourceId: SRC,
         byteRange: { start: 1240, end: 1410 },
-        contentHash: 'sha256:fixtureq3boardminutes',
+        contentHash: contentHash('sha256:fb1c4e3a7b0a4dabcdef'),
       },
     },
   ],

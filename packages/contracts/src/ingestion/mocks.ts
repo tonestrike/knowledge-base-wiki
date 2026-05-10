@@ -1,4 +1,4 @@
-import { folderId, sourceId } from '../shared/ids.ts';
+import { contentHash, folderId, sourceId } from '../shared/ids.ts';
 import type { IngestEvent } from './events.ts';
 import type { ListSourcesOutput, Source } from './sources.ts';
 
@@ -12,7 +12,7 @@ export const mockSource = (overrides: Partial<Source> = {}): Source => ({
   driveFileId: 'drive:abc',
   filename: 'q3-board-minutes.pdf',
   mime: 'application/pdf',
-  contentHash: 'sha256:fixtureq3boardminutes',
+  contentHash: contentHash('sha256:fb1c4e3a7b0a4dabcdef'),
   pageCount: 12,
   fetchedAt: '2026-05-09T12:00:00.000Z',
   ...overrides,
@@ -24,7 +24,7 @@ export const mockListSources = (): ListSourcesOutput => ({
     mockSource({
       id: SRC2,
       filename: 'q3-investor-update.pdf',
-      contentHash: 'sha256:fixtureq3investor',
+      contentHash: contentHash('sha256:fa1cab1edabcdef00012'),
       pageCount: 8,
     }),
   ],
