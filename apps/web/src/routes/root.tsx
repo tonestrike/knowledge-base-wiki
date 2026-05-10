@@ -1,5 +1,6 @@
 import type { Wiki } from '@package/contracts/wiki';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
@@ -13,18 +14,12 @@ const driveFolderIdFrom = (input: string): string => {
   return m?.[1] ?? trimmed;
 };
 
-// SF8 — Drive auth-failure heuristic. The oRPC server emits a typed error
-// code which surfaces in the message; we match common shapes so a future
-// server-side rename doesn't silently stop us from showing the Re-connect
-// button.
 const isDriveAuthError = (e: unknown): boolean => {
   const msg = (e as Error | undefined)?.message ?? '';
   return /NOT_AUTHENTICATED|missing Drive token|drive_unauthorized|401/i.test(msg);
 };
 
 const triggerDriveOauth = () => {
-  // Re-routes through the API which serves the OAuth start flow. The API
-  // sets the cookie and 302s back to '/'.
   window.location.assign('/api/auth/drive');
 };
 
@@ -35,35 +30,50 @@ export function RootRoute() {
 
   return (
     <AppShell>
-      <main className="mx-auto max-w-6xl space-y-12 px-6 py-12">
-        <header>
-          <h1 className="font-serif text-5xl tracking-tight">Your wikis</h1>
-          <p className="mt-3 max-w-prose text-muted-foreground">
-            Compile a Drive folder into a typed wiki you can chat with — and verify against the
-            original sources.
+      <main className="mx-auto max-w-6xl space-y-16 px-6 py-16">
+        <motion.header
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="space-y-3"
+        >
+          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">
+            Folder · Wiki · Verify
           </p>
-        </header>
+          <h1 className="font-serif text-6xl leading-[0.95] tracking-tight md:text-7xl">
+            Your wikis
+          </h1>
+          <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
+            Compile any folder of documents into a typed wiki you can chat with — every claim
+            anchored to the verbatim source bytes.
+          </p>
+        </motion.header>
 
-        <section>
-          <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+        <section className="space-y-4">
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
             Compiled wikis
           </h2>
           {wikis.isPending ? (
-            <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : wikis.isError ? (
-            <p className="mt-4 text-sm text-destructive">
+            <p className="text-sm text-destructive">
               Failed to load wikis: {(wikis.error as Error).message}
             </p>
           ) : wikis.data && wikis.data.items.length > 0 ? (
-            <ul className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {wikis.data.items.map((w) => (
-                <li key={w.id}>
+            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {wikis.data.items.map((w, i) => (
+                <motion.li
+                  key={w.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: i * 0.05 }}
+                >
                   <WikiCard wiki={w} />
-                </li>
+                </motion.li>
               ))}
             </ul>
           ) : (
-            <p className="mt-4 text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               No wikis yet — connect a Drive folder below to compile your first one.
             </p>
           )}
@@ -91,31 +101,34 @@ function WikiCard({ wiki }: { wiki: Wiki }) {
     : null;
 
   return (
-    <Link
-      to={`/wiki/${wiki.id}`}
-      className="block h-full rounded-lg border border-border bg-card/40 p-5 transition-colors hover:border-accent/50 hover:bg-card"
-    >
-      <p className="font-serif text-xl tracking-tight">{folderName}</p>
-      <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-        {wiki.pageCount} {wiki.pageCount === 1 ? 'page' : 'pages'}
-        {lastCompiled ? ` · compiled ${lastCompiled}` : ''}
-      </p>
-      <ul className="mt-3 flex flex-wrap gap-1.5">
-        {pageTypes.map((name) => (
-          <li
-            key={name}
-            className="rounded-full border border-accent/30 bg-accent/5 px-2 py-0.5 font-mono text-[10px] text-accent"
-          >
-            {name}
-          </li>
-        ))}
-        {wiki.schema.pageTypes.length > pageTypes.length ? (
-          <li className="font-mono text-[10px] text-muted-foreground">
-            +{wiki.schema.pageTypes.length - pageTypes.length}
-          </li>
-        ) : null}
-      </ul>
-    </Link>
+    <motion.div whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 22 }}>
+      <Link
+        to={`/wiki/${wiki.id}`}
+        className="group relative block h-full overflow-hidden rounded-lg border border-border bg-card/40 p-5 transition-colors hover:border-accent/60 hover:bg-card"
+      >
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/0 to-transparent transition-all duration-500 group-hover:via-accent/60" />
+        <p className="font-serif text-xl tracking-tight">{folderName}</p>
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          {wiki.pageCount} {wiki.pageCount === 1 ? 'page' : 'pages'}
+          {lastCompiled ? ` · ${lastCompiled}` : ''}
+        </p>
+        <ul className="mt-4 flex flex-wrap gap-1.5">
+          {pageTypes.map((name) => (
+            <li
+              key={name}
+              className="rounded-full border border-accent/30 bg-accent/5 px-2 py-0.5 font-mono text-[10px] text-accent"
+            >
+              {name}
+            </li>
+          ))}
+          {wiki.schema.pageTypes.length > pageTypes.length ? (
+            <li className="font-mono text-[10px] text-muted-foreground">
+              +{wiki.schema.pageTypes.length - pageTypes.length}
+            </li>
+          ) : null}
+        </ul>
+      </Link>
+    </motion.div>
   );
 }
 
@@ -129,52 +142,53 @@ function ConnectDriveCard() {
   const authFailure = register.isError && isDriveAuthError(register.error);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connect a Drive folder</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Paste a Google Drive folder URL or ID to register it for compile. You'll be prompted to
-          sign in to Google Drive on first use.
-        </p>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const id = driveFolderIdFrom(url);
-            if (id) register.mutate({ driveFolderId: id, name: 'Demo' });
-          }}
-        >
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://drive.google.com/drive/folders/..."
-            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <Button variant="accent" type="submit" disabled={register.isPending}>
-            {register.isPending ? 'Connecting…' : 'Connect'}
-          </Button>
-          <Button type="button" variant="outline" onClick={triggerDriveOauth}>
-            Sign in to Drive
-          </Button>
-        </form>
-        {/* SF8 — auth failure used to render a raw "NOT_AUTHENTICATED:
-            missing Drive token" string. Now we recognize the code and offer a
-            Re-connect button that triggers the OAuth flow. */}
-        {authFailure ? (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-verdict-contradicted/40 bg-verdict-contradicted/5 px-3 py-2">
-            <p className="text-xs">Drive isn&apos;t connected yet. Reconnect to continue.</p>
-            <Button variant="outline" size="sm" onClick={triggerDriveOauth}>
-              Re-connect Drive
-            </Button>
-          </div>
-        ) : register.isError ? (
-          <p className="text-xs text-verdict-contradicted">
-            {String((register.error as Error).message)}
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.1 }}
+    >
+      <Card className="border-accent/20 bg-accent/[0.02]">
+        <CardHeader>
+          <CardTitle className="font-serif text-2xl">Connect a Drive folder</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Paste a Google Drive folder URL or ID. You'll be prompted to sign in to Drive on first
+            use.
           </p>
-        ) : null}
-      </CardContent>
-    </Card>
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const id = driveFolderIdFrom(url);
+              if (id) register.mutate({ driveFolderId: id, name: 'Demo' });
+            }}
+          >
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <Button variant="accent" type="submit" disabled={register.isPending}>
+              {register.isPending ? 'Connecting…' : 'Connect'}
+            </Button>
+            <Button type="button" variant="outline" onClick={triggerDriveOauth}>
+              Sign in to Drive
+            </Button>
+          </form>
+          {authFailure ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+              <p className="text-xs">Drive isn&apos;t connected yet. Reconnect to continue.</p>
+              <Button variant="outline" size="sm" onClick={triggerDriveOauth}>
+                Re-connect Drive
+              </Button>
+            </div>
+          ) : register.isError ? (
+            <p className="text-xs text-destructive">{String((register.error as Error).message)}</p>
+          ) : null}
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }

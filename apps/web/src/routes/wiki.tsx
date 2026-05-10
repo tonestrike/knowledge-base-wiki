@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
@@ -22,13 +23,15 @@ export function WikiRoute() {
     ...orpc.wiki.listPages.queryOptions({ input: { wikiId, limit: 100 } }),
     enabled: !!wikiId,
   });
+  const folder = useQuery({
+    ...orpc.ingestion.getFolder.queryOptions({ input: { id: wiki.data?.folderId ?? '' } }),
+    enabled: !!wiki.data?.folderId,
+  });
 
   const start = useMutation({
     ...orpc.wiki.startCompile.mutationOptions(),
     onSuccess: (data) => setCompileRunId(data.compileRunId),
     onError: (e) => {
-      // SF5 — flip LiveMode → unavailable so the App-level banner offers
-      // a fall-back to mocks rather than rendering an empty theater.
       if (isBackendNotImplemented(e)) {
         markUnavailable('startCompile is not implemented in the current backend phase.');
       }
@@ -50,8 +53,6 @@ export function WikiRoute() {
     );
   }
 
-  // SF14 — getWiki errors used to leave the page rendering with a missing
-  // header silently; surface the failure with a Retry button instead.
   if (wiki.isError) {
     return (
       <AppShell>
@@ -66,18 +67,43 @@ export function WikiRoute() {
   }
 
   const pageCount = pages.data?.items.length ?? 0;
+  const headline = folder.data?.name ?? 'Wiki';
 
   return (
     <AppShell>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <header className="flex items-baseline justify-between">
-          <div>
-            <h1 className="font-serif text-3xl tracking-tight">Overview</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              PageTypes:{' '}
-              <span className="font-mono text-xs">
-                {wiki.data?.schema.pageTypes.map((p) => p.name).join(' · ')}
-              </span>
+      <main className="mx-auto max-w-7xl space-y-10 px-6 py-10">
+        <motion.header
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"
+        >
+          <div className="space-y-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
+              Wiki overview
+            </p>
+            <h1 className="font-serif text-5xl leading-tight tracking-tight">{headline}</h1>
+            <div className="flex flex-wrap gap-2">
+              {wiki.data?.schema.pageTypes.map((pt) => (
+                <motion.span
+                  key={pt.name}
+                  whileHover={{ y: -1 }}
+                  className="rounded-full border border-accent/30 bg-accent/5 px-2.5 py-1 font-mono text-[10px] tracking-wider text-accent"
+                >
+                  {pt.name}
+                </motion.span>
+              ))}
+            </div>
+            <p className="font-mono text-[11px] text-muted-foreground">
+              {pageCount} {pageCount === 1 ? 'page' : 'pages'} compiled
+              {wiki.data?.lastCompiledAt
+                ? ` · last ${new Date(wiki.data.lastCompiledAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}`
+                : ''}
             </p>
           </div>
           <Button
@@ -87,17 +113,13 @@ export function WikiRoute() {
           >
             {start.isPending ? 'Starting…' : pageCount === 0 ? 'Compile this folder' : 'Recompile'}
           </Button>
-        </header>
+        </motion.header>
 
-        {/* SF13 — startCompile errors used to be discarded; surface inline
-          so the user understands why the theater never appears. */}
         {start.isError ? (
-          <div className="mt-6">
-            <ErrorState
-              message={`Compile didn't start: ${(start.error as Error).message}`}
-              onRetry={startCompile}
-            />
-          </div>
+          <ErrorState
+            message={`Compile didn't start: ${(start.error as Error).message}`}
+            onRetry={startCompile}
+          />
         ) : null}
 
         {compileRunId ? (
@@ -110,38 +132,53 @@ export function WikiRoute() {
           />
         ) : null}
 
-        {/* SF14 — listPages errors should not silently render an empty
-          PageType column; show an inline error with retry. */}
         {pages.isError ? (
-          <div className="mt-12">
-            <ErrorState
-              message={`Failed to load pages: ${(pages.error as Error).message}`}
-              onRetry={() => pages.refetch()}
-            />
-          </div>
+          <ErrorState
+            message={`Failed to load pages: ${(pages.error as Error).message}`}
+            onRetry={() => pages.refetch()}
+          />
         ) : (
-          <section className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
-            {wiki.data?.schema.pageTypes.map((pt) => (
-              <div key={pt.name}>
-                <p className="font-mono text-xs uppercase tracking-widest text-accent">{pt.name}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{pt.description}</p>
-                <ul className="mt-3 space-y-1">
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
+            className="grid grid-cols-1 gap-x-8 gap-y-10 md:grid-cols-2 lg:grid-cols-3"
+          >
+            {wiki.data?.schema.pageTypes.map((pt, idx) => (
+              <motion.div
+                key={pt.name}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: idx * 0.04 }}
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
+                  {pt.name}
+                </p>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                  {pt.description}
+                </p>
+                <ul className="mt-3 space-y-1.5">
                   {pages.data?.items
                     .filter((p) => p.pageType === pt.name)
                     .map((p) => (
                       <li key={p.id}>
                         <Link
                           to={`/wiki/${wikiId}/page/${p.id}`}
-                          className="text-sm underline-offset-4 hover:text-accent hover:underline"
+                          className="group flex items-center gap-2 font-serif text-base transition-colors hover:text-accent"
                         >
-                          {p.title}
+                          <span className="border-b border-transparent group-hover:border-accent/50">
+                            {p.title}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-accent">
+                            →
+                          </span>
                         </Link>
                       </li>
                     ))}
                 </ul>
-              </div>
+              </motion.div>
             ))}
-          </section>
+          </motion.section>
         )}
       </main>
     </AppShell>

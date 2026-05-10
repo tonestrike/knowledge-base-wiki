@@ -46,10 +46,9 @@ export function CitationModal() {
       <DialogContent className="overflow-hidden p-0 sm:max-w-3xl">
         {active ? (
           <motion.div
-            layoutId={reduce ? undefined : `citation-${active.id}`}
-            initial={reduce ? { opacity: 0 } : false}
-            animate={reduce ? { opacity: 1 } : undefined}
-            transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 240, damping: 26 }}
             className="grid grid-rows-[auto_1fr_auto] bg-background"
           >
             <header className="flex items-center justify-between border-b border-border px-6 py-4">
