@@ -425,6 +425,30 @@ app.post('/__seed/wiki', async (c) => {
     .run();
   await env.DB.prepare('DELETE FROM wiki_pages WHERE wiki_id = ?').bind(body.wikiId).run();
   await env.DB.prepare('DELETE FROM wikis WHERE id = ?').bind(body.wikiId).run();
+  // Also drop any other wiki record sitting on the same folder_id (e.g. a
+  // half-finished compile-inferred wiki from a prior run) so the UNIQUE
+  // constraint on wikis.folder_id doesn't block re-seeding.
+  await env.DB.prepare(
+    'DELETE FROM citations WHERE claim_id IN (SELECT id FROM claims WHERE wiki_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE folder_id = ?)))',
+  )
+    .bind(body.folderId)
+    .run();
+  await env.DB.prepare(
+    'DELETE FROM claims WHERE wiki_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE folder_id = ?))',
+  )
+    .bind(body.folderId)
+    .run();
+  await env.DB.prepare(
+    'DELETE FROM backlinks WHERE from_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE folder_id = ?))',
+  )
+    .bind(body.folderId)
+    .run();
+  await env.DB.prepare(
+    'DELETE FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE folder_id = ?)',
+  )
+    .bind(body.folderId)
+    .run();
+  await env.DB.prepare('DELETE FROM wikis WHERE folder_id = ?').bind(body.folderId).run();
 
   await env.DB.prepare(
     'INSERT INTO wikis (id, folder_id, schema_json, created_at, updated_at, last_compiled_at, page_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
