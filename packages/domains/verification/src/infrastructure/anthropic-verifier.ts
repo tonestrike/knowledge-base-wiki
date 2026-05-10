@@ -44,7 +44,47 @@ export interface AnthropicVerifierOptions {
   appName?: string;
   appUrl?: string;
   maxTokens?: number;
+  // Bounded retry on transient OpenRouter errors. Default 3 attempts (= 1
+  // initial + 2 retries) with exponential backoff. See PR #6
+  // silent-failure-hunter finding 8.
+  maxAttempts?: number;
+  retryBaseDelayMs?: number;
+  // Injected for tests; in prod this is `setTimeout`-based.
+  sleep?: (ms: number) => Promise<void>;
 }
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// HTTP status codes worth retrying. 429 = rate limit; 5xx = server error or
+// upstream transient issue. 4xx other than 429 are caller bugs and must NOT
+// retry. Schema-validation rejections from generateObject (Vercel AI SDK
+// throws AI_NoObjectGeneratedError or AI_TypeValidationError) are also NOT
+// retried — same prompt + temperature 0 will reproduce the same bad output.
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+const isRetryable = (err: unknown): boolean => {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: unknown; statusCode?: unknown; name?: unknown };
+  // Schema-validation errors from Vercel AI SDK — never retry.
+  if (
+    typeof e.name === 'string' &&
+    /TypeValidation|NoObjectGenerated|InvalidArgument/i.test(e.name)
+  ) {
+    return false;
+  }
+  const status =
+    typeof e.status === 'number'
+      ? e.status
+      : typeof e.statusCode === 'number'
+        ? e.statusCode
+        : undefined;
+  if (status === undefined) {
+    // Network / fetch errors typically have no status — treat as transient.
+    return true;
+  }
+  return RETRYABLE_STATUSES.has(status);
+};
 
 // Wraps Vercel AI SDK + @openrouter/ai-sdk-provider. The 1.A spike proved this
 // path works; raw Anthropic-style prefill returns 400 against OpenRouter+Opus,
@@ -59,6 +99,9 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
   const modelId = opts.model ?? VERIFIER_MODEL;
   const temperature = opts.temperature ?? VERIFIER_TEMPERATURE;
   const maxTokens = opts.maxTokens ?? 800;
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
+  const baseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? 500);
+  const sleep = opts.sleep ?? defaultSleep;
 
   return {
     async audit({ claim, citedSlices }) {
@@ -67,18 +110,33 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
         .join('\n');
       const userPrompt = `Claim:\n${claim.claimText}\n\nCited slices:\n${slicesXml}`;
 
-      const { object } = await generateObject({
-        model: provider.chat(modelId),
-        schema: VerdictSchema,
-        schemaName: 'Verdict',
-        schemaDescription: 'Verifier verdict for a single Claim against its cited Spans.',
-        system: SYSTEM_PROMPT,
-        prompt: userPrompt,
-        temperature,
-        maxOutputTokens: maxTokens,
-      });
-
-      return object;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const { object } = await generateObject({
+            model: provider.chat(modelId),
+            schema: VerdictSchema,
+            schemaName: 'Verdict',
+            schemaDescription: 'Verifier verdict for a single Claim against its cited Spans.',
+            system: SYSTEM_PROMPT,
+            prompt: userPrompt,
+            temperature,
+            maxOutputTokens: maxTokens,
+          });
+          return object;
+        } catch (err) {
+          lastError = err;
+          if (attempt === maxAttempts || !isRetryable(err)) {
+            throw err;
+          }
+          // Exponential backoff: 500ms, 1000ms, 2000ms, ...
+          const delay = baseDelayMs * 2 ** (attempt - 1);
+          await sleep(delay);
+        }
+      }
+      // Unreachable — the loop either returns or throws — but TS demands a
+      // statement here.
+      throw lastError;
     },
   };
 };
