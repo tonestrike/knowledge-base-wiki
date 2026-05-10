@@ -3,17 +3,19 @@ import {
   type WikiPageId,
   wikiPageId as parsePageId,
 } from '@package/contracts/shared';
-import { Backlink, validateRelationArity } from '../domain/backlink.ts';
+import { Backlink } from '../domain/backlink.ts';
 import type { WikiPage } from '../domain/wiki-page.ts';
 
 // Linker — pure code, no LLM. Reads the markdown bodies, extracts links of
 // the form `](/<uuid>)`, and resolves them against the page set.
+// Arity validation is owned by Wiki.addBacklinks now (TD1) — this function
+// only resolves candidate edges from markdown.
 const LINK_RE = /\]\(\/([0-9a-f-]{36})\)/gi;
 
 export function resolveBacklinks(
   pages: ReadonlyArray<WikiPage>,
   relations: ReadonlyArray<Relation>,
-): { backlinks: Backlink[]; arityErrors: string[] } {
+): { backlinks: Backlink[] } {
   const knownIds = new Set<WikiPageId>(pages.map((p) => p.id));
   // Only Concept + Index pages carry a pageType; Summary/Answer pages have
   // none, so they can't participate as either end of a typed Relation.
@@ -52,6 +54,5 @@ export function resolveBacklinks(
     }
   }
 
-  const arityErrors = validateRelationArity(out, relations);
-  return { backlinks: out, arityErrors };
+  return { backlinks: out };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { wikiPageId } from '@package/contracts/shared';
-import { Backlink, validateRelationArity } from './backlink.ts';
+import { Backlink, partitionBacklinksByArity } from './backlink.ts';
 
 describe('Backlink', () => {
   it('refuses self-links', () => {
@@ -10,7 +10,7 @@ describe('Backlink', () => {
     ).toThrow(/self/);
   });
 
-  it('one-to-one rejects a second outgoing edge from the same source', () => {
+  it('one-to-one drops a second outgoing edge from the same source and reports a violation', () => {
     const a = wikiPageId('dddddddd-1111-4222-8333-444444444401');
     const b = wikiPageId('dddddddd-1111-4222-8333-444444444402');
     const c = wikiPageId('dddddddd-1111-4222-8333-444444444403');
@@ -18,10 +18,12 @@ describe('Backlink', () => {
       Backlink.create({ fromPageId: a, toPageId: b, relationName: 'OwnedBy' }),
       Backlink.create({ fromPageId: a, toPageId: c, relationName: 'OwnedBy' }),
     ];
-    const errors = validateRelationArity(links, [
+    const { kept, violations } = partitionBacklinksByArity(links, [
       { name: 'OwnedBy', from: 'X', to: 'Y', cardinality: 'one-to-one' },
     ]);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(kept).toHaveLength(1);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.reason).toBe('duplicate-outgoing');
   });
 
   it('many-to-many tolerates duplicates by (from, to)', () => {
@@ -31,9 +33,10 @@ describe('Backlink', () => {
       Backlink.create({ fromPageId: a, toPageId: b, relationName: 'RaisedIn' }),
       Backlink.create({ fromPageId: a, toPageId: b, relationName: 'RaisedIn' }),
     ];
-    const errors = validateRelationArity(links, [
+    const { kept, violations } = partitionBacklinksByArity(links, [
       { name: 'RaisedIn', from: 'A', to: 'B', cardinality: 'many-to-many' },
     ]);
-    expect(errors).toEqual([]);
+    expect(kept).toHaveLength(2);
+    expect(violations).toEqual([]);
   });
 });

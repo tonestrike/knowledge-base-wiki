@@ -1,4 +1,5 @@
 import type { FolderId, WikiId, WikiSchema } from '@package/contracts/shared';
+import { type ArityViolation, type Backlink, partitionBacklinksByArity } from './backlink.ts';
 import type { ConceptPage, IndexPage } from './wiki-page.ts';
 
 export interface Wiki {
@@ -58,6 +59,16 @@ export const Wiki = {
         wiki.schema.pageTypes.map((p) => p.name),
       );
     }
+  },
+  // TD1 — partition the candidate backlinks against the wiki's relation
+  // cardinality. Returns the kept set + a typed list of violations the
+  // caller emits as BacklinkArityViolated events. Violations are NEVER
+  // silently dropped without surfacing.
+  addBacklinks(
+    wiki: Wiki,
+    candidates: ReadonlyArray<Backlink>,
+  ): { kept: Backlink[]; violations: ArityViolation[] } {
+    return partitionBacklinksByArity(candidates, wiki.schema.relations);
   },
   recordCompile(wiki: Wiki, at: string, pageCount: number): Wiki {
     return Object.freeze({ ...wiki, updatedAt: at, lastCompiledAt: at, pageCount });

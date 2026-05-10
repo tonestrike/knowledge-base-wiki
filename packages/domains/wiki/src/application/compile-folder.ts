@@ -219,11 +219,21 @@ export async function compileFolder(
     run = CompileRun.advance(run, 'linking', deps.now().toISOString());
     await deps.runs.update(run);
 
-    const { backlinks, arityErrors } = resolveBacklinks(conceptDrafts, schema.relations);
-    if (arityErrors.length > 0) {
-      // Cardinality violations log a warning but don't fail the compile —
-      // they're surfaced to the verification context via Claims later.
-      console.warn('[wiki] backlink arity warnings', arityErrors);
+    const { backlinks: candidateBacklinks } = resolveBacklinks(conceptDrafts, schema.relations);
+    // SF5 / TD1 — Wiki owns relation arity. Violations are dropped from the
+    // Wiki and surfaced as typed events; they MUST NOT be persisted to D1
+    // because the 2.D verification pass would treat them as findings.
+    const { kept: backlinks, violations } = Wiki.addBacklinks(wiki, candidateBacklinks);
+    for (const v of violations) {
+      await deps.emit({
+        kind: 'BacklinkArityViolated',
+        compileRunId: input.compileRunId,
+        fromPageId: v.backlink.fromPageId,
+        toPageId: v.backlink.toPageId,
+        relationName: v.relationName,
+        cardinality: v.cardinality,
+        reason: v.reason,
+      });
     }
     const backlinksByFrom = new Map<WikiPageId, typeof backlinks>();
     for (const bl of backlinks) {

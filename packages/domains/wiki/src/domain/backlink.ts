@@ -23,40 +23,69 @@ export const Backlink = {
   },
 };
 
-export const validateRelationArity = (
+// TD1 / SF5 — Cardinality is enforced inside `Wiki.addBacklinks` via this
+// pure partition. Callers receive both the kept set and a typed list of
+// violations they emit as `BacklinkArityViolated` events; violations are
+// NOT silently inserted into D1 (which would seed false-positive findings
+// downstream in 2.D's lint pass).
+export interface ArityViolation {
+  readonly backlink: Backlink;
+  readonly relationName: string;
+  readonly cardinality: Cardinality;
+  readonly reason: 'duplicate-outgoing' | 'duplicate-incoming';
+}
+
+export const partitionBacklinksByArity = (
   backlinks: ReadonlyArray<Backlink>,
   relations: ReadonlyArray<Relation>,
-): string[] => {
-  const errors: string[] = [];
-  const byRelation = new Map<string, Backlink[]>();
-  for (const bl of backlinks) {
-    if (!bl.relationName) continue;
-    byRelation.set(bl.relationName, [...(byRelation.get(bl.relationName) ?? []), bl]);
-  }
+): { kept: Backlink[]; violations: ArityViolation[] } => {
   const cardinalityOf = new Map<string, Cardinality>(relations.map((r) => [r.name, r.cardinality]));
-  for (const [rel, bls] of byRelation) {
-    const card = cardinalityOf.get(rel);
-    if (!card) continue;
+  const seenOutgoing = new Map<string, Set<WikiPageId>>();
+  const seenIncoming = new Map<string, Set<WikiPageId>>();
+  const kept: Backlink[] = [];
+  const violations: ArityViolation[] = [];
+
+  for (const bl of backlinks) {
+    if (!bl.relationName) {
+      kept.push(bl);
+      continue;
+    }
+    const card = cardinalityOf.get(bl.relationName);
+    if (!card) {
+      kept.push(bl);
+      continue;
+    }
+    let violated: ArityViolation['reason'] | null = null;
     if (card === 'one-to-one' || card === 'many-to-one') {
-      const seen = new Set<WikiPageId>();
-      for (const bl of bls) {
-        if (seen.has(bl.fromPageId)) {
-          errors.push(`relation "${rel}" cardinality ${card} violated by ${bl.fromPageId}`);
-        }
-        seen.add(bl.fromPageId);
-      }
+      const set = seenOutgoing.get(bl.relationName) ?? new Set<WikiPageId>();
+      if (set.has(bl.fromPageId)) violated = 'duplicate-outgoing';
+      seenOutgoing.set(bl.relationName, set);
+    }
+    if (!violated && (card === 'one-to-one' || card === 'one-to-many')) {
+      const set = seenIncoming.get(bl.relationName) ?? new Set<WikiPageId>();
+      if (set.has(bl.toPageId)) violated = 'duplicate-incoming';
+      seenIncoming.set(bl.relationName, set);
+    }
+
+    if (violated) {
+      violations.push({
+        backlink: bl,
+        relationName: bl.relationName,
+        cardinality: card,
+        reason: violated,
+      });
+      continue;
+    }
+
+    // Only record this edge in seen-sets once we know it's kept.
+    if (card === 'one-to-one' || card === 'many-to-one') {
+      seenOutgoing.get(bl.relationName)?.add(bl.fromPageId);
     }
     if (card === 'one-to-one' || card === 'one-to-many') {
-      const seenIncoming = new Set<WikiPageId>();
-      for (const bl of bls) {
-        if (seenIncoming.has(bl.toPageId)) {
-          errors.push(
-            `relation "${rel}" cardinality ${card} violated by incoming edge to ${bl.toPageId}`,
-          );
-        }
-        seenIncoming.add(bl.toPageId);
-      }
+      seenIncoming.get(bl.relationName)?.add(bl.toPageId);
     }
+    kept.push(bl);
   }
-  return errors;
+
+  return { kept, violations };
 };
