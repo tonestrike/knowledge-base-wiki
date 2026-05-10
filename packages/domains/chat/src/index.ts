@@ -1,9 +1,11 @@
 export { chatRouter, type ChatContext } from './interface/index.ts';
 export type {
   ChatDeps,
+  ChatReadDeps,
+  ChatRuntimeDeps,
+  ChatWriteDeps,
   ConversationDispatcher,
   ConversationRepository,
-  EventBus,
   Researcher,
   ResearcherInput,
   ResearcherOutput,
@@ -16,6 +18,8 @@ export type {
   WikiPageSummary,
   WikiReader,
 } from './application/ports.ts';
+export { CitationTripwireError } from './application/ports.ts';
+export { ConversationNotFoundError, TurnNotFoundError } from './application/errors.ts';
 export { createMemorySourceHashVerifier } from './application/verify-citation.ts';
 export { createInMemoryDispatcher } from './infrastructure/in-memory-dispatcher.ts';
 export { createAiSdkResearcher } from './infrastructure/ai-sdk-researcher.ts';

@@ -8,6 +8,7 @@ import type {
   WikiPageId,
 } from '@package/contracts/shared';
 import { conversationId, turnId } from '@package/contracts/shared';
+import { InMemoryEventBus } from '@package/shared-kernel';
 import type { Conversation } from '../domain/conversation.ts';
 import type { Turn } from '../domain/turn.ts';
 import type {
@@ -174,6 +175,16 @@ export const makeFakeChatDeps = (opts: MakeFakeOptions = {}): FakeChatDeps => {
       }
     : noopWikiReader;
 
+  // Use the canonical InMemoryEventBus (TD-15). We instrument it by wrapping
+  // `publish` so tests can assert what was emitted. `subscribe` works as
+  // usual for in-process cross-context wiring tests.
+  const bus = new InMemoryEventBus();
+  const originalPublish = bus.publish.bind(bus);
+  bus.publish = async (event) => {
+    published.push(event);
+    await originalPublish(event);
+  };
+
   return {
     researcher,
     synthesizer,
@@ -186,11 +197,7 @@ export const makeFakeChatDeps = (opts: MakeFakeOptions = {}): FakeChatDeps => {
     conversations: inMemoryConversations(),
     turns: inMemoryTurns(),
     dispatcher,
-    eventBus: {
-      async publish(e) {
-        published.push(e);
-      },
-    },
+    eventBus: bus,
     newId: () => {
       const next = queue.shift();
       if (next === undefined) throw new Error('makeFakeChatDeps ran out of ids');
@@ -208,7 +215,7 @@ export const fakeCitation = (id: string, sourceUuid: string): Citation => ({
   span: {
     sourceId: sourceUuid as unknown as Citation['span']['sourceId'],
     byteRange: { start: 0, end: 5 },
-    contentHash: 'sha256:fixture',
+    contentHash: 'sha256:fixture' as unknown as Citation['span']['contentHash'],
   },
 });
 

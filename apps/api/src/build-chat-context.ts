@@ -1,7 +1,6 @@
 import {
   type ChatContext,
   type ConversationRepository,
-  type EventBus,
   type Researcher,
   type Synthesizer,
   type TurnRepository,
@@ -11,7 +10,7 @@ import {
 } from '@domain/chat';
 import type { Conversation as ConvWire, Turn as TurnWire } from '@package/contracts/chat';
 import { userId } from '@package/contracts/shared';
-import { systemClock } from '@package/shared-kernel';
+import { type EventBus, InMemoryEventBus, systemClock } from '@package/shared-kernel';
 
 /**
  * Default chat-context bindings for the api. Slice 2.C ships in-memory
@@ -124,15 +123,16 @@ const stubWikiReader: WikiReader = {
   },
 };
 
-const consoleEventBus: EventBus = {
-  async publish(event) {
-    console.info('[domain-event]', event.name, event.payload);
-  },
-};
-
 export interface BuildChatContextOptions {
   /** Default user id used for the single-user demo. */
   currentUserId?: string;
+  /**
+   * Canonical cross-context bus. When the chat context shares a worker
+   * process with the wiki context, pass the same `InMemoryEventBus` instance
+   * so `AnswerProduced` flows into the wiki cross-context handlers. Defaults
+   * to a fresh per-context bus (useful in unit tests).
+   */
+  eventBus?: EventBus;
 }
 
 export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContext => {
@@ -148,13 +148,14 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
       return `sha256:${hex}`;
     },
   });
+  const eventBus: EventBus = opts.eventBus ?? new InMemoryEventBus();
   const dispatcher = createInMemoryDispatcher({
     researcher: stubResearcher,
     synthesizer: stubSynthesizer,
     sourceHashes,
     conversations,
     turns,
-    eventBus: consoleEventBus,
+    eventBus,
     wikiReader: stubWikiReader,
     now: () => new Date(),
   });
@@ -167,7 +168,7 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     conversations,
     turns,
     dispatcher,
-    eventBus: consoleEventBus,
+    eventBus,
     wikiReader: stubWikiReader,
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
