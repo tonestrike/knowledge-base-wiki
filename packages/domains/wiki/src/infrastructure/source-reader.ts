@@ -15,31 +15,43 @@ interface SourceRow {
 // only place we need to update on the wiki side.
 export const createSourceReader = (db: D1Database, bucket: R2Bucket): SourceReader => ({
   async list(folderId: FolderId) {
-    const { results } = await db
-      .prepare(
-        'SELECT id, filename, content_hash FROM sources WHERE folder_id = ? ORDER BY fetched_at ASC',
-      )
-      .bind(folderId)
-      .all<SourceRow>();
-    return results.map((r) => ({
-      sourceId: parseSourceId(r.id),
-      filename: r.filename,
-    }));
+    try {
+      const { results } = await db
+        .prepare(
+          'SELECT id, filename, content_hash FROM sources WHERE folder_id = ? ORDER BY fetched_at ASC',
+        )
+        .bind(folderId)
+        .all<SourceRow>();
+      return results.map((r) => ({
+        sourceId: parseSourceId(r.id),
+        filename: r.filename,
+      }));
+    } catch (err) {
+      throw new Error(
+        `[d1.sources.list folderId=${folderId}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
   async read(sourceId: SourceId): Promise<ExtractedSourceText | null> {
-    const row = await db
-      .prepare('SELECT id, filename, content_hash FROM sources WHERE id = ?')
-      .bind(sourceId)
-      .first<SourceRow>();
-    if (!row) return null;
-    const obj = await bucket.get(`sources/${sourceId}/text`);
-    if (!obj) return null;
-    const text = await obj.text();
-    return {
-      sourceId,
-      filename: row.filename,
-      contentHash: row.content_hash,
-      text,
-    };
+    try {
+      const row = await db
+        .prepare('SELECT id, filename, content_hash FROM sources WHERE id = ?')
+        .bind(sourceId)
+        .first<SourceRow>();
+      if (!row) return null;
+      const obj = await bucket.get(`sources/${sourceId}/text`);
+      if (!obj) return null;
+      const text = await obj.text();
+      return {
+        sourceId,
+        filename: row.filename,
+        contentHash: row.content_hash,
+        text,
+      };
+    } catch (err) {
+      throw new Error(
+        `[sources.read sourceId=${sourceId}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
 });
