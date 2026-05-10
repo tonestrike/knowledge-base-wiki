@@ -122,3 +122,5 @@ maxItems
 minItems
 worktree
 worktrees
+openrouter
+unwired
