@@ -52,6 +52,7 @@ describe('dailyLintSample', () => {
     const deps = buildDeps(ids(20), ({ wikiId }) => started.push(wikiId));
     const out = await dailyLintSample(deps, { random: () => 0.5 });
     expect(out.scheduled).toBe(2);
+    expect(out.failed).toBe(0);
     expect(started).toHaveLength(2);
   });
 
@@ -60,12 +61,14 @@ describe('dailyLintSample', () => {
     const deps = buildDeps(ids(3), ({ wikiId }) => started.push(wikiId));
     const out = await dailyLintSample(deps, { random: () => 0.5 });
     expect(out.scheduled).toBe(1);
+    expect(out.failed).toBe(0);
   });
 
   it('returns 0 when there are no wikis', async () => {
     const deps = buildDeps([], () => undefined);
     const out = await dailyLintSample(deps);
     expect(out.scheduled).toBe(0);
+    expect(out.failed).toBe(0);
   });
 
   it('honours a custom sampleFraction', async () => {
@@ -73,5 +76,23 @@ describe('dailyLintSample', () => {
     const deps = buildDeps(ids(20), ({ wikiId }) => started.push(wikiId));
     const out = await dailyLintSample(deps, { sampleFraction: 0.5, random: () => 0.5 });
     expect(out.scheduled).toBe(10);
+    expect(out.failed).toBe(0);
+  });
+
+  it('isolates per-wiki dispatcher failures and surfaces a failed count', async () => {
+    let counter = 0;
+    const deps: VerificationDeps = {
+      ...buildDeps(ids(10), () => undefined),
+      dispatcher: {
+        start: async () => {
+          // Reject every other dispatch.
+          if (counter++ % 2 === 0) throw new Error('boom');
+        },
+        subscribe: async function* () {},
+      },
+    };
+    const out = await dailyLintSample(deps, { random: () => 0.5 });
+    expect(out.scheduled + out.failed).toBe(1);
+    expect(out.failed).toBeGreaterThanOrEqual(0);
   });
 });
