@@ -114,7 +114,9 @@ export async function draftPage(
   // Snap citations back to known findings — the Drafter doesn't get to invent
   // contentHashes; the orchestrator owns provenance. Drop bad citations
   // (unknown sourceId is a common LLM hallucination) rather than throwing;
-  // skip the whole claim if every citation was bad.
+  // skip the whole claim if every citation was bad. If *every* claim ends
+  // up with no citations, throw — a zero-claim page is a verification
+  // hazard (no spans for the lint pass to check).
   const byId = new Map(input.findings.map((f) => [f.sourceId, f]));
   const enrichedClaims: DraftedClaim[] = [];
   for (const c of result.claims) {
@@ -137,6 +139,11 @@ export async function draftPage(
       claimText: c.claimText,
       citations: goodCitations,
     });
+  }
+  if (enrichedClaims.length === 0) {
+    throw new Error(
+      'Drafter produced no claims with valid citations (all citations referenced unknown sourceIds)',
+    );
   }
 
   // Force kebab-case post-hoc — schema is now lenient on slug shape.
