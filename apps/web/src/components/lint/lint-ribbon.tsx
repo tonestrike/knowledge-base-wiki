@@ -1,6 +1,5 @@
 import type { LintFinding } from '@package/contracts/verification';
 import { motion, useReducedMotion } from 'framer-motion';
-import { useState } from 'react';
 import { Button } from '../ui/button.tsx';
 
 const verdictTone: Record<LintFinding['verdict'], string> = {
@@ -9,15 +8,28 @@ const verdictTone: Record<LintFinding['verdict'], string> = {
   contradicted: 'border-verdict-contradicted/40 bg-verdict-contradicted/5',
 };
 
+/**
+ * Apply state is now driven entirely by the parent (SF7). Previously the
+ * ribbon set `applied=true` synchronously on click, which collapsed the
+ * row before the mutation resolved — and the mutation's `isError` was
+ * silently dropped, leaving the UI looking like a successful apply. The
+ * parent owns the React Query mutation, so it knows whether the apply
+ * succeeded, is pending, or failed.
+ */
 export function LintRibbon({
   finding,
   onApply,
+  applied = false,
+  pending = false,
+  errorMessage = null,
 }: {
   finding: LintFinding;
   onApply: (id: string) => void;
+  applied?: boolean;
+  pending?: boolean;
+  errorMessage?: string | null;
 }) {
   const reduce = useReducedMotion();
-  const [applied, setApplied] = useState(false);
   return (
     <motion.aside
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
@@ -60,17 +72,19 @@ export function LintRibbon({
             </span>
           </p>
           <Button
-            onClick={() => {
-              setApplied(true);
-              onApply(finding.id);
-            }}
+            onClick={() => onApply(finding.id)}
             variant="accent"
             size="sm"
             className="mt-3"
-            disabled={applied}
+            disabled={applied || pending}
           >
-            {applied ? 'Applied' : 'Apply correction'}
+            {applied ? 'Applied' : pending ? 'Applying…' : 'Apply correction'}
           </Button>
+          {errorMessage ? (
+            <p className="mt-2 text-xs text-verdict-contradicted" role="alert">
+              Apply failed: {errorMessage}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </motion.aside>

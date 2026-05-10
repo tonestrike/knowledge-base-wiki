@@ -8,16 +8,27 @@ import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
 import { ThemeToggle } from '../components/theme-toggle.tsx';
 import { Button } from '../components/ui/button.tsx';
+import { isBackendNotImplemented, useLiveMode } from '../lib/live-mode.tsx';
 import { orpc } from '../lib/orpc.ts';
 
 export function LintRoute() {
   const { wikiId = '' } = useParams();
   const qc = useQueryClient();
+  const { markUnavailable } = useLiveMode();
   const [lintRunId, setLintRunId] = useState<string | null>(null);
+  // Track which finding is currently being applied so each ribbon can
+  // surface its own pending / error state without sharing a global
+  // mutation collapse animation (SF7).
+  const [applyingId, setApplyingId] = useState<string | null>(null);
 
   const start = useMutation({
     ...orpc.verification.start.mutationOptions(),
     onSuccess: (data) => setLintRunId(data.lintRunId),
+    onError: (e) => {
+      if (isBackendNotImplemented(e)) {
+        markUnavailable('verification.start is not implemented in the current backend phase.');
+      }
+    },
   });
 
   const findings = useQuery({
@@ -64,6 +75,20 @@ export function LintRoute() {
 
       {start.isError ? <ErrorState message={(start.error as Error).message} /> : null}
 
+      {/* SF3 — surface stream-level failures. Without this the dashboard
+          showed a phantom "auditing claims…" spinner forever on
+          LintRunFailed or premature SSE close. */}
+      {stream.error ? (
+        <ErrorState
+          message={`Audit stream failed: ${stream.error}`}
+          onRetry={() => {
+            // Re-running the start mutation issues a fresh lintRunId and
+            // resubscribes the SSE hook with a clean state.
+            if (wikiId) start.mutate({ wikiId });
+          }}
+        />
+      ) : null}
+
       {!lintRunId ? (
         <EmptyState
           title="No audit running"
@@ -76,17 +101,32 @@ export function LintRoute() {
           message={(findings.error as Error).message}
           onRetry={() => findings.refetch()}
         />
-      ) : (findings.data?.items.length ?? 0) === 0 && !stream.done ? (
+      ) : (findings.data?.items.length ?? 0) === 0 && !stream.done && !stream.error ? (
         <p className="text-sm text-muted-foreground" aria-live="polite">
           auditing claims…
         </p>
       ) : (
         <ul className="space-y-4">
-          {findings.data?.items.map((f) => (
-            <li key={f.id}>
-              <LintRibbon finding={f} onApply={(id) => apply.mutate({ lintFindingId: id })} />
-            </li>
-          ))}
+          {findings.data?.items.map((f) => {
+            const isApplying = applyingId === f.id && apply.isPending;
+            const applyError =
+              applyingId === f.id && apply.isError ? (apply.error as Error).message : null;
+            const isApplied = applyingId === f.id && apply.isSuccess;
+            return (
+              <li key={f.id}>
+                <LintRibbon
+                  finding={f}
+                  applied={isApplied}
+                  pending={isApplying}
+                  errorMessage={applyError}
+                  onApply={(id) => {
+                    setApplyingId(id);
+                    apply.mutate({ lintFindingId: id });
+                  }}
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>

@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { ErrorState } from '../states/error.tsx';
 import { AgentLane } from './agent-lane.tsx';
 import { EmergingPage } from './emerging-page.tsx';
 import { SourceCard } from './source-card.tsx';
@@ -12,10 +13,15 @@ export interface CompileTheaterProps {
    * toggles between SSE and in-process iterable consumption.
    */
   compileRunId?: string | null;
+  /**
+   * Optional retry callback wired by the parent (e.g. WikiRoute). Without
+   * it the error banner still renders but only as a notice.
+   */
+  onRetry?: () => void;
 }
 
-export function CompileTheater({ compileRunId = null }: CompileTheaterProps) {
-  const { events } = useCompileStream(compileRunId);
+export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterProps) {
+  const { events, error } = useCompileStream(compileRunId);
   const schemaEvent = events.find((e) => e.kind === 'SchemaInferred');
   const drafted = events.filter((e) => e.kind === 'PageDrafted');
   const compileStarted = events.find((e) => e.kind === 'CompileStarted');
@@ -29,6 +35,9 @@ export function CompileTheater({ compileRunId = null }: CompileTheaterProps) {
 
   return (
     <section className="mt-8 space-y-6">
+      {/* SF3 — propagate stream errors instead of leaving the lanes
+          empty when a CompileFailed event arrives or the SSE drops. */}
+      {error ? <ErrorState message={`Compile stream failed: ${error}`} onRetry={onRetry} /> : null}
       <AnimatePresence>
         {schemaEvent && schemaEvent.kind === 'SchemaInferred' ? (
           <motion.div
