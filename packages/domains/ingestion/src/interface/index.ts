@@ -4,6 +4,7 @@ import type { UserId } from '@package/contracts/shared';
 import type { Clock } from '@package/shared-kernel';
 import { completeDriveAuth } from '../application/complete-drive-auth.ts';
 import type { ExtractorRegistry } from '../application/extract-source.ts';
+import { getFolder } from '../application/get-folder.ts';
 import { getSource } from '../application/get-source.ts';
 import { ingestFolder } from '../application/ingest-folder.ts';
 import { listDriveFolders } from '../application/list-drive-folders.ts';
@@ -64,6 +65,8 @@ export const ingestionRouter = {
   streamIngestEvents: os.streamIngestEvents.handler(async function* () {
     yield* mockIngestEventStream();
   }),
+
+  getFolder: os.getFolder.handler(({ context, input }) => getFolder(context, input)),
 
   getSource: os.getSource.handler(({ context, input }) => getSource(context, input)),
 

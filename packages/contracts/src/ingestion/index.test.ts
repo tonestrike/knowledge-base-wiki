@@ -7,6 +7,7 @@ describe('ingestion contract', () => {
     expect(Object.keys(ingestionContract).sort()).toEqual([
       'authCallback',
       'authStart',
+      'getFolder',
       'getSource',
       'ingestFolder',
       'listFolders',
