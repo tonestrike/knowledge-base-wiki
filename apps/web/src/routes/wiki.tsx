@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
 import { CompileTheater } from '../components/compile-theater/compile-theater.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
+import { Button } from '../components/ui/button.tsx';
 import { isBackendNotImplemented, useLiveMode } from '../lib/live-mode.tsx';
 import { orpc } from '../lib/orpc.ts';
 
@@ -12,6 +13,15 @@ export function WikiRoute() {
   const { wikiId = '' } = useParams();
   const [compileRunId, setCompileRunId] = useState<string | null>(null);
   const { markUnavailable } = useLiveMode();
+
+  const wiki = useQuery({
+    ...orpc.wiki.getWiki.queryOptions({ input: { id: wikiId } }),
+    enabled: !!wikiId,
+  });
+  const pages = useQuery({
+    ...orpc.wiki.listPages.queryOptions({ input: { wikiId, limit: 100 } }),
+    enabled: !!wikiId,
+  });
 
   const start = useMutation({
     ...orpc.wiki.startCompile.mutationOptions(),
@@ -25,20 +35,10 @@ export function WikiRoute() {
     },
   });
 
-  const startMutate = start.mutate;
-  useEffect(() => {
-    if (!wikiId) return;
-    startMutate({ folderId: wikiId });
-  }, [wikiId, startMutate]);
-
-  const wiki = useQuery({
-    ...orpc.wiki.getWiki.queryOptions({ input: { id: wikiId } }),
-    enabled: !!wikiId,
-  });
-  const pages = useQuery({
-    ...orpc.wiki.listPages.queryOptions({ input: { wikiId, limit: 100 } }),
-    enabled: !!wikiId,
-  });
+  const startCompile = () => {
+    const folderId = wiki.data?.folderId;
+    if (folderId) start.mutate({ folderId });
+  };
 
   if (wiki.isPending) {
     return (
@@ -65,6 +65,8 @@ export function WikiRoute() {
     );
   }
 
+  const pageCount = pages.data?.items.length ?? 0;
+
   return (
     <AppShell>
       <main className="mx-auto max-w-7xl px-6 py-8">
@@ -78,6 +80,13 @@ export function WikiRoute() {
               </span>
             </p>
           </div>
+          <Button
+            variant={pageCount === 0 ? 'accent' : 'outline'}
+            onClick={startCompile}
+            disabled={start.isPending}
+          >
+            {start.isPending ? 'Starting…' : pageCount === 0 ? 'Compile this folder' : 'Recompile'}
+          </Button>
         </header>
 
         {/* SF13 — startCompile errors used to be discarded; surface inline
@@ -86,7 +95,7 @@ export function WikiRoute() {
           <div className="mt-6">
             <ErrorState
               message={`Compile didn't start: ${(start.error as Error).message}`}
-              onRetry={() => startMutate({ folderId: wikiId })}
+              onRetry={startCompile}
             />
           </div>
         ) : null}
@@ -96,7 +105,7 @@ export function WikiRoute() {
             compileRunId={compileRunId}
             onRetry={() => {
               setCompileRunId(null);
-              startMutate({ folderId: wikiId });
+              startCompile();
             }}
           />
         ) : null}

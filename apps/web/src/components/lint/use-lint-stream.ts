@@ -18,14 +18,21 @@ export function useLintStream(lintRunId: string | null): {
   const { mode } = useLiveMode();
   const config = useMemo<EventStreamConfig<LintEvent>>(
     () => ({
-      parse: (raw) => LintEvent.parse(raw),
+      parse: (raw) =>
+        LintEvent.parse(
+          typeof raw === 'object' && raw !== null && 'json' in raw
+            ? (raw as { json: unknown }).json
+            : raw,
+        ),
       failedKinds: FAILED,
       finishedKinds: FINISHED,
+      method: 'POST',
+      body: { json: { lintRunId } },
     }),
-    [],
+    [lintRunId],
   );
   const liveResult = useEventStream<LintEvent>(
-    mode.kind === 'live' && lintRunId ? `/rpc/lint-runs/${lintRunId}/events` : null,
+    mode.kind === 'live' && lintRunId ? '/rpc/verification/streamLintEvents' : null,
     config,
   );
   const mockResult = useAsyncIterableStream<LintEvent>(

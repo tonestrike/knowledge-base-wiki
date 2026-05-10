@@ -33,6 +33,20 @@ export interface EventStreamConfig<T> {
    * is exhausted we surface a permanent connection-lost error.
    */
   maxReconnects?: number;
+  /**
+   * HTTP method. oRPC's RPC handler exposes streaming procedures over POST
+   * with a JSON body, so consumers of `streamCompileEvents` /
+   * `streamLintEvents` / `streamAnswer` pass `'POST'` here. Defaults to GET
+   * for backwards compat with raw SSE endpoints.
+   */
+  method?: 'GET' | 'POST';
+  /**
+   * Optional JSON body, sent only when `method === 'POST'`. The oRPC RPC
+   * handler expects the input wrapped under a top-level `json` key —
+   * callers MUST shape it that way themselves so this hook stays
+   * transport-agnostic.
+   */
+  body?: unknown;
 }
 
 const DEFAULT_MAX_RECONNECTS = 3;
@@ -128,7 +142,13 @@ export function useEventStream<T>(
     let terminalSeen = false;
 
     const runOnce = async (): Promise<'terminal' | 'premature' | 'http-error'> => {
-      const res = await fetch(url, { signal: ac.signal });
+      const init: RequestInit = { signal: ac.signal };
+      if (config.method === 'POST') {
+        init.method = 'POST';
+        init.headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
+        init.body = JSON.stringify(config.body ?? {});
+      }
+      const res = await fetch(url, init);
       if (!res.ok || !res.body) {
         setError(`stream ${url} failed: ${res.status}`);
         return 'http-error';
