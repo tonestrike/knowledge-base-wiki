@@ -5,6 +5,20 @@ import type { Extractor } from '../application/extract-source.ts';
 import type { OutlineNode } from '../domain/outline.ts';
 import { Outline, outlineLevel } from '../domain/outline.ts';
 
+// PDF extraction in workerd: pdfjs's `PDFWorker._setupFakeWorkerGlobal`
+// does a dynamic `import(workerSrc)` to load `pdf.worker.mjs`, which
+// fails in workerd ("No such module 'pdf.worker.mjs'") because workerd
+// resolves modules at bundle time. We attempted a static
+// `import * as pdfjsWorker from 'pdfjs-dist/.../pdf.worker.mjs'` with the
+// idea of stashing `globalThis.pdfjsWorker = pdfjsWorker` so pdfjs would
+// short-circuit the dynamic import — but the worker bundle (~2 MB) has
+// boot-time side effects that wedge the workerd isolate (it boots, binds
+// the port, but never responds to requests). The proper fix is a
+// non-pdfjs PDF extractor for the api Worker (e.g. an external service,
+// or a WASM extractor). Tracked in the project doc; for now PDFs in
+// uploaded Drive folders are unreadable from this api and the ingest
+// page's "No documents we can read" guard catches that case loudly.
+
 const isHeading = (raw: string): boolean => {
   const t = raw.trim();
   if (!t || t.length > 80) return false;

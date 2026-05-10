@@ -14,9 +14,11 @@ export interface DriveFolderPickerProps {
 
 /**
  * Lists the signed-in user's Drive folders via `ingestion.listFolders` and
- * lets them pick one. Picking chains `registerFolder → startCompile → poll
- * compileRun → /wiki/<wikiId>` via {@link usePickAndCompile} so the user
- * lands on the live `CompileTheater` without an extra click.
+ * lets them pick one. Picking chains `registerFolder → startCompile →
+ * navigate to /compile/<runId>` via {@link usePickAndCompile} so the user
+ * sees the live `CompileTheater` (with sources flying in, schema reveal,
+ * and the agent-thoughts narrative) immediately, instead of staring at
+ * the picker waiting for a poll loop.
  *
  * If the listFolders query fails with a Drive-auth-shaped error (typed
  * 401, OAuthTokenUnreadable, the connector's "No Drive tokens" message)
@@ -124,12 +126,26 @@ function PhaseStatus({ phase, error }: { phase: PickAndCompilePhase; error: Erro
       </p>
     );
   }
-  if (phase === 'idle' || phase === 'done') return null;
+  if (phase === 'idle') return null;
+  // Sub-second window: register completes, the hook navigates to
+  // `/folder/<folderId>/ingest` where the real animated work lives. A
+  // single banner line is enough.
   const label =
-    phase === 'registering'
-      ? 'Registering folder…'
-      : phase === 'starting'
-        ? 'Starting compile…'
-        : 'Compiling… (typically takes 30-60s)';
-  return <p className="text-xs text-accent">{label}</p>;
+    phase === 'registering' ? 'Registering the folder with the api…' : 'Opening the ingest page…';
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent"
+    >
+      <motion.span
+        aria-hidden
+        animate={{ opacity: [0.3, 1, 0.3] }}
+        transition={{ duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: 'easeInOut' }}
+        className="inline-block h-2 w-2 rounded-full bg-accent"
+      />
+      {label}
+    </motion.div>
+  );
 }
