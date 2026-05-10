@@ -8,7 +8,17 @@ import { App } from './App.tsx';
 const enableMocks = async () => {
   if (import.meta.env.DEV) {
     const { worker } = await import('./mocks/browser.ts');
-    await worker.start({ onUnhandledRequest: 'bypass' });
+    // SF6 — error on any unhandled `/rpc/*` request so a missed mock
+    // route in dev blows up loudly instead of silently returning a 404.
+    // Non-rpc traffic (HTML, vite assets, /api/*) is still bypassed so
+    // the rest of the app works normally.
+    await worker.start({
+      onUnhandledRequest: (req, print) => {
+        if (new URL(req.url).pathname.startsWith('/rpc/')) {
+          print.error();
+        }
+      },
+    });
   }
 };
 
