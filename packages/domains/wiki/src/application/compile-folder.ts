@@ -35,15 +35,6 @@ type EnrichedFinding = {
   sourceContentHash: ContentHash;
 };
 
-const groupBy = <T, K>(items: T[], by: (t: T) => K): Map<K, T[]> => {
-  const m = new Map<K, T[]>();
-  for (const i of items) {
-    const k = by(i);
-    m.set(k, [...(m.get(k) ?? []), i]);
-  }
-  return m;
-};
-
 // SF11 — content hashes are load-bearing for the verification context's
 // span check. Silently padding zeros to fake a hash on regex mismatch
 // would mean spans pass verification against a synthesized hash that
@@ -132,26 +123,49 @@ export async function compileFolder(
     // SF1 — per-source isolation. allSettled keeps successful Researcher
     // findings even if other sources throw; each failure becomes a typed
     // ResearchFailed event so the user sees which source broke and why.
-    const settled = await Promise.allSettled(
-      tasks.map(async (t): Promise<{ sourceId: SourceId; findings: EnrichedFinding[] }> => {
+    console.info(
+      `[compile-folder] dispatching ${tasks.length} Researcher tasks; allTexts ids: ${allTexts.map((s) => s.sourceId.slice(0, 8)).join(',')}; task ids: ${tasks.map((t) => t.sourceId.slice(0, 8)).join(',')}`,
+    );
+    // Sequential dispatch — OpenRouter throttles concurrent Haiku calls in
+    // the demo tier; running 5 in parallel produced 4 "No object generated"
+    // failures every time. Sequential is slower (~10s × N) but reliable.
+    const settled: Array<
+      PromiseSettledResult<{ sourceId: SourceId; findings: EnrichedFinding[] }>
+    > = [];
+    for (const t of tasks) {
+      try {
         const src = allTexts.find((s) => s.sourceId === t.sourceId);
-        if (!src) return { sourceId: t.sourceId, findings: [] };
+        if (!src) {
+          console.info(
+            `[compile-folder] task sourceId=${t.sourceId.slice(0, 8)} NOT in allTexts — skipping`,
+          );
+          settled.push({
+            status: 'fulfilled',
+            value: { sourceId: t.sourceId, findings: [] },
+          });
+          continue;
+        }
         const { findings } = await researchSource(
           { llm: deps.llm },
           { source: src, pageTypes: t.pageTypes },
         );
-        return {
-          sourceId: src.sourceId,
-          findings: findings.map((f) => ({
-            ...f,
+        settled.push({
+          status: 'fulfilled',
+          value: {
             sourceId: src.sourceId,
-            sourceFilename: src.filename,
-            sourceText: src.text,
-            sourceContentHash: ensureContentHash(src.contentHash),
-          })),
-        };
-      }),
-    );
+            findings: findings.map((f) => ({
+              ...f,
+              sourceId: src.sourceId,
+              sourceFilename: src.filename,
+              sourceText: src.text,
+              sourceContentHash: ensureContentHash(src.contentHash),
+            })),
+          },
+        });
+      } catch (err) {
+        settled.push({ status: 'rejected', reason: err });
+      }
+    }
     const allFindings: EnrichedFinding[] = [];
     for (let i = 0; i < settled.length; i++) {
       const s = settled[i];
@@ -161,6 +175,9 @@ export async function compileFolder(
         allFindings.push(...s.value.findings);
       } else {
         const message = s.reason instanceof Error ? s.reason.message : String(s.reason);
+        console.info(
+          `[compile-folder] Researcher REJECTED for sourceId=${t.sourceId.slice(0, 8)}: ${message}`,
+        );
         await deps.emit({
           kind: 'ResearchFailed',
           compileRunId: input.compileRunId,
@@ -175,10 +192,15 @@ export async function compileFolder(
     await deps.runs.update(run);
 
     const conceptDrafts: ConceptPage[] = [];
-    for (const pt of schema.pageTypes) {
+    // Cap drafting at the first 4 PageTypes; one Drafter call per PageType
+    // (collapsing across titles) instead of one per title bucket — keeps
+    // drafting bounded to ~4 calls × ~30s each = ~2 min instead of unbounded.
+    const draftablePageTypes = schema.pageTypes.slice(0, 4);
+    for (const pt of draftablePageTypes) {
       const findingsOfType = allFindings.filter((f) => f.pageType === pt.name);
       if (findingsOfType.length === 0) continue;
-      const grouped = groupBy(findingsOfType, (f) => f.title.trim().toLowerCase());
+      // One Drafter call per PageType, all findings merged.
+      const grouped = new Map<string, EnrichedFinding[]>([[pt.name.toLowerCase(), findingsOfType]]);
       for (const [, findings] of grouped) {
         const draftFindings: ResearchFinding[] = findings.map((f) => ({
           sourceId: f.sourceId,
@@ -190,9 +212,16 @@ export async function compileFolder(
           spanEnd: f.spanEnd,
           title: f.title,
         }));
+        console.info(
+          `[compile-folder] Drafter dispatch pageType=${pt.name} findings=${draftFindings.length}`,
+        );
+        const draftStart = Date.now();
         const { draft } = await draftPage(
           { llm: deps.llm },
           { pageType: pt.name, findings: draftFindings },
+        );
+        console.info(
+          `[compile-folder] Drafter done pageType=${pt.name} in ${Date.now() - draftStart}ms slug=${draft.slug}`,
         );
 
         const pid = parseWikiPageId(deps.newId());

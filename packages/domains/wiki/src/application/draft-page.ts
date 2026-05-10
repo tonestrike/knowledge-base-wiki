@@ -107,36 +107,57 @@ export async function draftPage(
     schema: DraftOutput,
     schemaName: 'DraftedPage',
     schemaDescription: 'A markdown wiki page with cited claims.',
-    maxTokens: 3000,
+    maxTokens: 8000,
     temperature: 0.3,
   });
 
   // Snap citations back to known findings — the Drafter doesn't get to invent
-  // contentHashes; the orchestrator owns provenance.
+  // contentHashes; the orchestrator owns provenance. Drop bad citations
+  // (unknown sourceId is a common LLM hallucination) rather than throwing;
+  // skip the whole claim if every citation was bad. If *every* claim ends
+  // up with no citations, throw — a zero-claim page is a verification
+  // hazard (no spans for the lint pass to check).
   const byId = new Map(input.findings.map((f) => [f.sourceId, f]));
-  const enrichedClaims: DraftedClaim[] = result.claims.map((c) => ({
-    paragraphId: c.paragraphId,
-    claimText: c.claimText,
-    citations: c.citations.map((cite) => {
+  const enrichedClaims: DraftedClaim[] = [];
+  for (const c of result.claims) {
+    const goodCitations = [];
+    for (const cite of c.citations) {
       const sid = parseSourceId(cite.sourceId);
       const finding = byId.get(sid);
-      if (!finding) {
-        throw new Error(`Drafter cited unknown sourceId: ${cite.sourceId}`);
-      }
-      return {
+      if (!finding) continue;
+      goodCitations.push({
         sourceId: sid,
         spanStart: cite.spanStart,
-        spanEnd: cite.spanEnd,
+        spanEnd: Math.max(cite.spanStart + 1, cite.spanEnd),
         label: cite.label,
         sourceContentHash: finding.sourceContentHash,
-      };
-    }),
-  }));
+      });
+    }
+    if (goodCitations.length === 0) continue;
+    enrichedClaims.push({
+      paragraphId: c.paragraphId,
+      claimText: c.claimText,
+      citations: goodCitations,
+    });
+  }
+  if (enrichedClaims.length === 0) {
+    throw new Error(
+      'Drafter produced no claims with valid citations (all citations referenced unknown sourceIds)',
+    );
+  }
+
+  // Force kebab-case post-hoc — schema is now lenient on slug shape.
+  const kebabSlug =
+    result.slug
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 120) || 'untitled';
 
   return {
     draft: {
       title: result.title,
-      slug: result.slug,
+      slug: kebabSlug,
       body: result.body,
       claims: enrichedClaims,
     },

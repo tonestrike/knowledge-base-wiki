@@ -9,14 +9,14 @@ import type { VerificationDeps } from '../application/ports.ts';
 // CompileFinished payload's wikiId / compileRunId / finishedAt fields are
 // type-checked at the call site.
 export const subscribeCompileFinished = (
-  deps: Pick<VerificationDeps, 'newId' | 'dispatcher'>,
+  deps: Pick<VerificationDeps, 'newId' | 'lintDispatcher'>,
   bus: EventBus,
 ): (() => void) =>
   bus.subscribe('CompileFinished', async (event) => {
     const targetWiki: WikiId = wikiId(event.payload.wikiId);
     const id = lintRunId(deps.newId());
     try {
-      await deps.dispatcher.start({ lintRunId: id, wikiId: targetWiki });
+      await deps.lintDispatcher.start({ lintRunId: id, wikiId: targetWiki });
     } catch (err) {
       // The bus invokes handlers without a way to retry. Surface the failure
       // so it does not become an unhandled-promise warning. Auto-trigger is a

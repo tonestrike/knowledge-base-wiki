@@ -30,9 +30,9 @@ const requireDeps = <K extends keyof VerificationDeps>(
 
 export const verificationRouter = {
   start: os.start.handler(async ({ context, input }) => {
-    const deps = requireDeps(context, 'newId', 'dispatcher');
+    const deps = requireDeps(context, 'newId', 'lintDispatcher');
     const id = lintRunId(deps.newId());
-    await deps.dispatcher.start({ lintRunId: id, wikiId: input.wikiId });
+    await deps.lintDispatcher.start({ lintRunId: id, wikiId: input.wikiId });
     return { lintRunId: id };
   }),
 
@@ -47,8 +47,8 @@ export const verificationRouter = {
   }),
 
   streamLintEvents: os.streamLintEvents.handler(async function* ({ context, input }) {
-    const deps = requireDeps(context, 'dispatcher');
-    for await (const event of deps.dispatcher.subscribe(input.lintRunId)) {
+    const deps = requireDeps(context, 'lintDispatcher');
+    for await (const event of deps.lintDispatcher.subscribe(input.lintRunId)) {
       yield event;
     }
   }),

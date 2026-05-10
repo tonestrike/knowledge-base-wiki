@@ -55,10 +55,15 @@ export async function planCompile(
     temperature: 0,
   });
 
-  return {
-    tasks: result.tasks.map((t) => ({
-      sourceId: parseSourceId(t.sourceId),
-      pageTypes: t.pageTypes.filter((pt) => known.has(pt)).slice(0, 6),
-    })),
-  };
+  console.info(
+    `[Planner] in: ${input.sources.length} sources → out: ${result.tasks.length} tasks (raw); pageTypes per task: ${result.tasks.map((t) => t.pageTypes.length).join(',')}`,
+  );
+  const finalTasks = result.tasks.map((t) => ({
+    sourceId: parseSourceId(t.sourceId),
+    pageTypes: t.pageTypes.filter((pt) => known.has(pt)).slice(0, 6),
+  }));
+  console.info(
+    `[Planner] post-filter: ${finalTasks.length} tasks; pageTypes per task: ${finalTasks.map((t) => t.pageTypes.length).join(',')}`,
+  );
+  return { tasks: finalTasks };
 }

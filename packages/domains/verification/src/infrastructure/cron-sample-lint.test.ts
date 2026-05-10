@@ -28,7 +28,7 @@ const buildDeps = (
       list: async () => ({ items: [] }),
       toWire: () => ({}) as never,
     },
-    dispatcher: {
+    lintDispatcher: {
       start: async (args) => startedWithId(args),
       subscribe: async function* () {},
     },
@@ -83,7 +83,7 @@ describe('dailyLintSample', () => {
     let counter = 0;
     const deps: VerificationDeps = {
       ...buildDeps(ids(10), () => undefined),
-      dispatcher: {
+      lintDispatcher: {
         start: async () => {
           // Reject every other dispatch.
           if (counter++ % 2 === 0) throw new Error('boom');

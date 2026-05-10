@@ -10,7 +10,7 @@
     "deploy": "bun --filter @app/web run build && with-secrets --env=prod --path=/apps/api --recursive -- wrangler deploy --env=prod",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "secrets:export": "with-secrets --env=dev --path=/apps/api --recursive -- bunx infisical export --format=dotenv > .dev.vars",
+    "secrets:export": "with-secrets --env=dev --path=/apps/api --recursive -- bash -c 'bunx infisical export --projectId=$(jq -r .workspaceId ../../.infisical.json) --env=dev --path=/apps/api --include-imports --format=dotenv > .dev.vars'",
     "secrets:push": "with-secrets --env=prod --path=/apps/api --recursive -- bunx infisical export --format=dotenv | wrangler secret bulk --env=prod",
     "clean": "rm -rf dist .wrangler .turbo *.tsbuildinfo"
   },
