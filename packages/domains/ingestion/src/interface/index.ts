@@ -24,9 +24,12 @@ export interface IngestionContext extends IngestionDeps {
 const os = implement(ingestionContract).$context<IngestionContext>();
 
 export const ingestionRouter = {
-  authStart: os.authStart.handler(async ({ context }) => {
+  authStart: os.authStart.handler(async ({ context, input }) => {
     try {
-      return await startDriveAuth(context);
+      return await startDriveAuth(
+        context,
+        input?.returnTo !== undefined ? { returnTo: input.returnTo } : {},
+      );
     } catch (err) {
       // Surface the actionable cause (e.g. "GOOGLE_OAUTH_CLIENT_ID is unset")
       // instead of letting oRPC wrap the throw into a generic 500. The

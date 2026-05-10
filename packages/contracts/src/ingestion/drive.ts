@@ -2,6 +2,16 @@ import { oc } from '@orpc/contract';
 import { z } from 'zod';
 import { FolderId, UserId } from '../shared/ids.ts';
 
+export const DriveAuthStartInput = z.object({
+  /**
+   * Optional absolute URL the api should send the user back to after the
+   * OAuth callback completes. The api validates this against an allowlist
+   * before honouring it.
+   */
+  returnTo: z.string().url().optional(),
+});
+export type DriveAuthStartInput = z.infer<typeof DriveAuthStartInput>;
+
 export const DriveAuthStartOutput = z.object({
   authorizationUrl: z.string().url(),
   state: z.string().min(16),
@@ -45,7 +55,10 @@ export const RegisterFolderOutput = z.object({
 });
 
 export const driveContract = {
-  authStart: oc.route({ method: 'POST', path: '/drive/auth/start' }).output(DriveAuthStartOutput),
+  authStart: oc
+    .route({ method: 'POST', path: '/drive/auth/start' })
+    .input(DriveAuthStartInput)
+    .output(DriveAuthStartOutput),
   authCallback: oc
     .route({ method: 'POST', path: '/drive/auth/callback' })
     .input(DriveAuthCallbackInput)

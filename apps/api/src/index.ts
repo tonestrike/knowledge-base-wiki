@@ -41,6 +41,13 @@ type Env = WikiBindings & {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REDIRECT?: string;
+  // Comma-separated list of web origins the OAuth callback is allowed to
+  // 302 the user back to. Required in non-test envs so a malicious
+  // `returnTo` from a tampered authStart can't steer the redirect at an
+  // attacker-controlled host (open-redirect prevention). Falls back to the
+  // request's own origin when unset, which is correct for production
+  // single-origin deploys (Worker serves both `/rpc/*` and the SPA).
+  WEB_APP_ORIGINS?: string;
   // SF1: required in every non-test environment. Boot-time check below throws
   // when missing so production never silently falls back to a zero key.
   OAUTH_TOKEN_KEY_BASE64: string;
@@ -237,14 +244,52 @@ app.use(
   }),
 );
 
+/**
+ * Resolve the post-OAuth redirect target. The caller-provided `returnTo`
+ * (echoed from the OAuth state) is honoured only if its origin matches an
+ * entry in `WEB_APP_ORIGINS` (comma-separated env). Falls back to the
+ * first allowlisted origin, then to `/` (works for single-origin prod
+ * where the Worker serves both `/rpc/*` and the SPA).
+ */
+const resolveRedirect = (env: Env, returnTo: string | undefined, requestUrl: string): string => {
+  const allow = (env.WEB_APP_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  // The request's own origin is always allowlisted: in production the
+  // Worker serves the SPA from this origin, so a `returnTo` that matches
+  // it can never be a vector to anywhere else.
+  try {
+    allow.push(new URL(requestUrl).origin);
+  } catch {
+    /* ignore — env.WEB_APP_ORIGINS still applies */
+  }
+  if (returnTo) {
+    try {
+      const u = new URL(returnTo);
+      if (allow.includes(u.origin)) return returnTo;
+      console.warn('[ingestion.authCallback.GET] returnTo origin not in allowlist', {
+        origin: u.origin,
+      });
+    } catch {
+      /* malformed returnTo → fall through */
+    }
+  }
+  // Default to "?drive=connected" on the first allowlisted origin so the
+  // root route knows the user just completed sign-in.
+  if (allow.length > 0) return `${allow[0]}/?drive=connected`;
+  return '/?drive=connected';
+};
+
 // Google OAuth callback. Must be registered BEFORE the `/rpc/*` oRPC
 // dispatcher below: the contract defines `ingestion.authCallback` as POST
 // (typed RPC clients send the code/state in the body), but Google
 // redirects the user-agent here with a GET carrying `?code=...&state=...`.
 // Without this Hono GET, the dispatcher matches the path, sees the wrong
 // method, and returns 405. We run the same use-case as the POST handler
-// and 302 back to the app's root on success so the freshly stored Drive
-// tokens are immediately usable.
+// and 302 back to whichever web origin started the flow (validated
+// against `WEB_APP_ORIGINS`) so the freshly stored Drive tokens are
+// immediately usable from the SPA.
 app.get('/rpc/ingestion/authCallback', async (c) => {
   const code = c.req.query('code');
   const state = c.req.query('state');
@@ -254,8 +299,8 @@ app.get('/rpc/ingestion/authCallback', async (c) => {
   try {
     const env = c.env as Env;
     const ingestion = buildIngestionContext(env);
-    await completeDriveAuth(ingestion, { code, state });
-    return c.redirect('/', 302);
+    const result = await completeDriveAuth(ingestion, { code, state });
+    return c.redirect(resolveRedirect(env, result.returnTo, c.req.url), 302);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Drive OAuth callback failed.';
     console.error('[ingestion.authCallback.GET] failed', { err: message });

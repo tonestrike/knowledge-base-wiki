@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
 import { CompileTheater } from '../components/compile-theater/compile-theater.tsx';
 import { ErrorState } from '../components/states/error.tsx';
@@ -12,7 +12,20 @@ import { orpc } from '../lib/orpc.ts';
 
 export function WikiRoute() {
   const { wikiId = '' } = useParams();
-  const [compileRunId, setCompileRunId] = useState<string | null>(null);
+  const location = useLocation();
+  // The picker hook seeds `state.compileRunId` so the CompileTheater
+  // mounts on first paint instead of waiting for the user to click
+  // "Compile this folder". We copy it into local state once on mount;
+  // subsequent re-renders don't re-trigger the theater.
+  const seededRunId =
+    typeof (location.state as { compileRunId?: unknown } | null)?.compileRunId === 'string'
+      ? (location.state as { compileRunId: string }).compileRunId
+      : null;
+  const [compileRunId, setCompileRunId] = useState<string | null>(seededRunId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seed once on mount only; later re-renders to the same route shouldn't replay the theater.
+  useEffect(() => {
+    if (seededRunId && compileRunId === null) setCompileRunId(seededRunId);
+  }, []);
   const { markUnavailable } = useLiveMode();
 
   const wiki = useQuery({

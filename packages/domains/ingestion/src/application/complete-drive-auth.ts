@@ -9,6 +9,12 @@ export interface CompleteDriveAuthInput {
 export interface CompleteDriveAuthOutput {
   readonly userId: UserId;
   readonly scopes: string[];
+  /**
+   * Echoed back from the OAuth state record so the api shell knows where
+   * to send the user after a successful callback. The state record was
+   * written at `authStart` time with the originating browser's origin.
+   */
+  readonly returnTo?: string;
 }
 
 export async function completeDriveAuth(
@@ -25,5 +31,9 @@ export async function completeDriveAuth(
     accessToken: tokens.accessToken,
     expiresAt: tokens.expiresAt,
   });
-  return { userId: tokens.userId, scopes: ['drive.readonly'] };
+  return {
+    userId: tokens.userId,
+    scopes: ['drive.readonly'],
+    ...(stored.returnTo !== undefined ? { returnTo: stored.returnTo } : {}),
+  };
 }

@@ -1,27 +1,15 @@
 import type { Wiki } from '@package/contracts/wiki';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
+import { DriveFolderPicker } from '../components/drive/drive-folder-picker.tsx';
 import { Button } from '../components/ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.tsx';
+import { driveFolderIdFrom } from '../lib/drive-errors.ts';
 import { orpc } from '../lib/orpc.ts';
-
-const driveFolderIdFrom = (input: string): string => {
-  const trimmed = input.trim();
-  const m = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/);
-  return m?.[1] ?? trimmed;
-};
-
-const isDriveAuthError = (e: unknown): boolean => {
-  const msg = (e as Error | undefined)?.message ?? '';
-  return /NOT_AUTHENTICATED|missing Drive token|drive_unauthorized|401/i.test(msg);
-};
-
-// Real Drive OAuth happens via a mutation hook in ConnectDriveCard below —
-// the previous `/api/auth/drive` redirect hit a route that doesn't exist
-// on the API and rendered the React Router 404 ErrorBoundary.
+import { usePickAndCompile } from '../lib/use-pick-and-compile.ts';
 
 export function RootRoute() {
   const wikis = useQuery({
@@ -133,22 +121,21 @@ function WikiCard({ wiki }: { wiki: Wiki }) {
 }
 
 function ConnectDriveCard() {
-  const nav = useNavigate();
-  const [url, setUrl] = useState('');
-  const register = useMutation({
-    ...orpc.ingestion.registerFolder.mutationOptions(),
-    onSuccess: (data) => nav(`/wiki/${data.folderId}`),
-  });
-  const authStart = useMutation({
-    ...orpc.ingestion.authStart.mutationOptions(),
-    onSuccess: (data) => {
-      // Hand off to Google's consent screen; they redirect back to
-      // /rpc/ingestion/authCallback once the user grants scopes.
-      window.location.assign(data.authorizationUrl);
-    },
-  });
-  const triggerDriveOauth = () => authStart.mutate(undefined);
-  const authFailure = register.isError && isDriveAuthError(register.error);
+  const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  // Detect the post-OAuth landing flag and clear it from the URL on mount
+  // so a refresh doesn't keep replaying the "just signed in" effects. We
+  // also force the picker's `listFolders` query to refetch — its previous
+  // result was likely an auth error fetched seconds ago, and the cached
+  // 401 would otherwise mask the now-good token.
+  const justConnected = params.get('drive') === 'connected';
+  useEffect(() => {
+    if (!justConnected) return;
+    const next = new URLSearchParams(params);
+    next.delete('drive');
+    setParams(next, { replace: true });
+    qc.invalidateQueries({ queryKey: orpc.ingestion.listFolders.queryKey({ input: {} }) });
+  }, [justConnected, params, setParams, qc]);
 
   return (
     <motion.div
@@ -160,55 +147,58 @@ function ConnectDriveCard() {
         <CardHeader>
           <CardTitle className="font-serif text-2xl">Connect a Drive folder</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Paste a Google Drive folder URL or ID. You'll be prompted to sign in to Drive on first
-            use.
+            Pick a folder from your Google Drive. We'll register it and start a Compile run; you'll
+            land on the wiki as it's being built.
           </p>
-          <form
-            className="flex flex-col gap-2 sm:flex-row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const id = driveFolderIdFrom(url);
-              if (id) register.mutate({ driveFolderId: id, name: 'Demo' });
-            }}
-          >
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://drive.google.com/drive/folders/..."
-              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors focus:outline-hidden focus:ring-2 focus:ring-accent"
-            />
-            <Button variant="accent" type="submit" disabled={register.isPending}>
-              {register.isPending ? 'Connecting…' : 'Connect'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={triggerDriveOauth}
-              disabled={authStart.isPending}
-            >
-              {authStart.isPending ? 'Redirecting…' : 'Sign in to Drive'}
-            </Button>
-          </form>
-          {authFailure ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
-              <p className="text-xs">Drive isn&apos;t connected yet. Reconnect to continue.</p>
-              <Button variant="outline" size="sm" onClick={triggerDriveOauth}>
-                Re-connect Drive
-              </Button>
+          <DriveFolderPicker />
+          <details className="group rounded-md border border-border/60 bg-card/30 px-3 py-2">
+            <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+              Paste a folder URL instead
+            </summary>
+            <div className="mt-3">
+              <PasteFolderForm />
             </div>
-          ) : register.isError ? (
-            <p className="text-xs text-destructive">{String((register.error as Error).message)}</p>
-          ) : authStart.isError ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
-              <p className="text-xs text-destructive">
-                {String((authStart.error as Error).message)}
-              </p>
-            </div>
-          ) : null}
+          </details>
         </CardContent>
       </Card>
     </motion.div>
+  );
+}
+
+/**
+ * The legacy "paste a Drive URL" entry point, kept under a `<details>`
+ * disclosure so it covers the cases the picker can't:
+ *  - Folders shared with you that don't appear in your Drive's My Drive root.
+ *  - Direct links a colleague sent that you want to compile without
+ *    browsing for them.
+ */
+function PasteFolderForm() {
+  const [url, setUrl] = useState('');
+  const { pick, phase, error } = usePickAndCompile();
+  const submitting = phase !== 'idle' && phase !== 'error';
+  return (
+    <form
+      className="flex flex-col gap-2 sm:flex-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const id = driveFolderIdFrom(url);
+        if (id) pick({ driveFolderId: id, name: 'Drive folder' });
+      }}
+    >
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="https://drive.google.com/drive/folders/..."
+        className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors focus:outline-hidden focus:ring-2 focus:ring-accent"
+      />
+      <Button variant="outline" type="submit" disabled={submitting}>
+        {submitting ? 'Working…' : 'Compile'}
+      </Button>
+      {error && phase === 'error' ? (
+        <p className="basis-full text-xs text-destructive">{error.message}</p>
+      ) : null}
+    </form>
   );
 }

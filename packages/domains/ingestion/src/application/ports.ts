@@ -144,6 +144,14 @@ export interface OAuthRepository {
 export interface OAuthStateValue {
   readonly codeVerifier?: string;
   readonly createdAt: string;
+  /**
+   * Absolute URL the api should redirect the user-agent back to after the
+   * OAuth callback completes. Captured from the `authStart` request so the
+   * web app at a different origin (e.g. `https://web.tenex.localhost:1355`
+   * in dev) lands on its own home page rather than the api's. The api
+   * validates the host against an allowlist before redirecting.
+   */
+  readonly returnTo?: string;
 }
 
 export interface OAuthStateStore {
