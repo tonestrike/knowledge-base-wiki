@@ -42,7 +42,19 @@ export const StartIngestOutput = z.object({
   sourceCount: z.number().int().nonnegative(),
 });
 
+export const Folder = z.object({
+  id: FolderId,
+  name: z.string().min(1),
+  driveFolderId: z.string().min(1),
+});
+export type Folder = z.infer<typeof Folder>;
+export const GetFolderInput = z.object({ id: FolderId });
+
 export const sourcesContract = {
+  getFolder: oc
+    .route({ method: 'GET', path: '/folders/{id}' })
+    .input(GetFolderInput)
+    .output(Folder),
   getSource: oc
     .route({ method: 'GET', path: '/sources/{id}' })
     .input(GetSourceInput)

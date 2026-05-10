@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { AppShell } from '../components/app-shell.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
 import { WikiPageView } from '../components/wiki-page/wiki-page.tsx';
@@ -14,20 +15,28 @@ export function WikiPageRoute() {
 
   if (page.isPending) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-12">
-        <LoadingState rows={6} />
-      </main>
+      <AppShell>
+        <main className="mx-auto max-w-6xl px-6 py-12">
+          <LoadingState rows={6} />
+        </main>
+      </AppShell>
     );
   }
   if (page.isError || !page.data) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-12">
-        <ErrorState
-          message={(page.error as Error | null)?.message ?? 'Failed to load page.'}
-          onRetry={() => page.refetch()}
-        />
-      </main>
+      <AppShell>
+        <main className="mx-auto max-w-6xl px-6 py-12">
+          <ErrorState
+            message={(page.error as Error | null)?.message ?? 'Failed to load page.'}
+            onRetry={() => page.refetch()}
+          />
+        </main>
+      </AppShell>
     );
   }
-  return <WikiPageView page={page.data} />;
+  return (
+    <AppShell trail={[{ label: page.data.title }]}>
+      <WikiPageView page={page.data} />
+    </AppShell>
+  );
 }

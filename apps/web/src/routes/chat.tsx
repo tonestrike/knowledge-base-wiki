@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AnswerSegmentView } from '../components/answer/answer-segment.tsx';
 import { useAnswerStream } from '../components/answer/use-answer-stream.ts';
+import { AppShell } from '../components/app-shell.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
-import { ThemeToggle } from '../components/theme-toggle.tsx';
 import { Button } from '../components/ui/button.tsx';
 import { Card, CardContent } from '../components/ui/card.tsx';
 import { isBackendNotImplemented, useLiveMode } from '../lib/live-mode.tsx';
@@ -47,27 +47,33 @@ function ChatNewRoute() {
   // an empty / malformed wikiId silently strands the user on a spinner.
   if (!wikiIdValid) {
     return (
-      <main className="mx-auto max-w-3xl space-y-4 px-6 py-10">
-        <ErrorState message="No wiki specified for this chat." />
-        <p className="text-sm text-muted-foreground">
-          <Link to="/" className="underline-offset-4 hover:text-accent hover:underline">
-            ← Back to folder picker
-          </Link>
-        </p>
-      </main>
+      <AppShell>
+        <main className="mx-auto max-w-3xl space-y-4 px-6 py-10">
+          <ErrorState message="No wiki specified for this chat." />
+          <p className="text-sm text-muted-foreground">
+            <Link to="/" className="underline-offset-4 hover:text-accent hover:underline">
+              ← Back to folder picker
+            </Link>
+          </p>
+        </main>
+      </AppShell>
     );
   }
   if (open.isError) {
     return (
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <ErrorState message={(open.error as Error).message} />
-      </main>
+      <AppShell wikiId={wikiId}>
+        <main className="mx-auto max-w-3xl px-6 py-10">
+          <ErrorState message={(open.error as Error).message} />
+        </main>
+      </AppShell>
     );
   }
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <LoadingState rows={2} />
-    </main>
+    <AppShell wikiId={wikiId}>
+      <main className="mx-auto max-w-3xl px-6 py-10">
+        <LoadingState rows={2} />
+      </main>
+    </AppShell>
   );
 }
 
@@ -97,71 +103,74 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
 
   if (conv.isPending) {
     return (
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <LoadingState rows={3} />
-      </main>
+      <AppShell>
+        <main className="mx-auto max-w-3xl px-6 py-10">
+          <LoadingState rows={3} />
+        </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="mx-auto max-w-3xl space-y-8 px-6 py-10">
-      <header className="flex items-baseline justify-between">
-        <h1 className="font-serif text-3xl tracking-tight">{conv.data?.title ?? 'Chat'}</h1>
-        <ThemeToggle />
-      </header>
+    <AppShell wikiId={conv.data?.wikiId} trail={[{ label: conv.data?.title ?? 'New chat' }]}>
+      <main className="mx-auto max-w-3xl space-y-8 px-6 py-10">
+        <header>
+          <h1 className="font-serif text-3xl tracking-tight">{conv.data?.title ?? 'Chat'}</h1>
+        </header>
 
-      {ask.isError ? (
-        <ErrorState message={(ask.error as Error).message} onRetry={() => ask.reset()} />
-      ) : null}
+        {ask.isError ? (
+          <ErrorState message={(ask.error as Error).message} onRetry={() => ask.reset()} />
+        ) : null}
 
-      {activeTurnId ? (
-        <Card>
-          <CardContent className="space-y-4 py-6">
-            {segments.length === 0 && !error ? (
-              <p className="text-sm text-muted-foreground">streaming…</p>
-            ) : (
-              segments.map((s, i) => (
-                <AnswerSegmentView key={`live-seg-${i}-${s.kind}`} segment={s} />
-              ))
-            )}
-            {error ? (
-              <ErrorState
-                message={`Answer stream failed: ${error}`}
-                onRetry={() => {
-                  // Force the hook to tear down and resubscribe by
-                  // toggling the turn id — the parent mutation flow will
-                  // rehydrate via React Query if the user retries Ask.
-                  setActiveTurnId(null);
-                }}
-              />
-            ) : null}
-            {!finished && !error ? (
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                streaming…
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+        {activeTurnId ? (
+          <Card>
+            <CardContent className="space-y-4 py-6">
+              {segments.length === 0 && !error ? (
+                <p className="text-sm text-muted-foreground">streaming…</p>
+              ) : (
+                segments.map((s, i) => (
+                  <AnswerSegmentView key={`live-seg-${i}-${s.kind}`} segment={s} />
+                ))
+              )}
+              {error ? (
+                <ErrorState
+                  message={`Answer stream failed: ${error}`}
+                  onRetry={() => {
+                    // Force the hook to tear down and resubscribe by
+                    // toggling the turn id — the parent mutation flow will
+                    // rehydrate via React Query if the user retries Ask.
+                    setActiveTurnId(null);
+                  }}
+                />
+              ) : null}
+              {!finished && !error ? (
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  streaming…
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!draft.trim()) return;
-          ask.mutate({ conversationId, question: draft });
-        }}
-      >
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask the wiki…"
-          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <Button type="submit" variant="accent" disabled={ask.isPending || !draft.trim()}>
-          Ask
-        </Button>
-      </form>
-    </main>
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!draft.trim()) return;
+            ask.mutate({ conversationId, question: draft });
+          }}
+        >
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Ask the wiki…"
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <Button type="submit" variant="accent" disabled={ask.isPending || !draft.trim()}>
+            Ask
+          </Button>
+        </form>
+      </main>
+    </AppShell>
   );
 }
