@@ -1,29 +1,69 @@
 import { ORPCError, implement } from '@orpc/server';
+import { compileRunId as parseCompileRunId } from '@package/contracts/shared';
 import { wikiContract } from '@package/contracts/wiki';
 import type { Clock } from '@package/shared-kernel';
+import { getCompileRun } from '../application/get-compile-run.ts';
+import { getPage } from '../application/get-page.ts';
+import { getSchema } from '../application/get-schema.ts';
+import { getWiki } from '../application/get-wiki.ts';
+import { listPages } from '../application/list-pages.ts';
+import { listWikis } from '../application/list-wikis.ts';
+import type { WikiDeps } from '../application/ports.ts';
 
-export interface WikiContext {
+export interface WikiContext extends WikiDeps {
   clock: Clock;
 }
 
+const wrapNotFound = (e: unknown): never => {
+  if (e instanceof Error && /not found/i.test(e.message)) {
+    throw new ORPCError('NOT_FOUND', { message: e.message });
+  }
+  throw e;
+};
+
 const os = implement(wikiContract).$context<WikiContext>();
 
-const todo = (procedure: string): never => {
-  throw new ORPCError('NOT_IMPLEMENTED', {
-    message: `wiki.${procedure} is scaffolded but not implemented (Slice 2.B)`,
-  });
-};
-
 export const wikiRouter = {
-  getWiki: os.getWiki.handler(() => todo('getWiki')),
-  getSchema: os.getSchema.handler(() => todo('getSchema')),
-  listWikis: os.listWikis.handler(() => todo('listWikis')),
-  getPage: os.getPage.handler(() => todo('getPage')),
-  listPages: os.listPages.handler(() => todo('listPages')),
-  startCompile: os.startCompile.handler(() => todo('startCompile')),
-  getCompileRun: os.getCompileRun.handler(() => todo('getCompileRun')),
-  // biome-ignore lint/correctness/useYield: stub generator throws before yielding (Slice 2.B wires the real stream)
-  streamCompileEvents: os.streamCompileEvents.handler(async function* () {
-    todo('streamCompileEvents');
+  getWiki: os.getWiki.handler(async ({ context, input }) => {
+    try {
+      return await getWiki(context, input);
+    } catch (e) {
+      return wrapNotFound(e);
+    }
+  }),
+  getSchema: os.getSchema.handler(async ({ context, input }) => {
+    try {
+      return await getSchema(context, input);
+    } catch (e) {
+      return wrapNotFound(e);
+    }
+  }),
+  listWikis: os.listWikis.handler(({ context, input }) => listWikis(context, input)),
+  getPage: os.getPage.handler(async ({ context, input }) => {
+    try {
+      return await getPage(context, input);
+    } catch (e) {
+      return wrapNotFound(e);
+    }
+  }),
+  listPages: os.listPages.handler(({ context, input }) => listPages(context, input)),
+  startCompile: os.startCompile.handler(async ({ context, input }) => {
+    const id = parseCompileRunId(context.newId());
+    await context.dispatcher.start({ compileRunId: id, folderId: input.folderId });
+    return { compileRunId: id };
+  }),
+  getCompileRun: os.getCompileRun.handler(async ({ context, input }) => {
+    try {
+      return await getCompileRun(context, input);
+    } catch (e) {
+      return wrapNotFound(e);
+    }
+  }),
+  streamCompileEvents: os.streamCompileEvents.handler(async function* ({ context, input }) {
+    for await (const e of context.dispatcher.subscribe(input.compileRunId)) {
+      yield e;
+    }
   }),
 };
+
+export { subscribeWikiEvents } from './cross-context-subscriptions.ts';

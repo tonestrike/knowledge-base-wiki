@@ -14,22 +14,55 @@ enabled = true
 [vars]
 ENVIRONMENT = "production"
 
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "tenex"
-# database_id = "TODO"
+# Ingestion bindings. IDs are placeholders — run:
+#   bunx wrangler d1 create tenex
+#   bunx wrangler kv namespace create CACHE
+#   bunx wrangler r2 bucket create tenex
+# and paste the returned IDs in.
 
-# [[kv_namespaces]]
-# binding = "CACHE"
-# id = "TODO"
+[[d1_databases]]
+binding = "DB"
+database_name = "tenex"
+database_id = "TODO_run_wrangler_d1_create"
 
-# [[r2_buckets]]
-# binding = "STORAGE"
-# bucket_name = "tenex"
+[[kv_namespaces]]
+binding = "CACHE"
+id = "TODO_run_wrangler_kv_create"
+
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "tenex"
+
+# CompileRunDO orchestrates the multi-minute Compile so it can outlive the
+# 30s Workers request limit. Per spec §3.1.
+[[durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CompileRunDO"]
 
 [env.dev]
 [env.dev.vars]
 ENVIRONMENT = "development"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "tenex"
+database_id = "TODO_run_wrangler_d1_create"
+
+[[env.dev.kv_namespaces]]
+binding = "CACHE"
+id = "TODO_run_wrangler_kv_create"
+
+[[env.dev.r2_buckets]]
+binding = "STORAGE"
+bucket_name = "tenex"
+
+[[env.dev.durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
 
 # Production: same Worker serves /rpc/* (api) and apps/web/dist (SPA).
 # Per ADR-0002. Scoped to env.prod so `wrangler dev` (top-level config)
@@ -43,8 +76,25 @@ ENVIRONMENT = "production"
 [env.prod.observability]
 enabled = true
 
+[[env.prod.durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
+
 [env.prod.assets]
 directory = "../web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/rpc/*"]
+
+[[env.prod.d1_databases]]
+binding = "DB"
+database_name = "tenex"
+database_id = "TODO_run_wrangler_d1_create"
+
+[[env.prod.kv_namespaces]]
+binding = "CACHE"
+id = "TODO_run_wrangler_kv_create"
+
+[[env.prod.r2_buckets]]
+binding = "STORAGE"
+bucket_name = "tenex"

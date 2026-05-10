@@ -1,18 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
-import { orpc } from './lib/orpc.ts';
+import { RouterProvider } from 'react-router-dom';
+import { CitationFlightProvider } from './components/citation/use-citation-flight.tsx';
+import { BackendUnavailableBanner } from './components/states/backend-unavailable-banner.tsx';
+import { LiveModeProvider } from './lib/live-mode.tsx';
+import { router } from './router.tsx';
 
 export function App() {
-  const health = useQuery(orpc.core.health.queryOptions());
-
   return (
-    <main style={{ fontFamily: 'system-ui', padding: '2rem' }}>
-      <h1>tenex</h1>
-      <section>
-        <h2>health</h2>
-        {health.isPending && <p>checking...</p>}
-        {health.isError && <p>error: {String(health.error)}</p>}
-        {health.data && <pre>{JSON.stringify(health.data, null, 2)}</pre>}
-      </section>
-    </main>
+    <LiveModeProvider>
+      <CitationFlightProvider>
+        <BackendUnavailableBanner />
+        <RouterProvider router={router} />
+      </CitationFlightProvider>
+    </LiveModeProvider>
   );
 }

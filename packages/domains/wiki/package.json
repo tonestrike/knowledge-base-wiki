@@ -7,7 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./interface": "./src/interface/index.ts"
+    "./interface": "./src/interface/index.ts",
+    "./infrastructure": "./src/infrastructure/index.ts",
+    "./infrastructure/durable-objects": "./src/infrastructure/durable_objects/compile-run-do.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -15,9 +17,11 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^0.7.2",
     "@orpc/server": "^1.14.2",
     "@package/contracts": "workspace:*",
     "@package/shared-kernel": "workspace:*",
+    "ai": "^4.3.16",
     "zod": "^3.24.1"
   },
   "devDependencies": {

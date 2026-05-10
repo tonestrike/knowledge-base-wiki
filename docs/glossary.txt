@@ -116,3 +116,11 @@ RØDE
 kbps
 oneline
 checkpointing
+OpenRouter
+Bedrock
+maxItems
+minItems
+worktree
+worktrees
+openrouter
+unwired

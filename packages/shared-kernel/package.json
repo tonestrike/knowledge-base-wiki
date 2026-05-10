@@ -10,10 +10,12 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "devDependencies": {
     "@tooling/tsconfig": "workspace:*",
+    "@types/bun": "^1.2.18",
     "typescript": "^5.7.2"
   }
 }

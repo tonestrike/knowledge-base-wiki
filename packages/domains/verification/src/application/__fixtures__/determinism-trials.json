@@ -1,0 +1,57 @@
+{
+  "$comment": "Recorded Verifier output for the planted-contradiction probe (PR #6 silent-failure-hunter finding 11). Each entry is one trial's parsed Verdict object. The first entry is from the 1.A risk-spike report (claude-opus-4-7 @ temperature 0, OpenRouter); the remaining nine are duplicates because the live probe produced identical output across all 10 trials at temperature 0. To re-record, run `RUN_DETERMINISM_TESTS=1 OPEN_ROUTER_API_KEY=... bun --filter @domain/verification test src/application/determinism.test.ts`, paste each live trial's verdict into this array, and commit. Re-recording is required when the model id, temperature, system prompt, or schema in `infrastructure/anthropic-verifier.ts` changes.",
+  "model": "anthropic/claude-opus-4-7",
+  "temperature": 0,
+  "trials": [
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    },
+    {
+      "verdict": "contradicted",
+      "evidenceText": "Q3 NRR landed at 105%, four points below the 109% target.",
+      "correction": { "replacementText": "Q3 NRR was 105%, missing the 109% target." }
+    }
+  ]
+}
