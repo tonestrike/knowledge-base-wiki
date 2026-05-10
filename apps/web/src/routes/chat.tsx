@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ActivityTimeline, type Phase } from '../components/answer/activity-timeline.tsx';
+import { AgentLog, deriveLog } from '../components/answer/agent-log.tsx';
 import { AnswerSegmentView } from '../components/answer/answer-segment.tsx';
 import { useAnswerStream } from '../components/answer/use-answer-stream.ts';
 import { AppShell } from '../components/app-shell.tsx';
@@ -83,9 +83,9 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
 
   const [draft, setDraft] = useState('');
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
-  const [activeQuestion, setActiveQuestion] = useState<string | null>(null);
-  const [askedAt, setAskedAt] = useState<number | null>(null);
-  const [tickMs, setTickMs] = useState(0);
+  const [activeQuestion, setActiveQuestion] = useState<string>('');
+  const [askedAt, setAskedAt] = useState<number>(Date.now());
+  const [, setTickMs] = useState(0);
 
   const ask = useMutation({
     ...orpc.chat.ask.mutationOptions(),
@@ -95,27 +95,20 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
     },
   });
 
-  const { segments, finished, error } = useAnswerStream(activeTurnId);
+  const { segments, events, finished, error } = useAnswerStream(activeTurnId);
 
   // Tick a soft elapsed-time counter while the answer is in flight so the
-  // active phase pill shows live progress (Vercel AI Elements convention).
+  // log timestamps and progress bar stay live.
   useEffect(() => {
-    if (!askedAt || finished || error) return;
-    const t = setInterval(() => setTickMs(Date.now() - askedAt), 100);
+    if (finished || error) return;
+    if (!activeTurnId && !ask.isPending) return;
+    const t = setInterval(() => setTickMs(Date.now()), 200);
     return () => clearInterval(t);
-  }, [askedAt, finished, error]);
+  }, [activeTurnId, ask.isPending, finished, error]);
 
-  const phase: Phase = error
-    ? 'failed'
-    : finished
-      ? 'finished'
-      : segments.length > 0
-        ? 'synthesizing'
-        : ask.isPending || (activeTurnId && segments.length === 0)
-          ? 'researching'
-          : 'asking';
-
-  const elapsed = !askedAt ? 0 : finished || error ? tickMs : Date.now() - askedAt;
+  const log = activeTurnId ? deriveLog(events, activeQuestion, askedAt) : null;
+  const status = log?.status ?? (ask.isPending ? 'queued' : 'queued');
+  const elapsedSec = ((Date.now() - askedAt) / 1000).toFixed(1);
 
   if (conv.isPending) {
     return (
@@ -129,18 +122,15 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
 
   return (
     <AppShell wikiId={conv.data?.wikiId} trail={[{ label: conv.data?.title ?? 'New chat' }]}>
-      <main className="mx-auto max-w-3xl space-y-8 px-6 py-10">
+      <main className="mx-auto max-w-4xl space-y-8 px-6 py-10">
         <motion.header
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
         >
-          <h1 className="font-serif text-4xl tracking-tight">
-            {conv.data?.title ?? 'Ask the wiki'}
-          </h1>
+          <h1 className="font-serif text-4xl tracking-tight">Ask the wiki</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Every claim in the answer cites the source it came from. Click any chip to see the
-            verbatim quote.
+            Every claim cites the source it came from. Click any chip to see the verbatim quote.
           </p>
         </motion.header>
 
@@ -148,7 +138,7 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
           <ErrorState message={(ask.error as Error).message} onRetry={() => ask.reset()} />
         ) : null}
 
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {activeTurnId ? (
             <motion.div
               key={activeTurnId}
@@ -156,65 +146,78 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ type: 'spring', stiffness: 240, damping: 26 }}
-              className="space-y-4"
+              className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]"
             >
-              {activeQuestion ? (
+              <div className="space-y-4">
                 <Card className="border-accent/30">
                   <CardContent className="py-4">
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
                       You asked
                     </p>
                     <p className="mt-1 font-serif text-lg leading-snug">{activeQuestion}</p>
                   </CardContent>
                 </Card>
-              ) : null}
 
-              <ActivityTimeline
-                phase={phase}
-                durationMs={elapsed}
-                segmentCount={segments.length}
-                errorMessage={error}
-                modelName="anthropic/claude-sonnet-4.6"
-              />
+                <Card>
+                  <CardContent className="space-y-4 py-6">
+                    {segments.length === 0 && !error ? (
+                      <ShimmeringPlaceholder />
+                    ) : (
+                      <AnimatePresence initial={false}>
+                        {segments.map((s, i) => (
+                          <motion.div
+                            key={`live-seg-${i}-${s.kind}`}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, delay: i * 0.04 }}
+                          >
+                            <AnswerSegmentView segment={s} />
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    )}
+                    {error ? (
+                      <ErrorState
+                        message={`Answer stream failed: ${error}`}
+                        onRetry={() => setActiveTurnId(null)}
+                      />
+                    ) : null}
+                  </CardContent>
+                </Card>
+              </div>
 
-              <Card>
-                <CardContent className="space-y-4 py-6">
-                  {segments.length === 0 && !error ? (
-                    <ShimmeringPlaceholder />
-                  ) : (
-                    <AnimatePresence initial={false}>
-                      {segments.map((s, i) => (
-                        <motion.div
-                          key={`live-seg-${i}-${s.kind}`}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.2, delay: i * 0.04 }}
-                        >
-                          <AnswerSegmentView segment={s} />
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  )}
-                  {error ? (
-                    <ErrorState
-                      message={`Answer stream failed: ${error}`}
-                      onRetry={() => setActiveTurnId(null)}
-                    />
-                  ) : null}
-                </CardContent>
-              </Card>
+              <aside className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                    Agent thoughts
+                  </p>
+                  <StatusPill status={status} elapsed={elapsedSec} />
+                </div>
+                <Card>
+                  <CardContent className="py-5">
+                    {log ? (
+                      <AgentLog entries={log.entries} startedAt={askedAt} />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">waiting for turn…</p>
+                    )}
+                  </CardContent>
+                </Card>
+                <p className="font-mono text-[10px] text-muted-foreground/80">
+                  Researcher: anthropic/claude-sonnet-4.6 · Synthesizer: anthropic/claude-sonnet-4.6
+                </p>
+              </aside>
             </motion.div>
           ) : null}
         </AnimatePresence>
 
         <form
-          className="flex gap-2"
+          className="flex items-stretch gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const q = draft.trim();
             if (!q) return;
             setActiveQuestion(q);
-            setActiveTurnId(null); // tear down previous turn's stream
+            setActiveTurnId(null);
             setAskedAt(Date.now());
             setTickMs(0);
             setDraft('');
@@ -225,14 +228,59 @@ function ChatActiveRoute({ conversationId }: { conversationId: string }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Ask the wiki…"
-            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            className="flex-1 rounded-md border border-input bg-background px-4 py-3 text-base font-serif transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
-          <Button type="submit" variant="accent" disabled={ask.isPending || !draft.trim()}>
+          <Button
+            type="submit"
+            variant="accent"
+            disabled={ask.isPending || !draft.trim()}
+            className="px-6"
+          >
             Ask
           </Button>
         </form>
       </main>
     </AppShell>
+  );
+}
+
+function StatusPill({
+  status,
+  elapsed,
+}: {
+  status: 'queued' | 'researching' | 'synthesizing' | 'finished' | 'failed';
+  elapsed: string;
+}) {
+  const tone =
+    status === 'finished'
+      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+      : status === 'failed'
+        ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+        : 'border-accent/40 bg-accent/10 text-accent';
+  const label =
+    status === 'researching'
+      ? 'researching'
+      : status === 'synthesizing'
+        ? 'synthesizing'
+        : status === 'finished'
+          ? 'done'
+          : status === 'failed'
+            ? 'failed'
+            : 'queued';
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${tone}`}
+    >
+      {status !== 'finished' && status !== 'failed' ? (
+        <span className="relative inline-flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+        </span>
+      ) : (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+      )}
+      {label} · {elapsed}s
+    </span>
   );
 }
 
@@ -250,7 +298,7 @@ function ShimmeringPlaceholder() {
             repeat: Number.POSITIVE_INFINITY,
             ease: 'easeInOut',
           }}
-          className="h-3 w-full rounded bg-muted-foreground/20"
+          className="h-3 rounded bg-muted-foreground/20"
           style={{ width: `${100 - i * 12}%` }}
         />
       ))}

@@ -19,9 +19,9 @@ const isDriveAuthError = (e: unknown): boolean => {
   return /NOT_AUTHENTICATED|missing Drive token|drive_unauthorized|401/i.test(msg);
 };
 
-const triggerDriveOauth = () => {
-  window.location.assign('/api/auth/drive');
-};
+// Real Drive OAuth happens via a mutation hook in ConnectDriveCard below —
+// the previous `/api/auth/drive` redirect hit a route that doesn't exist
+// on the API and rendered the React Router 404 ErrorBoundary.
 
 export function RootRoute() {
   const wikis = useQuery({
@@ -139,6 +139,15 @@ function ConnectDriveCard() {
     ...orpc.ingestion.registerFolder.mutationOptions(),
     onSuccess: (data) => nav(`/wiki/${data.folderId}`),
   });
+  const authStart = useMutation({
+    ...orpc.ingestion.authStart.mutationOptions(),
+    onSuccess: (data) => {
+      // Hand off to Google's consent screen; they redirect back to
+      // /rpc/ingestion/authCallback once the user grants scopes.
+      window.location.assign(data.authorizationUrl);
+    },
+  });
+  const triggerDriveOauth = () => authStart.mutate(undefined);
   const authFailure = register.isError && isDriveAuthError(register.error);
 
   return (
@@ -173,8 +182,13 @@ function ConnectDriveCard() {
             <Button variant="accent" type="submit" disabled={register.isPending}>
               {register.isPending ? 'Connecting…' : 'Connect'}
             </Button>
-            <Button type="button" variant="outline" onClick={triggerDriveOauth}>
-              Sign in to Drive
+            <Button
+              type="button"
+              variant="outline"
+              onClick={triggerDriveOauth}
+              disabled={authStart.isPending}
+            >
+              {authStart.isPending ? 'Redirecting…' : 'Sign in to Drive'}
             </Button>
           </form>
           {authFailure ? (

@@ -10,6 +10,8 @@ import {
 
 export interface AnswerStreamState {
   segments: AnswerSegment[];
+  /** Raw events so the UI can render a thought log of what just happened. */
+  events: ReadonlyArray<AnswerEvent>;
   finished: boolean;
   error: string | null;
 }
@@ -51,5 +53,10 @@ export function useAnswerStream(turnId: string | null): AnswerStreamState {
     if (e.kind === 'AnswerSegment') segments[e.index] = e.segment;
   }
   const finished = events.some((e) => e.kind === 'AnswerFinished') || done;
-  return { segments: segments.filter((s): s is AnswerSegment => s !== undefined), finished, error };
+  return {
+    segments: segments.filter((s): s is AnswerSegment => s !== undefined),
+    events,
+    finished,
+    error,
+  };
 }
