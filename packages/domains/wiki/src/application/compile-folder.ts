@@ -72,6 +72,27 @@ export async function compileFolder(
       sourceCount: sourceList.length,
     });
 
+    // Pipeline-narrated checkpoints (`AgentThought`). These are deterministic
+    // template strings — zero LLM cost — that surface in the CompileTheater's
+    // Agents lane so the user sees what the orchestrator is doing right now.
+    // The typed events (CompileStarted / SchemaInferred / PageDrafted / …)
+    // still fire on their own and drive the Sources / Pages lanes.
+    const thought = (
+      agent: 'Compiler' | 'SchemaInferrer' | 'Researcher' | 'Drafter' | 'Linker' | 'IndexBuilder',
+      message: string,
+    ) =>
+      deps.emit({
+        kind: 'AgentThought',
+        compileRunId: input.compileRunId,
+        agent,
+        message,
+      });
+
+    await thought(
+      'Compiler',
+      `Reading ${sourceList.length} source${sourceList.length === 1 ? '' : 's'} from the folder…`,
+    );
+
     // 1. Schema inference (read first 10 sources) ---------------------------
     run = CompileRun.advance(run, 'inferring-schema', deps.now().toISOString());
     await deps.runs.update(run);
@@ -83,6 +104,10 @@ export async function compileFolder(
       if (!r) throw new Error(`Source not readable: ${s.sourceId}`);
       headTexts.push(r);
     }
+    await thought(
+      'SchemaInferrer',
+      `Inferring schema from the first ${headTexts.length} source${headTexts.length === 1 ? '' : 's'}…`,
+    );
     const { schema, reason } = await inferSchema({ llm: deps.llm }, { sources: headTexts });
     await deps.emit({
       kind: 'SchemaInferred',
@@ -90,6 +115,10 @@ export async function compileFolder(
       schema,
       reason,
     });
+    await thought(
+      'SchemaInferrer',
+      `Schema settled: ${schema.pageTypes.length} PageType${schema.pageTypes.length === 1 ? '' : 's'}, ${schema.relations.length} relation${schema.relations.length === 1 ? '' : 's'}.`,
+    );
 
     // 2. Wiki record --------------------------------------------------------
     const wid = parseWikiId(deps.newId());
@@ -132,6 +161,10 @@ export async function compileFolder(
     const settled: Array<
       PromiseSettledResult<{ sourceId: SourceId; findings: EnrichedFinding[] }>
     > = [];
+    await thought(
+      'Researcher',
+      `Reading ${tasks.length} source${tasks.length === 1 ? '' : 's'} for findings…`,
+    );
     for (const t of tasks) {
       try {
         const src = allTexts.find((s) => s.sourceId === t.sourceId);
@@ -145,6 +178,7 @@ export async function compileFolder(
           });
           continue;
         }
+        await thought('Researcher', `Reading ${src.filename} for ${t.pageTypes.join(', ')}…`);
         const { findings } = await researchSource(
           { llm: deps.llm },
           { source: src, pageTypes: t.pageTypes },
@@ -215,6 +249,10 @@ export async function compileFolder(
         console.info(
           `[compile-folder] Drafter dispatch pageType=${pt.name} findings=${draftFindings.length}`,
         );
+        await thought(
+          'Drafter',
+          `Drafting ${pt.name} page from ${draftFindings.length} finding${draftFindings.length === 1 ? '' : 's'}…`,
+        );
         const draftStart = Date.now();
         const { draft } = await draftPage(
           { llm: deps.llm },
@@ -272,6 +310,7 @@ export async function compileFolder(
     run = CompileRun.advance(run, 'linking', deps.now().toISOString());
     await deps.runs.update(run);
 
+    await thought('Linker', `Resolving backlinks across ${conceptDrafts.length} pages…`);
     const { backlinks: candidateBacklinks } = resolveBacklinks(conceptDrafts, schema.relations);
     // SF5 / TD1 — Wiki owns relation arity. Violations are dropped from the
     // Wiki and surfaced as typed events; they MUST NOT be persisted to D1
@@ -325,6 +364,12 @@ export async function compileFolder(
       newId: deps.newId,
       now: deps.now,
     });
+    await thought(
+      'Linker',
+      `Resolved ${backlinks.length} backlink${backlinks.length === 1 ? '' : 's'}${
+        violations.length > 0 ? `; dropped ${violations.length} arity violation(s)` : ''
+      }.`,
+    );
     for (const ip of indexPages) {
       await deps.emit({
         kind: 'IndexBuilt',
@@ -332,6 +377,10 @@ export async function compileFolder(
         pageType: ip.pageType,
         pageCount: ip.entries.length,
       });
+      await thought(
+        'IndexBuilder',
+        `Indexed ${ip.pageType} (${ip.entries.length} page${ip.entries.length === 1 ? '' : 's'}).`,
+      );
     }
 
     // Structural guard (TD2): every drafted page must declare a pageType
@@ -380,6 +429,10 @@ export async function compileFolder(
     const finalWiki = Wiki.recordCompile(wiki, endedAt, totalPages);
     await deps.wikis.update(finalWiki);
 
+    await thought(
+      'Compiler',
+      `Compile finished — ${totalPages} page${totalPages === 1 ? '' : 's'}.`,
+    );
     await deps.emit({
       kind: 'CompileFinished',
       compileRunId: input.compileRunId,

@@ -48,3 +48,5 @@ btoa
 atob
 bindable
 runtime
+AgentThought
+agentthought

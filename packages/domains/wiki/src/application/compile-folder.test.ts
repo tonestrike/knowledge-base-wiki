@@ -181,6 +181,39 @@ describe('compileFolder', () => {
     expect(seen).toEqual(['finished']);
   });
 
+  it('emits AgentThought narrative checkpoints around the typed events', async () => {
+    const { deps, emitted } = fakeRuntime();
+    await compileFolder(deps, { compileRunId: RUN, folderId: FOLDER });
+
+    // The fake runtime's `emitted` array is typed loosely as `{kind: string}`;
+    // cast to the contract shape for the assertions below.
+    const thoughts = emitted.filter((e) => e.kind === 'AgentThought') as Array<{
+      kind: 'AgentThought';
+      agent: string;
+      message: string;
+    }>;
+    // At least one per major phase + a final wrap-up.
+    expect(thoughts.length).toBeGreaterThanOrEqual(5);
+
+    const agents = new Set(thoughts.map((t) => t.agent));
+    expect(agents.has('Compiler')).toBe(true);
+    expect(agents.has('SchemaInferrer')).toBe(true);
+    expect(agents.has('Drafter')).toBe(true);
+    expect(agents.has('Linker')).toBe(true);
+    expect(agents.has('IndexBuilder')).toBe(true);
+
+    // The first AgentThought lands before SchemaInferred; the last lands
+    // before CompileFinished. This locks the "narrative wraps the run"
+    // invariant — if a refactor moves an emit out of order it'll fail loud.
+    const firstThoughtIdx = emitted.findIndex((e) => e.kind === 'AgentThought');
+    const schemaIdx = emitted.findIndex((e) => e.kind === 'SchemaInferred');
+    const finishedIdx = emitted.findIndex((e) => e.kind === 'CompileFinished');
+    const lastThoughtIdx = emitted.map((e) => e.kind).lastIndexOf('AgentThought');
+    expect(firstThoughtIdx).toBeGreaterThanOrEqual(0);
+    expect(firstThoughtIdx).toBeLessThan(schemaIdx);
+    expect(lastThoughtIdx).toBeLessThan(finishedIdx);
+  });
+
   it('marks the run failed and re-throws when sources are empty', async () => {
     const { deps } = fakeRuntime();
     deps.sources = {

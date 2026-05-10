@@ -1,9 +1,15 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect, useRef } from 'react';
 import { ErrorState } from '../states/error.tsx';
 import { AgentLane } from './agent-lane.tsx';
 import { EmergingPage } from './emerging-page.tsx';
 import { SourceCard } from './source-card.tsx';
+import { ThoughtLine } from './thought-line.tsx';
 import { useCompileStream } from './use-compile-stream.ts';
+
+/** Cap on visible AgentThought lines so a long compile doesn't grow the
+ *  DOM unbounded. The scroll stays pinned to the newest line. */
+const MAX_VISIBLE_THOUGHTS = 80;
 
 export interface CompileTheaterProps {
   /**
@@ -25,6 +31,18 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
   const schemaEvent = events.find((e) => e.kind === 'SchemaInferred');
   const drafted = events.filter((e) => e.kind === 'PageDrafted');
   const compileStarted = events.find((e) => e.kind === 'CompileStarted');
+  const thoughts = events.filter((e) => e.kind === 'AgentThought').slice(-MAX_VISIBLE_THOUGHTS);
+  const thoughtsScrollRef = useRef<HTMLDivElement | null>(null);
+  // Pin the agent-thoughts scroll to the newest line. Each emit grows the
+  // list by one; we scroll to the bottom on every change so the most
+  // recent narrative is always in view. The ref read is intentionally
+  // outside the dep array — only `thoughts.length` should re-run this.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ref deref isn't a tracked dep.
+  useEffect(() => {
+    const el = thoughtsScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [thoughts.length]);
   const sourceCards =
     compileStarted && compileStarted.kind === 'CompileStarted'
       ? Array.from({ length: compileStarted.sourceCount }, (_, i) => ({
@@ -78,9 +96,32 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
           </AnimatePresence>
         </AgentLane>
         <AgentLane name="Agents">
-          <p className="font-mono text-xs text-muted-foreground">
-            SchemaInferrer · Drafter · Linker · IndexBuilder
-          </p>
+          {thoughts.length === 0 ? (
+            <p className="font-mono text-xs text-muted-foreground">
+              SchemaInferrer · Drafter · Linker · IndexBuilder
+            </p>
+          ) : (
+            <div
+              ref={thoughtsScrollRef}
+              className="max-h-[380px] overflow-y-auto pr-1"
+              aria-label="Agent thoughts"
+              aria-live="polite"
+            >
+              <ul className="space-y-1.5">
+                <AnimatePresence initial={false}>
+                  {thoughts.map((t, i) => (
+                    <ThoughtLine
+                      // Index suffix lets the same agent emit two consecutive
+                      // identical-message thoughts without React de-duping the
+                      // motion entry. Tape order is canonical via i.
+                      key={`${t.compileRunId}-${i}-${t.agent}-${t.message.slice(0, 40)}`}
+                      thought={t}
+                    />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </div>
+          )}
         </AgentLane>
         <AgentLane name="Pages">
           <AnimatePresence>

@@ -39,6 +39,7 @@ This is the canonical glossary for the **wiki** bounded context. Every term used
 | WikiPageRepository | Application port for `WikiPage` persistence (rows, claims, citations, backlinks; markdown body in R2). | D1 + R2 adapter. |
 | CompileRunRepository | Application port for `CompileRun` aggregate persistence. | D1 adapter. |
 | WikiPageBodyStorage | Application port for `WikiPage` markdown body persistence. | R2 adapter. |
+| AgentThought | A pipeline-narrated `CompileEvent` describing a deterministic checkpoint in human-readable terms. Surfaces in the CompileTheater's Agents lane. NOT LLM-generated — template strings interpolated with run state. | Persisted on the `CompileRun` event tape so a refresh replays the narrative. |
 
 ## Banned synonyms
 

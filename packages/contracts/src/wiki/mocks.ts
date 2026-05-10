@@ -91,11 +91,41 @@ export const mockWikiPage = (overrides: Partial<WikiPage> = {}): WikiPage => ({
 export async function* mockCompileEventStream(): AsyncIterable<CompileEvent> {
   yield { kind: 'CompileStarted', compileRunId: RUN, folderId: FOLDER, sourceCount: 8 };
   yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'Compiler',
+    message: 'Reading 8 sources from the folder…',
+  };
+  yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'SchemaInferrer',
+    message: 'Inferring schema from the corpus…',
+  };
+  yield {
     kind: 'SchemaInferred',
     compileRunId: RUN,
     schema: demoSchema,
     reason:
       'This folder is about board governance. I will build pages for: Decision, Metric, Person, Risk.',
+  };
+  yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'SchemaInferrer',
+    message: 'Schema settled: 4 PageTypes, 3 relations.',
+  };
+  yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'Researcher',
+    message: 'Reading Q3-board-minutes.pdf for Decision, Person…',
+  };
+  yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'Drafter',
+    message: 'Drafting Decision page from 3 findings…',
   };
   yield {
     kind: 'PageDrafted',
@@ -107,6 +137,12 @@ export async function* mockCompileEventStream(): AsyncIterable<CompileEvent> {
     fromSourceId: SRC,
   };
   yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'Linker',
+    message: 'Resolving backlinks across 18 pages…',
+  };
+  yield {
     kind: 'BacklinkResolved',
     compileRunId: RUN,
     fromPageId: PAGE,
@@ -114,10 +150,22 @@ export async function* mockCompileEventStream(): AsyncIterable<CompileEvent> {
     relationName: 'DecidedAt',
   };
   yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'IndexBuilder',
+    message: 'Indexing Decision (5 pages)…',
+  };
+  yield {
     kind: 'IndexBuilt',
     compileRunId: RUN,
     pageType: 'Decision',
     pageCount: 5,
+  };
+  yield {
+    kind: 'AgentThought',
+    compileRunId: RUN,
+    agent: 'Compiler',
+    message: 'Compile finished — 18 pages.',
   };
   yield {
     kind: 'CompileFinished',
