@@ -44,14 +44,16 @@ const groupBy = <T, K>(items: T[], by: (t: T) => K): Map<K, T[]> => {
   return m;
 };
 
+// SF11 — content hashes are load-bearing for the verification context's
+// span check. Silently padding zeros to fake a hash on regex mismatch
+// would mean spans pass verification against a synthesized hash that
+// doesn't match the actual source bytes. Throw instead so the orchestrator
+// turns bad upstream data into a CompileFailed event.
 const ensureContentHash = (raw: string): ContentHash => {
-  // The SourceReader already provides a content hash from ingestion; default
-  // for tests/fixtures where it's missing keeps the type contract honest.
   if (/^[a-z0-9]+:[a-f0-9]+$/.test(raw)) return raw as ContentHash;
-  return `sha256:${raw
-    .padStart(64, '0')
-    .slice(0, 64)
-    .replace(/[^a-f0-9]/g, '0')}` as ContentHash;
+  throw new Error(
+    `invalid contentHash from SourceReader: ${JSON.stringify(raw)} (expected "<algo>:<hex>")`,
+  );
 };
 
 export async function compileFolder(
