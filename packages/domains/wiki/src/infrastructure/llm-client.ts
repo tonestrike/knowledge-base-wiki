@@ -115,6 +115,12 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
             schemaDescription,
             maxTokens,
             temperature,
+            // Disable AI SDK's internal retry-with-feedback. Our LlmClient
+            // wrapper handles transient errors (429/5xx) explicitly; for
+            // schema-validation failures we want to fail fast and let the
+            // orchestrator skip that source rather than hang for 60-90s
+            // per task on retries that historically don't recover.
+            maxRetries: 0,
           });
           return {
             result: res.object as z.infer<TSchema>,

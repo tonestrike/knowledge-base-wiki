@@ -40,6 +40,9 @@ bun-debug.log*
 .DS_Store
 Thumbs.db
 
+# local demo fixtures (large PDFs not for the repo)
+.demo-fixtures/
+
 # logs
 *.log
 npm-debug.log*

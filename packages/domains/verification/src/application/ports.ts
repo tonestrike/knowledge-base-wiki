@@ -80,7 +80,7 @@ export interface VerificationDeps {
   sourceText: SourceTextReader;
   runs: LintRunRepository;
   findings: LintFindingRepository;
-  dispatcher: LintRunDispatcher;
+  lintDispatcher: LintRunDispatcher;
   eventBus: EventBus;
   newId: () => string;
   now: () => Date;

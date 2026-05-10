@@ -36,7 +36,7 @@ export async function dailyLintSample(
   const settled = await Promise.allSettled(
     shuffled.map(async (wikiId) => {
       const id = lintRunId(deps.newId());
-      await deps.dispatcher.start({ lintRunId: id, wikiId });
+      await deps.lintDispatcher.start({ lintRunId: id, wikiId });
       return { lintRunId: id, wikiId };
     }),
   );

@@ -158,7 +158,7 @@ const buildDeps = (): {
     sourceText: { readSlice: async () => null },
     runs,
     findings,
-    dispatcher: {
+    lintDispatcher: {
       start: async () => undefined,
       subscribe: async function* () {},
     },

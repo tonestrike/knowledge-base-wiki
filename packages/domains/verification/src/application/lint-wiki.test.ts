@@ -119,7 +119,7 @@ const fakeRuntime = (
     sourceText: { readSlice: async () => 'sample' },
     runs,
     findings,
-    dispatcher: { start: async () => undefined, subscribe: () => emptyAsync() },
+    lintDispatcher: { start: async () => undefined, subscribe: () => emptyAsync() },
     eventBus: new InMemoryEventBus(),
     newId: () => {
       const idHex = (counter++).toString(16).padStart(12, '0');

@@ -18,7 +18,7 @@ export interface WikiBindings extends Record<string, unknown> {
   DB: D1Database;
   STORAGE: R2Bucket;
   COMPILE_RUN: DurableObjectNamespace;
-  OPENROUTER_API_KEY: string;
+  OPEN_ROUTER_API_KEY: string;
 }
 
 let cachedBus: EventBus | undefined;
@@ -46,7 +46,7 @@ const requireBinding = <T>(name: string, value: T | undefined): T => {
 
 const baseDeps = (env: Partial<WikiBindings>) => {
   const llm = createLlmClient({
-    apiKey: env.OPENROUTER_API_KEY ?? '',
+    apiKey: env.OPEN_ROUTER_API_KEY ?? '',
     appName: 'tenex',
     appUrl: 'https://tenex.dev',
   });

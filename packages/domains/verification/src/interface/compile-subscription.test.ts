@@ -18,7 +18,7 @@ describe('subscribeCompileFinished', () => {
     subscribeCompileFinished(
       {
         newId: () => `77777777-2222-4333-8444-${(counter++).toString(16).padStart(12, '0')}`,
-        dispatcher: {
+        lintDispatcher: {
           start: async (args) => {
             started.push(args);
           },
@@ -52,7 +52,7 @@ describe('subscribeCompileFinished', () => {
     const unsubscribe = subscribeCompileFinished(
       {
         newId: () => '77777777-2222-4333-8444-000000000000',
-        dispatcher: {
+        lintDispatcher: {
           start: async ({ wikiId }) => {
             started.push(wikiId);
           },
