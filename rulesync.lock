@@ -20,6 +20,16 @@
           "integrity": "sha256-5c8707fbd7e2d2c80bf55e5d49cb1b6888f5733492ad56050c07e27ecaefdea5"
         }
       }
+    },
+    "vercel/ai-elements": {
+      "requestedRef": "main",
+      "resolvedRef": "9ab9c715d6e87cd7f5b9a0cf2ae284e56f6acef9",
+      "resolvedAt": "2026-05-10T14:48:13.900Z",
+      "skills": {
+        "ai-elements": {
+          "integrity": "sha256-7e81acdd3028bb68aa4387b2bd083c5812a50e2be1bea08c76994dcfb8f6a3d3"
+        }
+      }
     }
   }
 }

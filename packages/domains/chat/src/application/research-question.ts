@@ -40,5 +40,18 @@ export async function researchQuestion(
     citations: p.citations,
   }));
   input.onPartial?.({ findings: findings.length });
+
+  // No matches → fetch a sample of the wiki so the synthesizer can guide
+  // the user to a follow-up question instead of dead-ending. We deliberately
+  // return this on `suggestionPages` and leave `findings` empty, because
+  // the synthesizer's empty-findings branch composes a different message
+  // when these are present.
+  if (pages.length === 0) {
+    const suggestionPages = await deps.wikiReader.listSamplePages({
+      wikiId: input.wikiId,
+      limit: 6,
+    });
+    return { pages, findings, suggestionPages };
+  }
   return { pages, findings };
 }

@@ -1,7 +1,7 @@
 import { eventIterator, oc } from '@orpc/contract';
 import { z } from 'zod';
 import { AnswerSegment } from '../shared/artifact.ts';
-import { TurnId } from '../shared/ids.ts';
+import { TurnId, WikiPageId } from '../shared/ids.ts';
 
 export const AnswerStarted = z.object({
   kind: z.literal('AnswerStarted'),
@@ -9,15 +9,24 @@ export const AnswerStarted = z.object({
 });
 
 // Intermediate progress events let the UI render a live "agent thoughts" log
-// without inferring phases from sparse segment-arrival timestamps. The chat
-// dispatcher emits one ResearchStarted before the Researcher prompt fires,
-// one ResearchCompleted when the Researcher returns (carrying candidate +
-// finding counts so the user sees what was actually grounded), and one
-// SynthesisStarted before the first AnswerSegment.
+// without inferring phases from sparse segment-arrival timestamps. The
+// dispatcher emits ResearchStarted before searching the pre-compiled wiki,
+// one WikiPageRetrieved per page surfaced (so the user sees what the agent
+// is reading, with title + pageType), ResearchCompleted when the search
+// returns, then SynthesisStarted before the first AnswerSegment.
 export const ResearchStarted = z.object({
   kind: z.literal('ResearchStarted'),
   turnId: TurnId,
   model: z.string().min(1),
+});
+
+export const WikiPageRetrieved = z.object({
+  kind: z.literal('WikiPageRetrieved'),
+  turnId: TurnId,
+  wikiPageId: WikiPageId,
+  title: z.string().min(1),
+  pageType: z.string().optional(),
+  citationCount: z.number().int().nonnegative(),
 });
 
 export const ResearchCompleted = z.object({
@@ -27,10 +36,9 @@ export const ResearchCompleted = z.object({
   findingCount: z.number().int().nonnegative(),
 });
 
-// Mid-stream progress fired as the Researcher's partialObjectStream parses
-// each new finding from the model's incremental JSON output. Lets the UI
-// surface real per-finding progress instead of a static "researching..."
-// spinner during the 20-90s the LLM call takes.
+// Mid-stream progress fired as findings stream in. With the LLM Researcher
+// dropped, this fires once after the D1 wiki search returns; the per-page
+// detail lives in the WikiPageRetrieved events above.
 export const ResearchProgress = z.object({
   kind: z.literal('ResearchProgress'),
   turnId: TurnId,
@@ -71,6 +79,7 @@ export const AnswerFinished = z.object({
 export const AnswerEvent = z.discriminatedUnion('kind', [
   AnswerStarted,
   ResearchStarted,
+  WikiPageRetrieved,
   ResearchProgress,
   ResearchCompleted,
   SynthesisStarted,

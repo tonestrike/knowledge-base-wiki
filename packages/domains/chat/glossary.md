@@ -21,13 +21,15 @@ This is the canonical glossary for the **chat** bounded context. Every term used
 | Synthesizer | The agent that composes the `Answer` from `Researcher` findings, picking an `Artifact` when appropriate. Runs on Sonnet 4.6 via OpenRouter through the Vercel AI SDK `streamObject`. | |
 | Finding | A `Researcher`-produced unit feeding the `Synthesizer`: a verbatim quote drawn from a `WikiPage` body, paired with the `Citation`s that support it. | One `Researcher` pass produces zero or more `Finding`s. |
 | Dispatcher | The infrastructure surface a `Conversation` calls to start a `Turn` run and to `subscribe` to its `AnswerEvent`s. | Backed by an in-memory broker in tests and a Cloudflare Durable Object in production. |
-| AnswerEvent | The wire shape streamed for a `Turn`: `AnswerStarted`, `AnswerSegment`, `AnswerProseDelta`, `AnswerFailed`, `AnswerFinished`. | Defined in `@package/contracts/chat`; transported via oRPC `eventIterator`. |
+| AnswerEvent | The wire shape streamed for a `Turn`: `AnswerStarted`, `WikiPageRetrieved`, `AnswerSegment`, `AnswerProseDelta`, `AnswerFailed`, `AnswerFinished`. | Defined in `@package/contracts/chat`; transported via oRPC `eventIterator`. |
+| WikiPageRetrieved | An `AnswerEvent` fired by the dispatcher once per `WikiPage` returned by the wiki search, carrying `wikiPageId`, `title`, optional `pageType`, and citation count. | Lets the UI render an "agent thoughts" log of what's actually being read. |
 | AnswerProduced | Domain event emitted when a `Turn` finishes; the `wiki` context may consume it to file an `AnswerPage`. | Schema in `@package/contracts/events`; published through the injected `EventBus`. |
 | WikiReader | A read-only port the `Researcher` uses to fetch `WikiPage`s for a `Wiki`. Implemented over the typed oRPC client to keep `chat` from importing `domains/wiki`. | |
 | SourceHashVerifier | A port that re-hashes the bytes a `Citation` covers and rejects mismatches before any `AnswerSegment` carrying that `Citation` is emitted. | The fabrication tripwire; a single failure aborts the `Turn` with `AnswerFailed`. |
 | CitationTripwireError | The typed error a `Synthesizer`-driven use-case throws when a citation invariant is violated (unknown id, hash mismatch, invalid `Artifact` shape). | Distinguishes a fabrication-tripwire abort from an infrastructure error so the dispatcher logs and reshapes them differently. |
 | ConversationNotFoundError | Typed not-found error for `Conversation` lookups; the interface boundary maps it to `ORPCError('NOT_FOUND')`. | |
 | TurnNotFoundError | Typed not-found error for `Turn` lookups; the interface boundary maps it to `ORPCError('NOT_FOUND')`. | |
+| Agentically | Adverb: "by way of an LLM agent." Used to describe response composition that routes through the `Synthesizer`'s structured-output call rather than being hand-rolled in code. Every user-visible chat response should be authored agentically. | Linguistic discipline reminder that the `Synthesizer` is the agent loop; deterministic fallback strings are an anti-pattern. |
 
 ## Banned synonyms
 

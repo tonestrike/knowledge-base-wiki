@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Public state shape every consumer hook (useAnswerStream / useLintStream /
- * useCompileStream) returns. The flat `events`/`done`/`error` triple is a
+ * Public state shape every consumer hook (useLintStream / useCompileStream)
+ * returns. The flat `events`/`done`/`error` triple is a
  * minimum contract; consumers MUST inspect `error` and treat a non-null
  * value as a stream-level failure (mid-stream `*Failed` event, premature
  * close after retries, network/HTTP failure).

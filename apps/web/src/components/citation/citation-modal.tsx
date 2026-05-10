@@ -124,7 +124,7 @@ function SourceExcerpt({
     <p className="whitespace-pre-wrap text-base">
       {start > 0 ? <span className="text-muted-foreground">…</span> : null}
       <span className="text-muted-foreground">{before}</span>
-      <mark className="rounded-sm bg-accent/30 px-0.5 text-foreground">{inside}</mark>
+      <mark className="rounded-xs bg-accent/30 px-0.5 text-foreground">{inside}</mark>
       <span className="text-muted-foreground">{after}</span>
       {end < text.length ? <span className="text-muted-foreground">…</span> : null}
     </p>

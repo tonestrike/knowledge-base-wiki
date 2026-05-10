@@ -8,7 +8,7 @@ export function SourceCard({ id, name }: { id: string; name: string }) {
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 200, damping: 25 }}
-      className="rounded-md border border-border bg-background p-3 font-mono text-xs shadow-sm"
+      className="rounded-md border border-border bg-background p-3 font-mono text-xs shadow-xs"
     >
       {name}
     </motion.div>

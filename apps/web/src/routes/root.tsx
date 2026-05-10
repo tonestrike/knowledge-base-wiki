@@ -106,7 +106,7 @@ function WikiCard({ wiki }: { wiki: Wiki }) {
         to={`/wiki/${wiki.id}`}
         className="group relative block h-full overflow-hidden rounded-lg border border-border bg-card/40 p-5 transition-colors hover:border-accent/60 hover:bg-card"
       >
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/0 to-transparent transition-all duration-500 group-hover:via-accent/60" />
+        <div className="absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-accent/0 to-transparent transition-all duration-500 group-hover:via-accent/60" />
         <p className="font-serif text-xl tracking-tight">{folderName}</p>
         <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           {wiki.pageCount} {wiki.pageCount === 1 ? 'page' : 'pages'}
@@ -156,7 +156,7 @@ function ConnectDriveCard() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1 }}
     >
-      <Card className="border-accent/20 bg-accent/[0.02]">
+      <Card className="border-accent/20 bg-accent/2">
         <CardHeader>
           <CardTitle className="font-serif text-2xl">Connect a Drive folder</CardTitle>
         </CardHeader>
@@ -177,7 +177,7 @@ function ConnectDriveCard() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://drive.google.com/drive/folders/..."
-              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-accent"
+              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors focus:outline-hidden focus:ring-2 focus:ring-accent"
             />
             <Button variant="accent" type="submit" disabled={register.isPending}>
               {register.isPending ? 'Connecting…' : 'Connect'}

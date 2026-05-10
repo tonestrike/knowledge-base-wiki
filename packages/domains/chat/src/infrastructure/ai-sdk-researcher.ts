@@ -1,5 +1,5 @@
 import type { WikiPageId } from '@package/contracts/shared';
-import { type LanguageModelV1, streamObject } from 'ai';
+import { type LanguageModel, streamObject } from 'ai';
 import { z } from 'zod';
 import type {
   Researcher,
@@ -53,7 +53,7 @@ const renderPages = (pages: ResearcherOutput['pages']): string =>
     .join('\n');
 
 export interface AiSdkResearcherOptions {
-  model: LanguageModelV1;
+  model: LanguageModel;
   wikiReader: WikiReader;
   systemPrompt?: string;
   /** Candidate-page fetch limit before prompting. Defaults to 4. */
@@ -112,7 +112,7 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
       system: opts.systemPrompt ?? SYSTEM,
       prompt: `Question: ${input.question}\n\nPages:\n${renderPages(candidates)}`,
       temperature: opts.temperature ?? 0.1,
-      maxTokens: opts.maxTokens ?? 1500,
+      maxOutputTokens: opts.maxTokens ?? 1500,
       maxRetries: 1,
     });
 

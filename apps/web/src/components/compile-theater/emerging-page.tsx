@@ -12,7 +12,7 @@ export function EmergingPage({ event }: { event: PageDraftedEvent }) {
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0 }}
       transition={{ type: 'spring', stiffness: 200, damping: 25 }}
-      className="rounded-md border border-accent/50 bg-accent/5 p-3 shadow-sm"
+      className="rounded-md border border-accent/50 bg-accent/5 p-3 shadow-xs"
     >
       <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
         {event.pageType ?? event.subtype}

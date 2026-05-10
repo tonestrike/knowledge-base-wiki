@@ -27,6 +27,11 @@
     // packages/domains/<ctx>/infrastructure/.
     { "source": "vercel/ai", "skills": ["use-ai-sdk"] },
 
+    // Vercel's AI Elements skill — Conversation/Message/Reasoning/PromptInput
+    // conventions for shadcn-style chat UI components on top of @ai-sdk/react.
+    // Drives the Phase 5 chat-dock + chat route rewrite under apps/web/.
+    { "source": "vercel/ai-elements", "skills": ["ai-elements"] },
+
     // rulesync's own skill — how to manage .rulesync/, targets, features,
     // and declarative sources.
     { "source": "dyoshikawa/rulesync", "skills": ["rulesync"] }

@@ -31,6 +31,9 @@ const wikiReader = (citations: Citation[] = [cit]): WikiReader => ({
       },
     ];
   },
+  async listSamplePages() {
+    return [];
+  },
   async getPage() {
     return null;
   },
@@ -53,6 +56,9 @@ describe('researchQuestion', () => {
       async searchPages() {
         return [];
       },
+      async listSamplePages() {
+        return [];
+      },
       async getPage() {
         return null;
       },
@@ -63,5 +69,36 @@ describe('researchQuestion', () => {
     );
     expect(out.findings).toHaveLength(0);
     expect(out.pages).toHaveLength(0);
+  });
+
+  it('falls back to a wiki sample as suggestion pages when nothing matched', async () => {
+    const samplePid = wikiPageId('eeeeeeee-1111-4222-8333-555555555555');
+    const fallbackReader: WikiReader = {
+      async searchPages() {
+        return [];
+      },
+      async listSamplePages() {
+        return [
+          {
+            id: samplePid,
+            wikiId: wid,
+            title: 'Pricing tiers',
+            pageType: 'Concept',
+            body: 'We have three tiers…',
+            citations: [cit],
+          },
+        ];
+      },
+      async getPage() {
+        return null;
+      },
+    };
+    const out = await researchQuestion(
+      { wikiReader: fallbackReader },
+      { wikiId: wid, question: 'totally unrelated question' },
+    );
+    expect(out.findings).toHaveLength(0);
+    expect(out.suggestionPages).toHaveLength(1);
+    expect(out.suggestionPages?.[0]?.title).toBe('Pricing tiers');
   });
 });

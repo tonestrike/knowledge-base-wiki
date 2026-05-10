@@ -30,6 +30,7 @@ answerfinished
 answerfailed
 answerprodelta
 answerproduced
+wikipageretrieved
 wikireader
 sourcehashverifier
 verifier
@@ -45,3 +46,4 @@ citationtripwireerror
 conversationnotfounderror
 turnnotfounderror
 errorid
+agentically

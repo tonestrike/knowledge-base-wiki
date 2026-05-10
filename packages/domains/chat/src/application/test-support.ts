@@ -126,6 +126,9 @@ const noopWikiReader: WikiReader = {
   async searchPages() {
     return [];
   },
+  async listSamplePages() {
+    return [];
+  },
   async getPage() {
     return null;
   },
@@ -167,6 +170,9 @@ export const makeFakeChatDeps = (opts: MakeFakeOptions = {}): FakeChatDeps => {
   const wikiReader: WikiReader = fixedWikiPages
     ? {
         async searchPages() {
+          return fixedWikiPages;
+        },
+        async listSamplePages() {
           return fixedWikiPages;
         },
         async getPage(id) {

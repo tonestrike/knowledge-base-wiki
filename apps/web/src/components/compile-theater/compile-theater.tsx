@@ -46,7 +46,7 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 25 }}
-            className="rounded-lg border border-accent bg-accent/5 px-5 py-4 text-sm shadow-sm"
+            className="rounded-lg border border-accent bg-accent/5 px-5 py-4 text-sm shadow-xs"
           >
             <p className="font-mono text-xs uppercase tracking-widest text-accent">
               Schema inferred

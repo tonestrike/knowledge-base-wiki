@@ -124,3 +124,9 @@ worktree
 worktrees
 openrouter
 unwired
+oxlint
+cmdk
+synthesise
+synthesises
+unflushed
+unfinalized

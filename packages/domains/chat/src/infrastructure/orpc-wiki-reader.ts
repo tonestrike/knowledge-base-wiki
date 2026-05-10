@@ -89,6 +89,27 @@ export const createOrpcWikiReader = (opts: OrpcWikiReaderOptions): WikiReader =>
         .slice(0, limit)
         .map((x) => x.p);
     },
+    async listSamplePages({ wikiId, limit }: { wikiId: WikiId; limit: number }) {
+      try {
+        const page = await client.wiki.listPages({ wikiId, limit });
+        return page.items.map((p) => ({
+          id: p.id,
+          wikiId: p.wikiId,
+          title: p.title,
+          ...(p.pageType !== undefined ? { pageType: p.pageType } : {}),
+          body: p.body,
+          citations: p.citations,
+        }));
+      } catch (err) {
+        console.error('[chat.orpc-wiki-reader.listSamplePages] cross-context call failed', {
+          wikiId,
+          limit,
+          err:
+            err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
+        });
+        throw err;
+      }
+    },
     async getPage(id: WikiPageId) {
       try {
         const p = await client.wiki.getPage({ id });
