@@ -1,7 +1,12 @@
-import { type AnswerEvent, mockAnswerEventStream } from '@package/contracts/chat';
+import { AnswerEvent, mockAnswerEventStream } from '@package/contracts/chat';
 import type { AnswerSegment } from '@package/contracts/shared';
+import { useMemo } from 'react';
 import { useLiveMode } from '../../lib/live-mode.tsx';
-import { useAsyncIterableStream, useEventStream } from '../../lib/use-event-stream.ts';
+import {
+  type EventStreamConfig,
+  useAsyncIterableStream,
+  useEventStream,
+} from '../../lib/use-event-stream.ts';
 
 export interface AnswerStreamState {
   segments: AnswerSegment[];
@@ -9,15 +14,30 @@ export interface AnswerStreamState {
   error: string | null;
 }
 
+const FAILED: ReadonlyArray<string> = ['AnswerFailed'];
+const FINISHED: ReadonlyArray<string> = ['AnswerFinished'];
+
 export function useAnswerStream(turnId: string | null): AnswerStreamState {
-  const { live } = useLiveMode();
+  const { mode } = useLiveMode();
+  // Memoize to keep config-identity stable across renders (the hook deps
+  // are [url, config], so a fresh object would re-fire the effect every
+  // render and abort the in-flight stream).
+  const config = useMemo<EventStreamConfig<AnswerEvent>>(
+    () => ({
+      parse: (raw) => AnswerEvent.parse(raw),
+      failedKinds: FAILED,
+      finishedKinds: FINISHED,
+    }),
+    [],
+  );
   const liveResult = useEventStream<AnswerEvent>(
-    live && turnId ? `/rpc/turns/${turnId}/answer/events` : null,
+    mode.kind === 'live' && turnId ? `/rpc/turns/${turnId}/answer/events` : null,
+    config,
   );
   const mockResult = useAsyncIterableStream<AnswerEvent>(
-    !live && turnId ? mockAnswerEventStream : null,
+    mode.kind === 'static' && turnId ? mockAnswerEventStream : null,
   );
-  const { events, done, error } = live ? liveResult : mockResult;
+  const { events, done, error } = mode.kind === 'live' ? liveResult : mockResult;
 
   const segments: AnswerSegment[] = [];
   for (const e of events) {

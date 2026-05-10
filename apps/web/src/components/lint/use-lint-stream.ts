@@ -1,18 +1,35 @@
-import { type LintEvent, mockLintEventStream } from '@package/contracts/verification';
+import { LintEvent, mockLintEventStream } from '@package/contracts/verification';
+import { useMemo } from 'react';
 import { useLiveMode } from '../../lib/live-mode.tsx';
-import { useAsyncIterableStream, useEventStream } from '../../lib/use-event-stream.ts';
+import {
+  type EventStreamConfig,
+  useAsyncIterableStream,
+  useEventStream,
+} from '../../lib/use-event-stream.ts';
+
+const FAILED: ReadonlyArray<string> = ['LintRunFailed'];
+const FINISHED: ReadonlyArray<string> = ['LintRunFinished'];
 
 export function useLintStream(lintRunId: string | null): {
   events: LintEvent[];
   done: boolean;
   error: string | null;
 } {
-  const { live } = useLiveMode();
+  const { mode } = useLiveMode();
+  const config = useMemo<EventStreamConfig<LintEvent>>(
+    () => ({
+      parse: (raw) => LintEvent.parse(raw),
+      failedKinds: FAILED,
+      finishedKinds: FINISHED,
+    }),
+    [],
+  );
   const liveResult = useEventStream<LintEvent>(
-    live && lintRunId ? `/rpc/lint-runs/${lintRunId}/events` : null,
+    mode.kind === 'live' && lintRunId ? `/rpc/lint-runs/${lintRunId}/events` : null,
+    config,
   );
   const mockResult = useAsyncIterableStream<LintEvent>(
-    !live && lintRunId ? mockLintEventStream : null,
+    mode.kind === 'static' && lintRunId ? mockLintEventStream : null,
   );
-  return live ? liveResult : mockResult;
+  return mode.kind === 'live' ? liveResult : mockResult;
 }

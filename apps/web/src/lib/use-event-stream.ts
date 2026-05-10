@@ -1,14 +1,93 @@
 import { useEffect, useState } from 'react';
 
+/**
+ * Public state shape every consumer hook (useAnswerStream / useLintStream /
+ * useCompileStream) returns. The flat `events`/`done`/`error` triple is a
+ * minimum contract; consumers MUST inspect `error` and treat a non-null
+ * value as a stream-level failure (mid-stream `*Failed` event, premature
+ * close after retries, network/HTTP failure).
+ */
 export interface EventStreamState<T> {
   events: T[];
   done: boolean;
   error: string | null;
 }
 
-// Module-scoped identity parse so the default doesn't re-trigger useEffect
-// on every render of the consumer hook.
-const identityParse = <T>(raw: unknown): T => raw as T;
+/**
+ * Optional config a wrapper passes to declare which event `kind` strings
+ * count as terminal — `failedKinds` flips the stream into the error state
+ * with the event's `message` field; `finishedKinds` marks `done` true. When
+ * the underlying reader closes WITHOUT having seen a terminal event we
+ * treat that as a premature close (network drop, server crash mid-stream)
+ * and surface a connection error per SF4.
+ */
+export interface EventStreamConfig<T> {
+  parse: (raw: unknown) => T;
+  /** Event kinds that terminate the stream as a failure. */
+  failedKinds?: ReadonlyArray<string>;
+  /** Event kinds that terminate the stream as a success. */
+  finishedKinds?: ReadonlyArray<string>;
+  /**
+   * Reconnect attempts on premature close. Default 3. Each attempt waits
+   * `2^attempt * 1000` ms (1s, 2s, 4s) before retrying. After the budget
+   * is exhausted we surface a permanent connection-lost error.
+   */
+  maxReconnects?: number;
+}
+
+const DEFAULT_MAX_RECONNECTS = 3;
+const RECONNECT_BASE_MS = 1000;
+
+interface KindCarrier {
+  kind?: unknown;
+  message?: unknown;
+  reason?: unknown;
+}
+
+const eventKind = (e: unknown): string | null => {
+  if (typeof e !== 'object' || e === null) return null;
+  const k = (e as KindCarrier).kind;
+  return typeof k === 'string' ? k : null;
+};
+
+const eventMessage = (e: unknown): string => {
+  if (typeof e !== 'object' || e === null) return 'stream failed';
+  const m = (e as KindCarrier).message ?? (e as KindCarrier).reason;
+  return typeof m === 'string' && m.length > 0 ? m : 'stream failed';
+};
+
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException('aborted', 'AbortError'));
+    const t = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+interface SseFrame {
+  /** SSE `event:` field; empty string when absent. */
+  event: string;
+  /** Joined `data:` payload. */
+  data: string;
+}
+
+const parseFrame = (raw: string): SseFrame => {
+  let event = '';
+  const dataLines: string[] = [];
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    // ignore comments (`:`) and `id:` / `retry:` for now — eventIterator
+    // only emits `event:` + `data:`.
+  }
+  return { event, data: dataLines.join('\n') };
+};
 
 /**
  * Subscribes to a Server-Sent Events endpoint and returns the cumulative
@@ -17,11 +96,21 @@ const identityParse = <T>(raw: unknown): T => raw as T;
  * Why fetch + ReadableStream instead of EventSource: the contract's
  * `eventIterator()` output is JSON-per-event SSE; native EventSource would
  * give us strings only and hides errors. fetch lets us wire AbortController
- * for clean unmount and surface non-2xx as a typed error.
+ * for clean unmount, parse `event:` lines (SF1), and surface non-2xx as a
+ * typed error.
+ *
+ * Failure semantics (per SF1, SF4):
+ *   1. Mid-stream `event: error` frame OR a `*Failed` event-kind known to
+ *      the wrapper (`failedKinds`) → set `error`, stop.
+ *   2. Reader close before any terminal event → exponential-backoff
+ *      reconnect up to `maxReconnects`. If still no terminal event, set
+ *      `error = 'connection lost'`.
+ *   3. Frame fails Zod parsing → `console.warn` + skip frame; the stream
+ *      keeps reading rather than poisoning the whole UI.
  */
 export function useEventStream<T>(
   url: string | null,
-  parse: (raw: unknown) => T = identityParse,
+  config: EventStreamConfig<T>,
 ): EventStreamState<T> {
   const [events, setEvents] = useState<T[]>([]);
   const [done, setDone] = useState(false);
@@ -33,40 +122,104 @@ export function useEventStream<T>(
     setDone(false);
     setError(null);
     const ac = new AbortController();
+    const maxReconnects = config.maxReconnects ?? DEFAULT_MAX_RECONNECTS;
+    const failedKinds = config.failedKinds ?? [];
+    const finishedKinds = config.finishedKinds ?? [];
+    let terminalSeen = false;
+
+    const runOnce = async (): Promise<'terminal' | 'premature' | 'http-error'> => {
+      const res = await fetch(url, { signal: ac.signal });
+      if (!res.ok || !res.body) {
+        setError(`stream ${url} failed: ${res.status}`);
+        return 'http-error';
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number = buf.indexOf('\n\n');
+        while (idx !== -1) {
+          const frame = parseFrame(buf.slice(0, idx));
+          buf = buf.slice(idx + 2);
+          // Server can send `event: error` for transport-level failures
+          // that don't fit the discriminated event union.
+          if (frame.event === 'error') {
+            terminalSeen = true;
+            const msg = frame.data || 'stream failed';
+            setError(msg);
+            return 'terminal';
+          }
+          if (frame.data) {
+            let raw: unknown;
+            try {
+              raw = JSON.parse(frame.data);
+            } catch (e) {
+              console.warn(`useEventStream: malformed JSON frame in ${url}`, e, frame.data);
+              idx = buf.indexOf('\n\n');
+              continue;
+            }
+            let parsed: T;
+            try {
+              parsed = config.parse(raw);
+            } catch (e) {
+              console.warn(`useEventStream: parse rejected frame in ${url}`, e, raw);
+              idx = buf.indexOf('\n\n');
+              continue;
+            }
+            const kind = eventKind(raw);
+            if (kind && failedKinds.includes(kind)) {
+              terminalSeen = true;
+              setEvents((prev) => [...prev, parsed]);
+              setError(eventMessage(raw));
+              return 'terminal';
+            }
+            setEvents((prev) => [...prev, parsed]);
+            if (kind && finishedKinds.includes(kind)) {
+              terminalSeen = true;
+              setDone(true);
+              return 'terminal';
+            }
+          }
+          idx = buf.indexOf('\n\n');
+        }
+      }
+      return terminalSeen ? 'terminal' : 'premature';
+    };
+
     (async () => {
       try {
-        const res = await fetch(url, { signal: ac.signal });
-        if (!res.ok || !res.body) throw new Error(`stream ${url} failed: ${res.status}`);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
+        let attempt = 0;
+        // Loop with backoff on premature close. Stop on terminal/http-error
+        // or when the budget is exhausted.
         while (true) {
-          const { done: readerDone, value } = await reader.read();
-          if (readerDone) break;
-          buf += decoder.decode(value, { stream: true });
-          let idx: number = buf.indexOf('\n\n');
-          while (idx !== -1) {
-            const frame = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            const dataLine = frame
-              .split('\n')
-              .map((l) => (l.startsWith('data:') ? l.slice(5).trim() : null))
-              .filter((l): l is string => l !== null)
-              .join('\n');
-            if (dataLine) {
-              const parsed = parse(JSON.parse(dataLine));
-              setEvents((prev) => [...prev, parsed]);
+          const outcome = await runOnce();
+          if (outcome === 'terminal' || outcome === 'http-error') return;
+          // outcome === 'premature'
+          if (attempt >= maxReconnects) {
+            // No `failedKinds`/`finishedKinds` configured (or none seen) ⇒
+            // wrapper opts into "EOF == done" semantics. Only surface a
+            // connection-lost error when the wrapper declared terminal
+            // kinds, because that's the only signal that a premature close
+            // is actually wrong.
+            if (failedKinds.length > 0 || finishedKinds.length > 0) {
+              setError('connection lost');
+            } else {
+              setDone(true);
             }
-            idx = buf.indexOf('\n\n');
+            return;
           }
+          await sleep(RECONNECT_BASE_MS * 2 ** attempt, ac.signal);
+          attempt += 1;
         }
-        setDone(true);
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setError(String(e));
       }
     })();
     return () => ac.abort();
-  }, [url, parse]);
+  }, [url, config]);
 
   return { events, done, error };
 }
