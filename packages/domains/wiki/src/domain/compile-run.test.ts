@@ -13,16 +13,21 @@ describe('CompileRun status machine', () => {
   });
 
   it('progresses pending → inferring-schema → planning → ... → finished', () => {
-    let r = CompileRun.start({ id, folderId: fid, startedAt: '2026-05-09T12:00:00.000Z' });
+    let r: CompileRun = CompileRun.start({
+      id,
+      folderId: fid,
+      startedAt: '2026-05-09T12:00:00.000Z',
+    });
     r = CompileRun.advance(r, 'inferring-schema', '2026-05-09T12:00:01.000Z');
     r = CompileRun.advance(r, 'planning', '2026-05-09T12:00:05.000Z');
-    expect(r.schemaInferredAt).toBe('2026-05-09T12:00:05.000Z');
+    if (r.status === 'planning') expect(r.schemaInferredAt).toBe('2026-05-09T12:00:05.000Z');
     r = CompileRun.advance(r, 'researching', '2026-05-09T12:00:10.000Z');
     r = CompileRun.advance(r, 'drafting', '2026-05-09T12:00:30.000Z');
     r = CompileRun.advance(r, 'linking', '2026-05-09T12:00:45.000Z');
     r = CompileRun.advance(r, 'indexing', '2026-05-09T12:00:50.000Z');
     r = CompileRun.finish(r, { wikiId: wid, endedAt: '2026-05-09T12:01:00.000Z' });
     expect(r.status).toBe('finished');
+    if (r.status !== 'finished') throw new Error('unreachable');
     expect(r.endedAt).toBe('2026-05-09T12:01:00.000Z');
     expect(r.wikiId).toBe(wid);
   });

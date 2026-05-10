@@ -87,6 +87,9 @@ const baseDeps = (): WikiDeps => {
               folderId: FID,
               status: 'finished' as const,
               startedAt: '2026-05-09T12:00:00.000Z',
+              schemaInferredAt: '2026-05-09T12:00:01.000Z',
+              wikiId: WID,
+              endedAt: '2026-05-09T12:01:00.000Z',
             } as never)
           : null,
     },

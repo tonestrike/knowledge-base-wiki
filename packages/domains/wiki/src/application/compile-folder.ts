@@ -12,7 +12,7 @@ import {
   wikiId as parseWikiId,
   wikiPageId as parseWikiPageId,
 } from '@package/contracts/shared';
-import { CompileRun } from '../domain/compile-run.ts';
+import { CompileRun, type CompileRun as TCompileRun } from '../domain/compile-run.ts';
 import { type ConceptPage, type IndexPage, WikiPage } from '../domain/wiki-page.ts';
 import { Wiki } from '../domain/wiki.ts';
 import { buildIndexes } from './build-indexes.ts';
@@ -59,7 +59,7 @@ export async function compileFolder(
   input: { compileRunId: CompileRunId; folderId: FolderId },
 ): Promise<{ wikiId: WikiId }> {
   const startedAt = deps.now().toISOString();
-  let run = CompileRun.start({
+  let run: TCompileRun = CompileRun.start({
     id: input.compileRunId,
     folderId: input.folderId,
     startedAt,
