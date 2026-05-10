@@ -3,7 +3,7 @@
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { Extractor } from '../application/extract-source.ts';
 import type { OutlineNode } from '../domain/outline.ts';
-import { Outline } from '../domain/outline.ts';
+import { Outline, outlineLevel } from '../domain/outline.ts';
 
 const isHeading = (raw: string): boolean => {
   const t = raw.trim();
@@ -37,7 +37,7 @@ export const createPdfExtractor = (): Extractor => ({
         if (isHeading(t)) {
           nodes.push({
             kind: 'heading',
-            level: 2,
+            level: outlineLevel(2),
             title: t.trim(),
             byteRange: { start, end },
             page: p,

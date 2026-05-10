@@ -1,28 +1,21 @@
-import type { ContentHash, FolderId, SourceId } from '@package/contracts/shared';
+import type { ContentHash, FolderId, IsoTimestamp, SourceId } from '@package/contracts/shared';
+import { Manifest } from './manifest.ts';
 
-export type SourceMime =
-  | 'application/pdf'
-  | 'application/vnd.google-apps.document'
-  | 'application/vnd.google-apps.spreadsheet'
-  | 'application/vnd.google-apps.presentation'
-  | 'text/plain'
-  | 'text/markdown';
+export type { SourceMime } from './manifest.ts';
+export { Manifest } from './manifest.ts';
 
-export interface Manifest {
-  readonly driveFileId: string;
-  readonly filename: string;
-  readonly mime: SourceMime;
-  readonly sizeBytes: number;
-  readonly modifiedAt: string;
-  readonly pageCount?: number;
-}
-
+// `Source` is the aggregate root. Identity is rooted in (id, contentHash). If
+// the underlying Drive file's bytes change, callers MUST mint a new Source —
+// never mutate. Constructed only via `Source.create`; the `Source` symbol
+// below is the namespace + a brand-tagged type, NOT a bare interface, so plain
+// object literals don't satisfy `Source` (TD1). Runtime invariant: frozen.
 export interface Source {
+  readonly _tag: 'Source';
   readonly id: SourceId;
   readonly folderId: FolderId;
   readonly manifest: Manifest;
   readonly contentHash: ContentHash;
-  readonly fetchedAt: string;
+  readonly fetchedAt: IsoTimestamp;
 }
 
 export interface SourceCreateProps {
@@ -30,17 +23,18 @@ export interface SourceCreateProps {
   readonly folderId: FolderId;
   readonly manifest: Manifest;
   readonly contentHash: ContentHash;
-  readonly fetchedAt: string;
+  readonly fetchedAt: IsoTimestamp;
 }
 
-// Source is an immutable aggregate root. Identity is rooted in (id, contentHash).
-// If the underlying Drive file's bytes change, callers MUST mint a new Source —
-// never mutate. This is enforced at the type level (readonly) and at runtime
-// via Object.freeze on both the Source and its Manifest.
 export const Source = {
   create(props: SourceCreateProps): Source {
-    const manifest: Manifest = Object.freeze({ ...props.manifest });
+    // Defensive: re-freeze the manifest in case a caller forgot to use
+    // `Manifest.create`. Cheap and keeps the aggregate invariant local.
+    const manifest = Object.isFrozen(props.manifest)
+      ? props.manifest
+      : Manifest.create(props.manifest);
     return Object.freeze({
+      _tag: 'Source' as const,
       id: props.id,
       folderId: props.folderId,
       manifest,

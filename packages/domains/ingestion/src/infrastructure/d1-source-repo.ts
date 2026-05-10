@@ -1,12 +1,13 @@
 import type { Source as SourceWire } from '@package/contracts/ingestion';
 import type { ContentHash, FolderId, SourceId } from '@package/contracts/shared';
 import {
+  isoTimestamp,
   contentHash as parseContentHash,
   folderId as parseFolderId,
   sourceId as parseSourceId,
 } from '@package/contracts/shared';
 import type { SourceRepository } from '../application/ports.ts';
-import type { Manifest } from '../domain/source.ts';
+import type { Manifest } from '../domain/manifest.ts';
 import { Source } from '../domain/source.ts';
 import type { D1DatabaseLike } from './cloudflare-bindings.ts';
 
@@ -32,11 +33,11 @@ const rowToSource = (r: Row): Source =>
       filename: r.filename,
       mime: r.mime,
       sizeBytes: r.size_bytes,
-      modifiedAt: r.modified_at,
+      modifiedAt: isoTimestamp(r.modified_at),
       pageCount: r.page_count ?? undefined,
     },
     contentHash: parseContentHash(r.content_hash) as ContentHash,
-    fetchedAt: r.fetched_at,
+    fetchedAt: isoTimestamp(r.fetched_at),
   });
 
 const sourceToWire = (s: Source): SourceWire => ({
