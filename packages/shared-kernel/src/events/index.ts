@@ -24,6 +24,35 @@ export interface DomainEventMap {
     reason: 'fetch' | 'extract' | 'storage' | 'persist' | 'unknown';
     message: string;
   };
+  // Slice 2.D — verification context. The wiki context emits CompileFinished
+  // when a CompileRun completes; verification subscribes to auto-trigger a
+  // LintRun for the affected Wiki. LintRunFinished / LintRunFailed mirror the
+  // run-level outcome so downstream telemetry / UIs can react without polling.
+  // CorrectionAccepted is emitted when a user applies a Correction; the wiki
+  // context's handler patches the WikiPage paragraph (eventually consistent).
+  CompileFinished: {
+    compileRunId: string;
+    wikiId: string;
+    finishedAt: string;
+  };
+  LintRunFinished: {
+    lintRunId: string;
+    wikiId: string;
+    finishedAt: string;
+    findingCount: number;
+  };
+  LintRunFailed: {
+    lintRunId: string;
+    wikiId: string;
+    failureMessage: string;
+    failedAt: string;
+  };
+  CorrectionAccepted: {
+    lintFindingId: string;
+    wikiPageId: string;
+    replacementText: string;
+    acceptedAt: string;
+  };
 }
 
 export type DomainEventName = keyof DomainEventMap;
