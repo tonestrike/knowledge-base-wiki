@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { SourceId } from './ids.ts';
+import { ContentHash, SourceId } from './ids.ts';
+
+// Re-export so existing `import { ContentHash, contentHash } from '.../span'`
+// call sites keep working. The canonical home is now `ids.ts` (TD5).
+export { ContentHash, contentHash } from './ids.ts';
 
 export const ByteRange = z
   .object({
@@ -10,11 +14,6 @@ export const ByteRange = z
     message: 'byte range must have positive length',
   });
 export type ByteRange = z.infer<typeof ByteRange>;
-
-export const ContentHash = z
-  .string()
-  .regex(/^[a-z0-9]+:[a-f0-9]+$/, 'content hash must be `<algo>:<hex>`');
-export type ContentHash = z.infer<typeof ContentHash>;
 
 export const Span = z.object({
   sourceId: SourceId,

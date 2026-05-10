@@ -35,7 +35,7 @@ describe('subscribeCompileFinished', () => {
       payload: {
         compileRunId: compileRunId('99999999-2222-4333-8444-555555555555'),
         wikiId: targetWiki,
-        pageCount: 5,
+        finishedAt: '2026-05-09T12:00:00.000Z',
       },
     });
 
@@ -69,7 +69,7 @@ describe('subscribeCompileFinished', () => {
       payload: {
         compileRunId: compileRunId('99999999-2222-4333-8444-555555555555'),
         wikiId: wikiId('44444444-2222-4333-8444-555555555555'),
-        pageCount: 5,
+        finishedAt: '2026-05-09T12:00:00.000Z',
       },
     });
 

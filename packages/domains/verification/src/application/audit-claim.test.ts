@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { citationId, claimId, sourceId, wikiPageId } from '@package/contracts/shared';
+import { citationId, claimId, contentHash, sourceId, wikiPageId } from '@package/contracts/shared';
 import { auditClaim } from './audit-claim.ts';
 import type { AnthropicVerifier, SourceTextReader } from './ports.ts';
 
@@ -15,7 +15,7 @@ const claim = {
       span: {
         sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
         byteRange: { start: 0, end: 50 },
-        contentHash: 'sha256:abc',
+        contentHash: contentHash('sha256:abc'),
       },
     },
   ],

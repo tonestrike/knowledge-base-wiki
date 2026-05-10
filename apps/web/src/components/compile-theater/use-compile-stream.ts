@@ -1,20 +1,35 @@
-import { type CompileEvent, mockCompileEventStream } from '@package/contracts/wiki';
-import { useEffect, useState } from 'react';
+import { CompileEvent, mockCompileEventStream } from '@package/contracts/wiki';
+import { useMemo } from 'react';
+import { useLiveMode } from '../../lib/live-mode.tsx';
+import {
+  type EventStreamConfig,
+  useAsyncIterableStream,
+  useEventStream,
+} from '../../lib/use-event-stream.ts';
 
-export function useCompileStream() {
-  const [events, setEvents] = useState<CompileEvent[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      for await (const e of mockCompileEventStream()) {
-        if (cancelled) break;
-        setEvents((prev) => [...prev, e]);
-        await new Promise((r) => setTimeout(r, 600));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return events;
+const FAILED: ReadonlyArray<string> = ['CompileFailed'];
+const FINISHED: ReadonlyArray<string> = ['CompileFinished'];
+
+export function useCompileStream(compileRunId: string | null): {
+  events: CompileEvent[];
+  done: boolean;
+  error: string | null;
+} {
+  const { mode } = useLiveMode();
+  const config = useMemo<EventStreamConfig<CompileEvent>>(
+    () => ({
+      parse: (raw) => CompileEvent.parse(raw),
+      failedKinds: FAILED,
+      finishedKinds: FINISHED,
+    }),
+    [],
+  );
+  const liveResult = useEventStream<CompileEvent>(
+    mode.kind === 'live' && compileRunId ? `/rpc/compile-runs/${compileRunId}/events` : null,
+    config,
+  );
+  const mockResult = useAsyncIterableStream<CompileEvent>(
+    mode.kind === 'static' ? mockCompileEventStream : null,
+  );
+  return mode.kind === 'live' ? liveResult : mockResult;
 }

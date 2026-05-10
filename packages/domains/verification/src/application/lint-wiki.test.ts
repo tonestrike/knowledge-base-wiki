@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   citationId,
   claimId,
+  contentHash,
   lintRunId,
   sourceId,
   wikiId,
@@ -46,7 +47,11 @@ const buildClaims = (n: number): Array<{ wikiPageId: typeof PAGE; claim: Claim }
           {
             id: citationId(`aaaaaaaa-1111-4222-8333-${idHex}`),
             label: 'src',
-            span: { sourceId: SRC, byteRange: { start: 0, end: 1 }, contentHash: 'sha256:abc' },
+            span: {
+              sourceId: SRC,
+              byteRange: { start: 0, end: 1 },
+              contentHash: contentHash('sha256:abc'),
+            },
           },
         ] satisfies Citation[],
       } satisfies Claim,

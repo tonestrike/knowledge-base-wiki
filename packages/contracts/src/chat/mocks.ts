@@ -1,6 +1,14 @@
 import type { AnswerSegment } from '../shared/artifact.ts';
 import type { Citation } from '../shared/citation.ts';
-import { citationId, conversationId, sourceId, turnId, userId, wikiId } from '../shared/ids.ts';
+import {
+  citationId,
+  contentHash,
+  conversationId,
+  sourceId,
+  turnId,
+  userId,
+  wikiId,
+} from '../shared/ids.ts';
 import type { AnswerEvent } from './answers.ts';
 import type { Conversation } from './conversations.ts';
 import type { Turn } from './turns.ts';
@@ -16,7 +24,7 @@ const sampleCitation: Citation = {
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start: 1240, end: 1410 },
-    contentHash: 'sha256:fixtureq3boardminutes',
+    contentHash: contentHash('sha256:abc'),
   },
 };
 

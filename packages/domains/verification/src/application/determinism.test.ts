@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { type Claim, citationId, claimId, sourceId, wikiPageId } from '@package/contracts/shared';
+import {
+  type Claim,
+  citationId,
+  claimId,
+  contentHash,
+  sourceId,
+  wikiPageId,
+} from '@package/contracts/shared';
 import { z } from 'zod';
 import recordedFixture from './__fixtures__/determinism-trials.json';
 import { auditClaim } from './audit-claim.ts';
@@ -20,7 +27,7 @@ const PLANTED_CLAIM: Claim = {
       span: {
         sourceId: sourceId('11111111-2222-4333-8444-000000000099'),
         byteRange: { start: 0, end: 200 },
-        contentHash: 'sha256:planted',
+        contentHash: contentHash('sha256:abc123'),
       },
     },
   ],

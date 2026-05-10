@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   citationId,
   claimId,
+  contentHash,
   lintFindingId,
   lintRunId,
   sourceId,
@@ -42,7 +43,11 @@ const seedClaim = {
     {
       id: CIT,
       label: 'metrics',
-      span: { sourceId: SRC, byteRange: { start: 0, end: 50 }, contentHash: 'sha256:abc' },
+      span: {
+        sourceId: SRC,
+        byteRange: { start: 0, end: 50 },
+        contentHash: contentHash('sha256:abc'),
+      },
     },
   ],
 };
@@ -168,15 +173,16 @@ const buildDeps = (): {
 describe('applyCorrection', () => {
   it('marks the finding resolved and publishes CorrectionAccepted', async () => {
     const { deps, bus, store } = buildDeps();
+    const seen: Array<{ name: string; payload: { replacementText: string } }> = [];
+    bus.subscribe('CorrectionAccepted', (event) => {
+      seen.push({ name: event.name, payload: { replacementText: event.payload.replacementText } });
+    });
     const out = await applyCorrection(deps, { lintFindingId: unsupportedFinding.id });
     expect(out.appliedAt).toBe('2026-05-09T12:10:00.000Z');
     expect(store.findings.get(unsupportedFinding.id)?.resolvedAt).toBe('2026-05-09T12:10:00.000Z');
-    expect(bus.published).toHaveLength(1);
-    const published = bus.published[0];
-    expect(published?.name).toBe('CorrectionAccepted');
-    expect((published?.payload as { replacementText: string }).replacementText).toBe(
-      'NRR was 105%.',
-    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.name).toBe('CorrectionAccepted');
+    expect(seen[0]?.payload.replacementText).toBe('NRR was 105%.');
   });
 
   it('refuses to apply a finding with no Correction (i.e. supported)', async () => {

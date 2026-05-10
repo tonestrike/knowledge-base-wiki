@@ -46,11 +46,10 @@ export async function applyCorrection(
     name: 'CorrectionAccepted',
     occurredAt: at,
     payload: {
-      lintRunId: f.lintRunId,
       lintFindingId: f.id,
       wikiPageId: f.wikiPageId,
-      claimId: f.claimId,
       replacementText: f.correction.replacementText,
+      acceptedAt: at,
     },
   });
 
