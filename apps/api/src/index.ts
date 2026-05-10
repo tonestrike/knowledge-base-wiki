@@ -13,6 +13,7 @@ import {
 } from '@domain/ingestion/infrastructure';
 import type { IngestionContext } from '@domain/ingestion/interface';
 import { OAuthTokenUnreadable } from '@domain/ingestion/ports';
+import { subscribeWikiEvents } from '@domain/wiki/interface';
 import { onError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import type { UserId } from '@package/contracts/shared';
@@ -20,9 +21,10 @@ import { userId } from '@package/contracts/shared';
 import { InMemoryEventBus, newId, systemClock } from '@package/shared-kernel';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { type WikiBindings, buildWikiContext } from './build-wiki-deps.ts';
 import { router } from './router.ts';
 
-interface Env {
+type Env = WikiBindings & {
   ENVIRONMENT: string;
   DB: D1Database;
   CACHE: KVNamespace;
@@ -33,7 +35,7 @@ interface Env {
   // SF1: required in every non-test environment. Boot-time check below throws
   // when missing so production never silently falls back to a zero key.
   OAUTH_TOKEN_KEY_BASE64: string;
-}
+};
 
 // Single-user demo: every signed-in identity collapses to this UserId.
 // Multi-user comes later.
@@ -213,18 +215,29 @@ const handler = new RPCHandler(router, {
   ],
 });
 
+let subscriptionsBootstrapped = false;
+const bootstrapSubscriptions = (env: Partial<WikiBindings>) => {
+  if (subscriptionsBootstrapped) return;
+  subscriptionsBootstrapped = true;
+  const ctx = buildWikiContext(env, systemClock);
+  subscribeWikiEvents(ctx.eventBus);
+};
+
 app.use('/rpc/*', async (c, next) => {
   // c.env is undefined when running under bun:test without executionContext;
   // we still want core/* routes to work in that case, so fall back to an
   // ENVIRONMENT=test stub. Ingestion routes will fail at use-time on missing
   // bindings, not here at construction time.
-  const ingestion = buildIngestionContext(c.env ?? ({ ENVIRONMENT: 'test' } as Env));
+  const env = (c.env ?? { ENVIRONMENT: 'test' }) as Env;
+  const ingestion = buildIngestionContext(env);
+  bootstrapSubscriptions(env);
+  const wiki = buildWikiContext(env, systemClock);
   const { matched, response } = await handler.handle(c.req.raw, {
     prefix: '/rpc',
-    // Spread the ingestion context first; `clock` is included from there. We
-    // keep clock spelled out below for routers that haven't migrated yet.
     context: {
       ...ingestion,
+      ...wiki,
+      clock: systemClock,
     },
   });
   if (matched) {
@@ -234,5 +247,7 @@ app.use('/rpc/*', async (c, next) => {
 });
 
 app.get('/', (c) => c.text('tenex api'));
+
+export { CompileRunDO } from './durable-objects.ts';
 
 export default app;
