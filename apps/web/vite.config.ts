@@ -11,6 +11,13 @@ export default defineConfig({
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },
+      // Source artifact proxy (PDF bytes, extracted text, page outline) is
+      // served directly by the API — vite must forward it instead of falling
+      // back to the SPA index.html.
+      '/__source': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
     },
   },
 });
