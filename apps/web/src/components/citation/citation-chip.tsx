@@ -24,10 +24,11 @@ export function CitationChip({ citation }: CitationChipProps) {
       transition={{ duration: 0.18, ease: 'easeOut' }}
       whileHover={{ y: -1 }}
       whileTap={{ scale: 0.96 }}
-      className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-[11px] text-accent shadow-[0_0_0_1px_transparent] transition-colors hover:border-accent hover:bg-accent/20 hover:text-foreground hover:shadow-[0_0_0_1px_rgba(0,0,0,0.04)]"
+      className="inline-flex max-w-full items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-[11px] text-accent shadow-[0_0_0_1px_transparent] transition-colors hover:border-accent hover:bg-accent/20 hover:text-foreground hover:shadow-[0_0_0_1px_rgba(0,0,0,0.04)]"
+      title={citation.label}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-      {citation.label}
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+      <span className="truncate">{citation.label}</span>
     </motion.button>
   );
 }

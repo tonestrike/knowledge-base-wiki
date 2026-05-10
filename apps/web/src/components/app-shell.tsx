@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { orpc } from '../lib/orpc.ts';
+import { useChatDock } from './chat-dock/chat-dock-context.tsx';
 import { ThemeToggle } from './theme-toggle.tsx';
 
 interface AppShellProps {
@@ -26,6 +27,7 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
   const params = useParams();
   const location = useLocation();
   const wikiId = wikiIdOverride ?? (params.wikiId as string | undefined) ?? '';
+  const dock = useChatDock();
 
   const wiki = useQuery({
     ...orpc.wiki.getWiki.queryOptions({ input: { id: wikiId } }),
@@ -38,7 +40,6 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
 
   const folderName = folder.data?.name ?? wiki.data?.folderId ?? '';
   const isLint = location.pathname.endsWith('/lint');
-  const isChat = location.pathname.startsWith('/chat/');
   const isPage = /\/page\//.test(location.pathname);
   const isOverview = !!wikiId && !isLint && !isPage;
 
@@ -88,9 +89,21 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
                 <TabLink to={`/wiki/${wikiId}/lint`} active={isLint}>
                   Lint
                 </TabLink>
-                <TabLink to={`/chat/new?wikiId=${wikiId}`} active={isChat}>
+                <button
+                  type="button"
+                  onClick={() => dock.openFor(wikiId)}
+                  className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm transition-colors ${
+                    dock.open
+                      ? 'bg-foreground/10 font-medium text-foreground'
+                      : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                  }`}
+                  aria-pressed={dock.open}
+                >
                   Chat
-                </TabLink>
+                  <kbd className="hidden rounded border border-border/60 bg-card/40 px-1 font-mono text-[10px] text-muted-foreground sm:inline">
+                    ⌘K
+                  </kbd>
+                </button>
               </nav>
             )}
             <ThemeToggle />

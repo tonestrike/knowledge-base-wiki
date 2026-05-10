@@ -67,7 +67,21 @@ const synthesizer: Synthesizer = {
 };
 
 const buildDeps = (): ChatDeps => {
-  const base = makeFakeChatDeps({ ids: [cid, tid] });
+  const base = makeFakeChatDeps({
+    ids: [cid, tid],
+    // Researcher LLM was dropped; researchQuestion now sources findings
+    // straight from the wiki search. Seed the fake wikiReader with a page
+    // that holds the citation the synthesizer will reference.
+    wikiPages: [
+      {
+        id: pid,
+        wikiId: wid,
+        title: 'Q3 NRR',
+        body: 'NRR was 110%.',
+        citations: [cit],
+      },
+    ],
+  });
   const dispatcher = createInMemoryDispatcher({
     researcher,
     synthesizer,
