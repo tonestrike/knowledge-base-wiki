@@ -11,7 +11,7 @@ describe('Span', () => {
       byteRange: { start: 0, end: 100 },
       contentHash: 'sha256:abc123',
     });
-    expect(span.contentHash).toBe('sha256:abc123');
+    expect(span.contentHash as string).toBe('sha256:abc123');
   });
 
   it('rejects byteRange where end <= start', () => {

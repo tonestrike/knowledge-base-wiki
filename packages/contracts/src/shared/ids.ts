@@ -2,6 +2,22 @@ import { z } from 'zod';
 
 const brand = <Name extends string>(_name: Name) => z.string().uuid().brand<Name>();
 
+// ISO-8601 timestamp brand. Lives here (not in span.ts) because it's an
+// identity primitive — every aggregate needs at least one timestamp field.
+export const IsoTimestamp = z.string().datetime().brand<'IsoTimestamp'>();
+export type IsoTimestamp = z.infer<typeof IsoTimestamp>;
+export const isoTimestamp = (s: string): IsoTimestamp => IsoTimestamp.parse(s);
+
+// Content-hash identity primitive — `<algo>:<hex>`. Moved from `span.ts` so
+// callers that need it without spans (e.g. domain manifests) don't import a
+// span-specific module. The shared barrel re-exports both for compatibility.
+export const ContentHash = z
+  .string()
+  .regex(/^[a-z0-9]+:[a-f0-9]+$/, 'content hash must be `<algo>:<hex>`')
+  .brand<'ContentHash'>();
+export type ContentHash = z.infer<typeof ContentHash>;
+export const contentHash = (s: string): ContentHash => ContentHash.parse(s);
+
 export const SourceId = brand('SourceId');
 export type SourceId = z.infer<typeof SourceId>;
 export const sourceId = (s: string): SourceId => SourceId.parse(s);
