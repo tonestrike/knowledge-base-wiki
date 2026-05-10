@@ -136,6 +136,14 @@ const fakeRuntime = (): {
         return;
       },
     },
+    gapAnalyzer: {
+      analyze: async () => ({
+        pageTypeWithNoPages: [],
+        pagesWithNoClaims: [],
+        claimsWithNoCitations: [],
+        sourcesNeverCited: [],
+      }),
+    },
     eventBus: bus,
     newId: sequentialId,
     now: () => new Date('2026-05-09T12:00:00.000Z'),

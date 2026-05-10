@@ -124,7 +124,7 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
             schema,
             schemaName,
             schemaDescription,
-            maxTokens,
+            maxOutputTokens: maxTokens,
             temperature,
             // Disable AI SDK's internal retry-with-feedback. Our LlmClient
             // wrapper handles transient errors (429/5xx) explicitly; for
@@ -137,8 +137,8 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
           clearTimeout(timer);
           return {
             result: res.object as z.infer<TSchema>,
-            inputTokens: res.usage?.promptTokens ?? 0,
-            outputTokens: res.usage?.completionTokens ?? 0,
+            inputTokens: res.usage?.inputTokens ?? 0,
+            outputTokens: res.usage?.outputTokens ?? 0,
           };
         } catch (err) {
           clearTimeout(timer);

@@ -25,6 +25,43 @@ export const ListWikisOutput = z.object({
   nextCursor: z.string().optional(),
 });
 
+export const GapsInput = z.object({ id: WikiId });
+
+export const Gap = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('PageTypeHasNoPages'),
+    pageType: z.string(),
+    description: z.string(),
+  }),
+  z.object({
+    kind: z.literal('PageHasNoClaims'),
+    pageId: z.string().uuid(),
+    title: z.string(),
+    pageType: z.string().nullable(),
+  }),
+  z.object({
+    kind: z.literal('ClaimHasNoCitations'),
+    pageId: z.string().uuid(),
+    pageTitle: z.string(),
+    claimId: z.string().uuid(),
+    claimText: z.string(),
+  }),
+  z.object({
+    kind: z.literal('SourceNeverCited'),
+    sourceId: z.string().uuid(),
+    filename: z.string(),
+  }),
+]);
+export type Gap = z.infer<typeof Gap>;
+
+export const GapsOutput = z.object({
+  wikiId: WikiId,
+  generatedAt: z.string().datetime(),
+  totalGaps: z.number().int().nonnegative(),
+  gaps: z.array(Gap),
+});
+export type GapsOutput = z.infer<typeof GapsOutput>;
+
 export const wikisContract = {
   getWiki: oc.route({ method: 'GET', path: '/wikis/{id}' }).input(GetWikiInput).output(Wiki),
   getSchema: oc
@@ -35,4 +72,8 @@ export const wikisContract = {
     .route({ method: 'GET', path: '/wikis' })
     .input(ListWikisInput)
     .output(ListWikisOutput),
+  // Wiki health / gap analysis. Surfaces structural gaps in the compile —
+  // claims with no citations, schema PageTypes with no pages, sources
+  // never cited, etc. Cheap D1 queries; runs on demand.
+  gaps: oc.route({ method: 'GET', path: '/wikis/{id}/gaps' }).input(GapsInput).output(GapsOutput),
 };

@@ -3,6 +3,7 @@ import { compileRunId as parseCompileRunId } from '@package/contracts/shared';
 import { wikiContract } from '@package/contracts/wiki';
 import type { Clock } from '@package/shared-kernel';
 import { getCompileRun } from '../application/get-compile-run.ts';
+import { getGaps } from '../application/get-gaps.ts';
 import { getPage } from '../application/get-page.ts';
 import { getSchema } from '../application/get-schema.ts';
 import { getWiki } from '../application/get-wiki.ts';
@@ -39,6 +40,13 @@ export const wikiRouter = {
     }
   }),
   listWikis: os.listWikis.handler(({ context, input }) => listWikis(context, input)),
+  gaps: os.gaps.handler(async ({ context, input }) => {
+    try {
+      return await getGaps(context, input);
+    } catch (e) {
+      return wrapNotFound(e);
+    }
+  }),
   getPage: os.getPage.handler(async ({ context, input }) => {
     try {
       return await getPage(context, input);

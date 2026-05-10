@@ -86,6 +86,28 @@ export interface CompileRunDispatcher {
   subscribe(compileRunId: CompileRunId): AsyncIterable<CompileEvent>;
 }
 
+// Surfaces structural problems in the compiled wiki — claims with no
+// citations, schema PageTypes with no pages, sources never cited.
+// Implemented as a D1-backed adapter at the api boundary; the domain
+// only knows the analyzer interface.
+export interface GapAnalyzer {
+  analyze(wikiId: WikiId): Promise<{
+    pageTypeWithNoPages: ReadonlyArray<{ pageType: string; description: string }>;
+    pagesWithNoClaims: ReadonlyArray<{
+      pageId: string;
+      title: string;
+      pageType: string | null;
+    }>;
+    claimsWithNoCitations: ReadonlyArray<{
+      pageId: string;
+      pageTitle: string;
+      claimId: string;
+      claimText: string;
+    }>;
+    sourcesNeverCited: ReadonlyArray<{ sourceId: string; filename: string }>;
+  }>;
+}
+
 // Read-side dependencies the oRPC handlers see.
 export interface WikiDeps {
   llm: LlmClient;
@@ -94,6 +116,7 @@ export interface WikiDeps {
   pages: WikiPageRepository;
   runs: CompileRunRepository;
   dispatcher: CompileRunDispatcher;
+  gapAnalyzer: GapAnalyzer;
   eventBus: EventBus;
   newId: () => string;
   now: () => Date;

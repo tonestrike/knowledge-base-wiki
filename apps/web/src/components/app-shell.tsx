@@ -37,15 +37,23 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
     ...orpc.ingestion.getFolder.queryOptions({ input: { id: wiki.data?.folderId ?? '' } }),
     enabled: !!wiki.data?.folderId,
   });
+  // Live gap count for the nav badge. Kept cheap: the gaps procedure is
+  // already cached per-wiki by react-query and is a single D1 read.
+  const gapsCount = useQuery({
+    ...orpc.wiki.gaps.queryOptions({ input: { id: wikiId } }),
+    enabled: !!wikiId,
+    select: (data) => data.totalGaps,
+  });
 
   const folderName = folder.data?.name ?? wiki.data?.folderId ?? '';
   const isLint = location.pathname.endsWith('/lint');
+  const isGaps = location.pathname.endsWith('/gaps');
   const isPage = /\/page\//.test(location.pathname);
-  const isOverview = !!wikiId && !isLint && !isPage;
+  const isOverview = !!wikiId && !isLint && !isGaps && !isPage;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="border-b border-border/60 bg-background/80 backdrop-blur-sm supports-backdrop-filter:bg-background/60">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-3">
           <Link
             to="/"
@@ -89,6 +97,17 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
                 <TabLink to={`/wiki/${wikiId}/lint`} active={isLint}>
                   Lint
                 </TabLink>
+                <TabLink to={`/wiki/${wikiId}/gaps`} active={isGaps}>
+                  Gaps
+                  {gapsCount.data !== undefined && gapsCount.data > 0 ? (
+                    <span
+                      className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/20 px-1 font-mono text-[10px] text-accent"
+                      aria-label={`${gapsCount.data} open gaps`}
+                    >
+                      {gapsCount.data}
+                    </span>
+                  ) : null}
+                </TabLink>
                 <button
                   type="button"
                   onClick={() => dock.openFor(wikiId)}
@@ -100,7 +119,7 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
                   aria-pressed={dock.open}
                 >
                   Chat
-                  <kbd className="hidden rounded border border-border/60 bg-card/40 px-1 font-mono text-[10px] text-muted-foreground sm:inline">
+                  <kbd className="hidden rounded-sm border border-border/60 bg-card/40 px-1 font-mono text-[10px] text-muted-foreground sm:inline">
                     ⌘K
                   </kbd>
                 </button>

@@ -94,6 +94,14 @@ const baseDeps = (): WikiDeps => {
           : null,
     },
     dispatcher: {} as never,
+    gapAnalyzer: {
+      analyze: async () => ({
+        pageTypeWithNoPages: [],
+        pagesWithNoClaims: [],
+        claimsWithNoCitations: [],
+        sourcesNeverCited: [],
+      }),
+    },
     eventBus: { publish: async () => undefined, subscribe: () => () => undefined },
     newId: () => '00000000-0000-4000-8000-000000000000',
     now: () => new Date('2026-05-09T12:00:00.000Z'),
