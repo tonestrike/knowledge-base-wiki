@@ -124,6 +124,13 @@ export interface Synthesizer {
 export interface ResearcherInput {
   wikiId: WikiId;
   question: string;
+  /**
+   * Optional progress callback fired as findings stream in from the model.
+   * The dispatcher uses this to emit `ResearchProgress` events to the SSE
+   * tape so the UI surfaces real per-finding progress instead of a static
+   * spinner.
+   */
+  onPartial?: (partial: { findings: number }) => void;
 }
 
 export interface ResearcherOutput {

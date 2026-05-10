@@ -99,20 +99,28 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
   }): Promise<void> => {
     const key = subscribeKey(args.conversationId, args.turnId);
     try {
-      // Emit AnswerStarted + ResearchStarted up front so the UI can flip
-      // into the "Researcher running" state immediately (the LLM call
-      // below blocks for several seconds — without these the user sees a
-      // blank chat with no progress).
+      // The "research" step is now a D1 query against the pre-compiled
+      // wiki — no LLM call. Pages are already structured prose with
+      // citations attached (that work happened at compile time). These
+      // events fire effectively instantly; we keep them in the agent log
+      // for narrative continuity.
       emit(key, { kind: 'AnswerStarted', turnId: args.turnId });
       emit(key, {
         kind: 'ResearchStarted',
         turnId: args.turnId,
-        model: 'anthropic/claude-sonnet-4.6',
+        model: 'd1-wiki-index',
       });
 
       const { findings, pages } = await researchQuestion(deps, {
         wikiId: args.wikiId,
         question: args.question,
+        onPartial: ({ findings: count }) => {
+          emit(key, {
+            kind: 'ResearchProgress',
+            turnId: args.turnId,
+            findingsExtracted: count,
+          });
+        },
       });
 
       emit(key, {
