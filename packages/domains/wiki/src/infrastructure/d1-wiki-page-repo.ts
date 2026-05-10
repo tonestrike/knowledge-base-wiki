@@ -69,10 +69,29 @@ export const createD1WikiPageRepository = (
   async insertMany(pages) {
     if (pages.length === 0) return;
 
-    // Bodies live in R2 — write them first so a partial D1 batch never points
-    // at missing markdown.
-    for (const p of pages) {
-      await storage.put(p.id, p.body);
+    // SF2 — atomicity: bodies live in R2 (cannot share a D1 transaction).
+    // Two failure modes to defend against:
+    //   (a) R2 put k/N fails — the first k-1 puts orphan markdown the D1
+    //       row will never reference. We cleanup the puts we already made.
+    //   (b) R2 puts all succeed but D1 batch fails — R2 has bodies, D1 has
+    //       no rows. We cleanup all R2 keys we wrote.
+    // Either way, on a thrown error the post-state is "no R2 body, no D1
+    // row" — safe to retry the whole insertMany without orphan accumulation.
+    const writtenIds: typeof pages = [];
+    try {
+      for (const p of pages) {
+        await storage.put(p.id, p.body);
+        writtenIds.push(p);
+      }
+    } catch (putErr) {
+      await Promise.allSettled(writtenIds.map((p) => storage.delete(p.id)));
+      throw new Error(
+        `[d1.wiki_pages.insertMany r2.put] failed at page ${writtenIds.length + 1}/${
+          pages.length
+        }; rolled back ${writtenIds.length} bodies; ${
+          putErr instanceof Error ? putErr.message : String(putErr)
+        }`,
+      );
     }
 
     const stmts: D1PreparedStatement[] = [];
@@ -133,53 +152,77 @@ export const createD1WikiPageRepository = (
         );
       }
     }
-    await db.batch(stmts);
+    try {
+      await db.batch(stmts);
+    } catch (batchErr) {
+      // D1 batch failed — every R2 key we wrote is now orphaned. Best-effort
+      // cleanup; if a delete throws, log the orphan key path so an operator
+      // can sweep it. We do NOT swallow batchErr — the caller must know the
+      // run failed.
+      const cleanups = await Promise.allSettled(pages.map((p) => storage.delete(p.id)));
+      const leaked = cleanups
+        .map((c, i) => (c.status === 'rejected' ? bodyKey(pages[i]?.id ?? ('' as never)) : null))
+        .filter((k): k is string => k !== null);
+      const leakedNote =
+        leaked.length > 0 ? ` (LEAKED R2 keys requiring sweep: ${leaked.join(', ')})` : '';
+      throw new Error(
+        `[d1.wiki_pages.insertMany d1.batch] failed; rolled back ${pages.length} R2 bodies${leakedNote}; ${
+          batchErr instanceof Error ? batchErr.message : String(batchErr)
+        }`,
+      );
+    }
   },
 
   async findById(id) {
-    const r = await db.prepare('SELECT * FROM wiki_pages WHERE id = ?').bind(id).first<PageRow>();
-    if (!r) return null;
-    const body = (await storage.get(parseWikiPageId(r.id))) ?? '';
-    const claimsRows = await db
-      .prepare('SELECT * FROM claims WHERE wiki_page_id = ? ORDER BY position ASC')
-      .bind(r.id)
-      .all<ClaimRow>();
-    const claims: Claim[] = [];
-    for (const c of claimsRows.results) {
-      const citationRows = await db
-        .prepare('SELECT * FROM citations WHERE claim_id = ?')
-        .bind(c.id)
-        .all<CitationRow>();
-      const citations: Citation[] = citationRows.results.map((row) => ({
-        id: parseCitationId(row.id),
-        label: row.label,
-        span: {
-          sourceId: parseSourceId(row.source_id),
-          byteRange: { start: row.byte_range_start, end: row.byte_range_end },
-          contentHash: row.content_hash as ContentHash,
-        },
-      }));
-      claims.push({
-        id: parseClaimId(c.id),
-        wikiPageId: parseWikiPageId(c.wiki_page_id),
-        paragraphId: c.paragraph_id,
-        claimText: c.claim_text,
-        citations,
-      });
-    }
-    const backlinkRows = await db
-      .prepare('SELECT * FROM backlinks WHERE from_page_id = ?')
-      .bind(r.id)
-      .all<BacklinkRow>();
-    const backlinks = backlinkRows.results.map((row) =>
-      Backlink.create({
-        fromPageId: parseWikiPageId(row.from_page_id),
-        toPageId: parseWikiPageId(row.to_page_id),
-        relationName: row.relation_name || undefined,
-      }),
-    );
+    try {
+      const r = await db.prepare('SELECT * FROM wiki_pages WHERE id = ?').bind(id).first<PageRow>();
+      if (!r) return null;
+      const body = (await storage.get(parseWikiPageId(r.id))) ?? '';
+      const claimsRows = await db
+        .prepare('SELECT * FROM claims WHERE wiki_page_id = ? ORDER BY position ASC')
+        .bind(r.id)
+        .all<ClaimRow>();
+      const claims: Claim[] = [];
+      for (const c of claimsRows.results) {
+        const citationRows = await db
+          .prepare('SELECT * FROM citations WHERE claim_id = ?')
+          .bind(c.id)
+          .all<CitationRow>();
+        const citations: Citation[] = citationRows.results.map((row) => ({
+          id: parseCitationId(row.id),
+          label: row.label,
+          span: {
+            sourceId: parseSourceId(row.source_id),
+            byteRange: { start: row.byte_range_start, end: row.byte_range_end },
+            contentHash: row.content_hash as ContentHash,
+          },
+        }));
+        claims.push({
+          id: parseClaimId(c.id),
+          wikiPageId: parseWikiPageId(c.wiki_page_id),
+          paragraphId: c.paragraph_id,
+          claimText: c.claim_text,
+          citations,
+        });
+      }
+      const backlinkRows = await db
+        .prepare('SELECT * FROM backlinks WHERE from_page_id = ?')
+        .bind(r.id)
+        .all<BacklinkRow>();
+      const backlinks = backlinkRows.results.map((row) =>
+        Backlink.create({
+          fromPageId: parseWikiPageId(row.from_page_id),
+          toPageId: parseWikiPageId(row.to_page_id),
+          relationName: row.relation_name || undefined,
+        }),
+      );
 
-    return rowToPage(r, body, claims, backlinks);
+      return rowToPage(r, body, claims, backlinks);
+    } catch (err) {
+      throw new Error(
+        `[d1.wiki_pages.findById id=${id}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
 
   async list({ wikiId, subtype, pageType, cursor, limit }) {
@@ -199,20 +242,28 @@ export const createD1WikiPageRepository = (
     }
     params.push(limit);
     const sql = `SELECT * FROM wiki_pages WHERE ${filters.join(' AND ')} ORDER BY updated_at DESC LIMIT ?`;
-    const { results } = await db
-      .prepare(sql)
-      .bind(...params)
-      .all<PageRow>();
-    const items = await Promise.all(
-      results.map(async (r) => {
-        const body = (await storage.get(parseWikiPageId(r.id))) ?? '';
-        // List endpoints return shallow pages — claims/citations/backlinks
-        // are fetched on the dedicated `getPage` route.
-        return rowToPage(r, body, [], []);
-      }),
-    );
-    const nextCursor = items.length === limit ? items[items.length - 1]?.updatedAt : undefined;
-    return { items, nextCursor };
+    try {
+      const { results } = await db
+        .prepare(sql)
+        .bind(...params)
+        .all<PageRow>();
+      const items = await Promise.all(
+        results.map(async (r) => {
+          const body = (await storage.get(parseWikiPageId(r.id))) ?? '';
+          // List endpoints return shallow pages — claims/citations/backlinks
+          // are fetched on the dedicated `getPage` route.
+          return rowToPage(r, body, [], []);
+        }),
+      );
+      const nextCursor = items.length === limit ? items[items.length - 1]?.updatedAt : undefined;
+      return { items, nextCursor };
+    } catch (err) {
+      throw new Error(
+        `[d1.wiki_pages.list wikiId=${wikiId} subtype=${subtype ?? '*'} pageType=${
+          pageType ?? '*'
+        }] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
 
   toWire(p): WikiPageWire {

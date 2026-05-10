@@ -33,47 +33,79 @@ const rowToWiki = (r: Row): Wiki =>
 
 export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
   async insert(w) {
-    await db
-      .prepare(
-        'INSERT INTO wikis (id, folder_id, schema_json, created_at, updated_at, last_compiled_at, page_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      )
-      .bind(
-        w.id,
-        w.folderId,
-        JSON.stringify(w.schema),
-        w.createdAt,
-        w.updatedAt,
-        w.lastCompiledAt ?? null,
-        w.pageCount,
-      )
-      .run();
+    try {
+      await db
+        .prepare(
+          'INSERT INTO wikis (id, folder_id, schema_json, created_at, updated_at, last_compiled_at, page_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .bind(
+          w.id,
+          w.folderId,
+          JSON.stringify(w.schema),
+          w.createdAt,
+          w.updatedAt,
+          w.lastCompiledAt ?? null,
+          w.pageCount,
+        )
+        .run();
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.insert id=${w.id}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
   async update(w) {
-    await db
-      .prepare(
-        'UPDATE wikis SET schema_json = ?, updated_at = ?, last_compiled_at = ?, page_count = ? WHERE id = ?',
-      )
-      .bind(JSON.stringify(w.schema), w.updatedAt, w.lastCompiledAt ?? null, w.pageCount, w.id)
-      .run();
+    try {
+      await db
+        .prepare(
+          'UPDATE wikis SET schema_json = ?, updated_at = ?, last_compiled_at = ?, page_count = ? WHERE id = ?',
+        )
+        .bind(JSON.stringify(w.schema), w.updatedAt, w.lastCompiledAt ?? null, w.pageCount, w.id)
+        .run();
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.update id=${w.id}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
   async findById(id: WikiId) {
-    const r = await db.prepare('SELECT * FROM wikis WHERE id = ?').bind(id).first<Row>();
-    return r ? rowToWiki(r) : null;
+    try {
+      const r = await db.prepare('SELECT * FROM wikis WHERE id = ?').bind(id).first<Row>();
+      return r ? rowToWiki(r) : null;
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.findById id=${id}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
   async findByFolderId(id: FolderId) {
-    const r = await db.prepare('SELECT * FROM wikis WHERE folder_id = ?').bind(id).first<Row>();
-    return r ? rowToWiki(r) : null;
+    try {
+      const r = await db.prepare('SELECT * FROM wikis WHERE folder_id = ?').bind(id).first<Row>();
+      return r ? rowToWiki(r) : null;
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.findByFolderId folderId=${id}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
   async list({ cursor, limit }) {
-    const stmt = cursor
-      ? db
-          .prepare('SELECT * FROM wikis WHERE updated_at < ? ORDER BY updated_at DESC LIMIT ?')
-          .bind(cursor, limit)
-      : db.prepare('SELECT * FROM wikis ORDER BY updated_at DESC LIMIT ?').bind(limit);
-    const { results } = await stmt.all<Row>();
-    const items = results.map(rowToWiki);
-    const nextCursor = items.length === limit ? items[items.length - 1]?.updatedAt : undefined;
-    return { items, nextCursor };
+    try {
+      const stmt = cursor
+        ? db
+            .prepare('SELECT * FROM wikis WHERE updated_at < ? ORDER BY updated_at DESC LIMIT ?')
+            .bind(cursor, limit)
+        : db.prepare('SELECT * FROM wikis ORDER BY updated_at DESC LIMIT ?').bind(limit);
+      const { results } = await stmt.all<Row>();
+      const items = results.map(rowToWiki);
+      const nextCursor = items.length === limit ? items[items.length - 1]?.updatedAt : undefined;
+      return { items, nextCursor };
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.list cursor=${cursor ?? 'null'} limit=${limit}] ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   },
   toWire(w): WikiWire {
     return {

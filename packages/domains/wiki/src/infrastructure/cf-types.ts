@@ -27,6 +27,7 @@ export interface R2Bucket {
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
   get(key: string): Promise<R2Body | null>;
+  delete(key: string): Promise<void>;
 }
 
 // Durable Object — narrow shape used by `cf-compile-run-dispatcher.ts`.
