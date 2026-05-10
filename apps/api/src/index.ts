@@ -21,7 +21,8 @@ import { userId } from '@package/contracts/shared';
 import { InMemoryEventBus, newId, systemClock } from '@package/shared-kernel';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type WikiBindings, buildWikiContext } from './build-wiki-deps.ts';
+import { buildChatContext } from './build-chat-context.ts';
+import { type WikiBindings, buildWikiContext, getSharedEventBus } from './build-wiki-deps.ts';
 import { router } from './router.ts';
 
 type Env = WikiBindings & {
@@ -229,6 +230,13 @@ const bootstrapSubscriptions = (env: Partial<WikiBindings>) => {
   subscribeWikiEvents(ctx.eventBus);
 };
 
+// Single-instance chat context: in-memory bindings persist across requests for
+// the duration of the worker process. Phase 3 swaps these for D1 + DO.
+// The chat EventBus is the same shared-kernel InMemoryEventBus the wiki
+// context subscribes against, so `AnswerProduced` events flow into the wiki
+// cross-context handlers.
+const chatContext = buildChatContext({ eventBus: getSharedEventBus() });
+
 app.use('/rpc/*', async (c, next) => {
   // c.env is undefined when running under bun:test without executionContext;
   // we still want core/* routes to work in that case, so fall back to an
@@ -250,6 +258,7 @@ app.use('/rpc/*', async (c, next) => {
     context: {
       ...wiki,
       ...ingestion,
+      ...chatContext,
       clock: systemClock,
       // biome-ignore lint/suspicious/noExplicitAny: cross-context union, see comment above
     } as any,

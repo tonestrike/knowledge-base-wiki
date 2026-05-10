@@ -27,6 +27,11 @@ const getBus = (): EventBus => {
   return cachedBus;
 };
 
+// Exposed for other contexts (e.g. chat) that need to publish into the same
+// in-process bus the wiki context subscribes against. Keeps cross-context
+// events flowing through one canonical instance.
+export const getSharedEventBus = (): EventBus => getBus();
+
 // Lazy throwers — for environments (e.g. unit tests against `app.fetch`)
 // where the Worker bindings aren't supplied. The handler itself will only
 // touch these when a `/rpc/wiki/*` request actually flows through.

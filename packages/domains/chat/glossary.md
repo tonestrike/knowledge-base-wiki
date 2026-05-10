@@ -17,8 +17,17 @@ This is the canonical glossary for the **chat** bounded context. Every term used
 | AnswerSegment | A unit of the streaming `Answer`: prose, citation, or `Artifact`. Streamed in order. | Discriminated union. |
 | Artifact | An interactive React component picked by the `Synthesizer` per question (e.g. ComparisonTable, Timeline, LineChart, BarChart, KeyMetric, CodeBlock, Quote, Markdown). Has typed props + a citations array. | Third-leap addition. Closed registry; structured-output schema enforces the registry. |
 | CitationChip | The rendered representation of a `Citation` in an `AnswerSegment`. Clickable; opens the source via citation-flight modal at the cited `Span`. | UI concept with a domain mirror because the protocol streams it. |
-| Researcher | The agent that reads the `Wiki` to gather information for an `Answer`. | |
-| Synthesizer | The agent that composes the `Answer` from `Researcher` findings, picking an `Artifact` when appropriate. | |
+| Researcher | The agent that reads the `Wiki` to gather information for an `Answer`. Runs on Haiku 4.5. | |
+| Synthesizer | The agent that composes the `Answer` from `Researcher` findings, picking an `Artifact` when appropriate. Runs on Sonnet 4.6 via OpenRouter through the Vercel AI SDK `streamObject`. | |
+| Finding | A `Researcher`-produced unit feeding the `Synthesizer`: a verbatim quote drawn from a `WikiPage` body, paired with the `Citation`s that support it. | One `Researcher` pass produces zero or more `Finding`s. |
+| Dispatcher | The infrastructure surface a `Conversation` calls to start a `Turn` run and to `subscribe` to its `AnswerEvent`s. | Backed by an in-memory broker in tests and a Cloudflare Durable Object in production. |
+| AnswerEvent | The wire shape streamed for a `Turn`: `AnswerStarted`, `AnswerSegment`, `AnswerProseDelta`, `AnswerFailed`, `AnswerFinished`. | Defined in `@package/contracts/chat`; transported via oRPC `eventIterator`. |
+| AnswerProduced | Domain event emitted when a `Turn` finishes; the `wiki` context may consume it to file an `AnswerPage`. | Schema in `@package/contracts/events`; published through the injected `EventBus`. |
+| WikiReader | A read-only port the `Researcher` uses to fetch `WikiPage`s for a `Wiki`. Implemented over the typed oRPC client to keep `chat` from importing `domains/wiki`. | |
+| SourceHashVerifier | A port that re-hashes the bytes a `Citation` covers and rejects mismatches before any `AnswerSegment` carrying that `Citation` is emitted. | The fabrication tripwire; a single failure aborts the `Turn` with `AnswerFailed`. |
+| CitationTripwireError | The typed error a `Synthesizer`-driven use-case throws when a citation invariant is violated (unknown id, hash mismatch, invalid `Artifact` shape). | Distinguishes a fabrication-tripwire abort from an infrastructure error so the dispatcher logs and reshapes them differently. |
+| ConversationNotFoundError | Typed not-found error for `Conversation` lookups; the interface boundary maps it to `ORPCError('NOT_FOUND')`. | |
+| TurnNotFoundError | Typed not-found error for `Turn` lookups; the interface boundary maps it to `ORPCError('NOT_FOUND')`. | |
 
 ## Banned synonyms
 

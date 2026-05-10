@@ -56,12 +56,16 @@ export interface DomainEventMap {
     replacementText: string;
     acceptedAt: string;
   };
-  // 2.C placeholder — chat context emits this when it produces an Answer.
-  // The wiki context optionally files the Answer as an AnswerPage (v1.1).
-  // Shape will firm up when 2.C lands; v1 is a loud stub.
+  // AnswerProduced — chat context emits this after a Turn finishes. The
+  // wiki context's cross-context subscriber may file the Answer as an
+  // AnswerPage (v1.1 stub today). Payload shape mirrors the contract-level
+  // `AnswerProduced` envelope in `@package/contracts/events`; we keep the
+  // ids as plain `string` here so shared-kernel doesn't take a runtime
+  // dependency on the contracts package.
   AnswerProduced: {
-    answerId: string;
-    sessionId: string;
+    conversationId: string;
+    turnId: string;
+    wikiId: string;
   };
 }
 
