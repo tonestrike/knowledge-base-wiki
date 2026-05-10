@@ -7,9 +7,11 @@ import {
 } from '@package/contracts/shared';
 import {
   CitationTripwireError,
+  type PriorTurn,
   type SourceHashVerifier,
   type Synthesizer,
   type SynthesizerInput,
+  type WikiPageSummary,
 } from './ports.ts';
 
 export interface SynthesizeAnswerDeps {
@@ -19,7 +21,78 @@ export interface SynthesizeAnswerDeps {
 
 export interface SynthesizeAnswerInput extends SynthesizerInput {
   turnId: TurnId;
+  /**
+   * Populated by the researcher when no findings matched the question.
+   * The use-case still routes through the LLM (the synthesizer is the
+   * agent loop) but seeds it with these pages as findings so the agent
+   * has real grounded context to compose a guided "couldn't match that,
+   * here's what this wiki covers" response — never a hand-written string.
+   */
+  suggestionPages?: ReadonlyArray<WikiPageSummary>;
 }
+
+/**
+ * Cap on how many prior turns of the Conversation flow into the synth
+ * prompt. Keeps the prompt bounded; pre-existing turns farther back than
+ * this rarely affect followup interpretation and add token cost.
+ */
+const MAX_HISTORY_TURNS = 6;
+/** Per-prior-answer cap so a long previous answer can't dominate the prompt. */
+const MAX_HISTORY_ANSWER_CHARS = 1200;
+
+/**
+ * Flatten a prior turn's `AnswerSegment[]` into plain text the Synthesizer
+ * can thread into its message history. Citation markers and artifact bodies
+ * are surfaced as compact text so pronoun / topic references in the next
+ * question resolve. Bounded to {@link MAX_HISTORY_ANSWER_CHARS} per turn.
+ */
+const flattenAnswer = (
+  segments: ReadonlyArray<import('@package/contracts/shared').AnswerSegment>,
+): string => {
+  const parts: string[] = [];
+  for (const s of segments) {
+    if (s.kind === 'prose') parts.push(s.text);
+    else if (s.kind === 'citation') parts.push(`[${s.citation.label}]`);
+    else {
+      const a = s.artifact;
+      switch (a.kind) {
+        case 'Quote':
+          parts.push(`"${(a.props as { text: string }).text}"`);
+          break;
+        case 'KeyMetric': {
+          const p = a.props as { label: string; value: string };
+          parts.push(`${p.label}: ${p.value}`);
+          break;
+        }
+        case 'Markdown':
+          parts.push((a.props as { body: string }).body);
+          break;
+        default:
+          parts.push(`[${a.kind} artifact]`);
+      }
+    }
+  }
+  const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+  return text.length > MAX_HISTORY_ANSWER_CHARS
+    ? `${text.slice(0, MAX_HISTORY_ANSWER_CHARS)}…`
+    : text;
+};
+
+/** Convert recent prior Turns of the same Conversation into the bounded
+ *  `PriorTurn[]` the Synthesizer thread expects. */
+export const buildHistory = (
+  priorTurns: ReadonlyArray<{
+    question: string;
+    answer: ReadonlyArray<import('@package/contracts/shared').AnswerSegment>;
+    finishedAt?: string;
+  }>,
+): PriorTurn[] => {
+  return priorTurns
+    .filter((t) => t.finishedAt && t.answer.length > 0)
+    .slice(-MAX_HISTORY_TURNS)
+    .map((t) => ({ question: t.question, answerText: flattenAnswer(t.answer) }))
+    .filter((t) => t.answerText.length > 0);
+};
 
 const errorId = (): string => {
   // SF-CHAT-1: a short correlation id we attach to AnswerFailed messages
@@ -57,8 +130,23 @@ export async function* synthesizeAnswer(
 ): AsyncGenerator<AnswerEvent, void, void> {
   yield { kind: 'AnswerStarted', turnId: input.turnId };
 
+  // The synthesizer is the agent loop. When the question matched no
+  // findings, fall back to the researcher's wiki sample so the agent
+  // still has real grounded context to compose a guided "couldn't
+  // match that, here's what this wiki covers" response. The model
+  // decides what to write — we never hand-author the user-visible
+  // string, we just hand it the right findings.
+  const synthesizerFindings: SynthesizerInput['findings'] =
+    input.findings.length === 0 && (input.suggestionPages?.length ?? 0) > 0
+      ? (input.suggestionPages ?? []).map((p) => ({
+          quoteText: p.body,
+          citationIds: p.citations.map((c) => c.id),
+          citations: p.citations,
+        }))
+      : input.findings;
+
   const knownCitations = new Map<string, Citation>();
-  for (const f of input.findings) {
+  for (const f of synthesizerFindings) {
     for (const c of f.citations) knownCitations.set(c.id, c);
   }
 
@@ -74,11 +162,24 @@ export async function* synthesizeAnswer(
     verifiedCache.set(c.id, true);
   };
 
+  // When the wiki is genuinely empty (no matched findings AND no sample
+  // pages), the synthesizer would otherwise see zero context and could
+  // refuse / return []. Augment the user's question with a system note
+  // so the model agentically composes a "this wiki has no compiled
+  // pages yet — connect and compile a Drive folder first" message.
+  // Stays grounded (no citations needed for prose) and never hand-rolls
+  // user-facing copy.
+  const augmentedQuestion =
+    synthesizerFindings.length === 0
+      ? `${input.question}\n\n[System note: this wiki has no compiled pages, so the findings list is empty. Reply with a single short prose segment explaining that the wiki is empty and the user needs to connect and compile a Drive folder before chatting. Do not invent citations.]`
+      : input.question;
+
   let segmentsEmitted = 0;
   try {
     for await (const evt of deps.synthesizer.stream({
-      question: input.question,
-      findings: input.findings,
+      question: augmentedQuestion,
+      findings: synthesizerFindings,
+      ...(input.history !== undefined ? { history: input.history } : {}),
     })) {
       if (evt.kind === 'proseDelta') {
         yield {

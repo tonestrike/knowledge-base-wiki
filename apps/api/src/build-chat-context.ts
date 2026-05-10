@@ -25,6 +25,7 @@ import type {
 } from '@package/contracts/shared';
 import { userId } from '@package/contracts/shared';
 import { type EventBus, InMemoryEventBus, systemClock } from '@package/shared-kernel';
+import type { LanguageModel } from 'ai';
 
 /**
  * Default chat-context bindings for the api. With OPEN_ROUTER_API_KEY +
@@ -130,6 +131,9 @@ const stubWikiReader: WikiReader = {
   async searchPages() {
     return [];
   },
+  async listSamplePages() {
+    return [];
+  },
   async getPage() {
     return null;
   },
@@ -190,7 +194,14 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
   };
 
   const hydrate = async (row: PageRow): Promise<WikiPageSummary> => {
-    const obj = await storage.get(row.body_r2_key);
+    // Bodies live at R2 key = page id. Both the canonical wiki writer
+    // (`d1-wiki-page-repo.insertMany` → `storage.put(p.id, p.body)`) and
+    // the dev seed endpoint write at this key, and the `body_r2_key`
+    // column is kept consistent with it. Reading at `row.id` here matches
+    // both writers; a previous version of this reader hit `row.body_r2_key`
+    // expecting `wiki_pages/<id>.md`, which silently returned null bodies
+    // because no writer ever used that prefix.
+    const obj = await storage.get(row.id);
     const body = obj ? await obj.text() : '';
     const citations = await loadCitations(row.id);
     return {
@@ -219,6 +230,25 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
         .sort((a, b) => b.s - a.s)
         .slice(0, limit)
         .map((x) => x.p);
+    },
+    async listSamplePages({ wikiId, limit }) {
+      // No score / query — just return the first `limit` pages from the
+      // wiki. Used as a fallback for the empty-findings synthesizer
+      // branch so the agent has real grounded context to compose
+      // guidance instead of hand-rolling a "no results" string. We
+      // inline `limit` (validated as a positive int by the caller in
+      // researchQuestion) because some D1 builds reject parameter
+      // binding inside LIMIT clauses.
+      const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+      const rows = await db
+        .prepare(
+          `SELECT id, wiki_id, title, page_type, body_r2_key FROM wiki_pages WHERE wiki_id = ? LIMIT ${safeLimit}`,
+        )
+        .bind(wikiId)
+        .all<PageRow>();
+      const out: WikiPageSummary[] = [];
+      for (const r of rows.results) out.push(await hydrate(r));
+      return out;
     },
     async getPage(id) {
       const row = await db
@@ -260,9 +290,19 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
   const turns: TurnRepository = opts.bindings
     ? createD1TurnRepository(opts.bindings.db)
     : inMemoryTurns();
+  // Source text reader: the source's extracted text is stored at R2 key
+  // `sources/<id>/text` by the ingestion extractor and surfaced to the
+  // browser via the `/__source/:id/text` endpoint. The citation verifier
+  // re-hashes the slice that a Citation covers to confirm the source still
+  // says what the wiki claims it says. Without this binding the verifier
+  // would always fail with "source text not found" and every Citation would
+  // tripwire — making the entire chat path unusable as soon as any citation
+  // bound to a source is emitted.
   const sourceHashes = createMemorySourceHashVerifier({
-    async readSourceText() {
-      return null;
+    async readSourceText(sourceId) {
+      if (!opts.bindings) return null;
+      const obj = await opts.bindings.storage.get(`sources/${sourceId}/text`);
+      return obj ? await obj.text() : null;
     },
     async sha256Hex(s) {
       const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -280,12 +320,23 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     const { db, storage, openRouterApiKey } = opts.bindings;
     const openrouter = createOpenRouter({ apiKey: openRouterApiKey });
     wikiReader = createDirectWikiReader(db, storage);
-    researcher = createAiSdkResearcher({
-      model: openrouter.chat('anthropic/claude-sonnet-4.6'),
-      wikiReader,
-    });
+    // Pin routing to Anthropic-direct. OpenRouter otherwise picks the
+    // cheapest provider; Sonnet 4.6 falls back to Amazon Bedrock when
+    // Anthropic itself is at capacity, and Bedrock's tool-call validator
+    // diverges from Anthropic-direct on inputs the Synthesizer prompt is
+    // tuned against. `allow_fallbacks: false` makes the failure mode loud
+    // (a 400 from OpenRouter) instead of silently degrading.
+    //
+    // Cast: @openrouter/ai-sdk-provider@2.9 implements an older variant of
+    // ai SDK's LanguageModelV2 that's missing the new `supportedUrls` field.
+    // Verified compatible at runtime (verification context calls it the same
+    // way). Drop the cast once the provider package catches up.
+    const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
+      provider: { order: ['anthropic'], allow_fallbacks: false },
+    }) as LanguageModel;
+    researcher = createAiSdkResearcher({ model: sonnet, wikiReader });
     synthesizer = createAiSdkSynthesizer({
-      model: openrouter.chat('anthropic/claude-sonnet-4.6'),
+      model: sonnet,
       modelName: 'anthropic/claude-sonnet-4.6',
     });
   }

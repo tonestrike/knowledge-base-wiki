@@ -10,7 +10,7 @@ import type {
   TurnRepository,
 } from '../application/ports.ts';
 import { researchQuestion } from '../application/research-question.ts';
-import { synthesizeAnswer } from '../application/synthesize-answer.ts';
+import { buildHistory, synthesizeAnswer } from '../application/synthesize-answer.ts';
 import { Turn } from '../domain/turn.ts';
 
 export interface InMemoryDispatcherDeps {
@@ -111,7 +111,11 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
         model: 'd1-wiki-index',
       });
 
-      const { findings, pages } = await researchQuestion(deps, {
+      console.info('[chat.dispatcher] research start', {
+        turnId: args.turnId,
+        wikiId: args.wikiId,
+      });
+      const { findings, pages, suggestionPages } = await researchQuestion(deps, {
         wikiId: args.wikiId,
         question: args.question,
         onPartial: ({ findings: count }) => {
@@ -122,6 +126,26 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
           });
         },
       });
+
+      console.info('[chat.dispatcher] research done', {
+        turnId: args.turnId,
+        pageCount: pages.length,
+        findingCount: findings.length,
+        suggestionCount: suggestionPages?.length ?? 0,
+      });
+      // Fan out one event per retrieved page so the UI can render the agent's
+      // reading list with titles + types — without this, the user just sees
+      // "X candidate pages" with no idea what's been pulled.
+      for (const p of pages) {
+        emit(key, {
+          kind: 'WikiPageRetrieved',
+          turnId: args.turnId,
+          wikiPageId: p.id,
+          title: p.title,
+          pageType: p.pageType,
+          citationCount: p.citations.length,
+        });
+      }
 
       emit(key, {
         kind: 'ResearchCompleted',
@@ -140,6 +164,17 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
         );
       }
 
+      // Load prior turns of the same Conversation so the Synthesizer can
+      // resolve pronouns / topic continuations ("him", "that one", "why").
+      // `turns.list` returns oldest-first; we drop the *current* turn (it
+      // exists at this point because `ask` inserted it before dispatching)
+      // and let `buildHistory` cap + flatten the rest.
+      const prior = await deps.turns.list({
+        conversationId: args.conversationId,
+        limit: 100,
+      });
+      const history = buildHistory(prior.items.filter((t) => t.id !== args.turnId));
+
       emit(key, {
         kind: 'SynthesisStarted',
         turnId: args.turnId,
@@ -149,7 +184,13 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
       let working: Turn = turn;
       for await (const evt of synthesizeAnswer(
         { synthesizer: deps.synthesizer, sourceHashes: deps.sourceHashes },
-        { turnId: args.turnId, question: args.question, findings },
+        {
+          turnId: args.turnId,
+          question: args.question,
+          findings,
+          ...(suggestionPages !== undefined ? { suggestionPages } : {}),
+          ...(history.length > 0 ? { history } : {}),
+        },
       )) {
         // Skip the use-case's own AnswerStarted — we already fired one
         // before research kicked off.
@@ -198,11 +239,18 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
     async start(args) {
       const key = subscribeKey(args.conversationId, args.turnId);
       tapeFor(key);
-      // Fire-and-forget; the live stream pushes through `emit`. SF-CHAT-10:
-      // attach a top-level catch so a synchronous throw in `run` (before its
-      // own try/catch) still surfaces as AnswerFailed instead of an
-      // unhandled-rejection log.
-      void run(args).catch((err) => {
+      // The live stream pushes through `emit`. SF-CHAT-10: attach a top-level
+      // catch so a synchronous throw in `run` (before its own try/catch)
+      // still surfaces as AnswerFailed instead of an unhandled-rejection log.
+      //
+      // SF-CHAT-11 (Workers keepalive): `chat.ask` returns synchronously with
+      // the turnId; the SSE `streamAnswer` subscription is a separate HTTP
+      // request. Without `args.waitUntil` (= `ExecutionContext.waitUntil`),
+      // workerd treats the `run` promise as orphaned once `ask` responds and
+      // refuses any new I/O it tries to perform — the first `await` on D1 in
+      // `researchQuestion` hangs forever. Anchoring `runPromise` to
+      // `waitUntil` keeps the isolate scheduling I/O until the run resolves.
+      const runPromise = run(args).catch((err) => {
         const id = errorId();
         console.error('[chat.in-memory-dispatcher] run threw synchronously', {
           errorId: id,
@@ -218,6 +266,7 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
           }`,
         });
       });
+      if (args.waitUntil) args.waitUntil(runPromise);
     },
     subscribe({ conversationId, turnId }) {
       const key = subscribeKey(conversationId, turnId);

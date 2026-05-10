@@ -113,6 +113,16 @@ describe('createInMemoryDispatcher', () => {
     expect(kinds[kinds.length - 1]).toBe('AnswerFinished');
     expect(kinds.filter((k) => k === 'AnswerSegment').length).toBe(3);
 
+    // One WikiPageRetrieved per page surfaced by the wiki search, carrying
+    // the title + citation count so the UI's agent-thoughts log can render
+    // the agent's reading list (not just a count).
+    const retrieved = events.filter((e) => e.kind === 'WikiPageRetrieved');
+    expect(retrieved).toHaveLength(1);
+    const [first] = retrieved;
+    if (first?.kind !== 'WikiPageRetrieved') throw new Error('expected WikiPageRetrieved');
+    expect(first.title).toBe('Q3 NRR');
+    expect(first.citationCount).toBe(1);
+
     const turn = await deps.turns.findById(tid);
     expect(turn?.finishedAt).toBeDefined();
     expect(turn?.answer).toHaveLength(3);

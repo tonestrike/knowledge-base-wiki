@@ -61,6 +61,35 @@ const main = async () => {
     });
   }
 
+  // Per-source extracted text, fetched from `/__source/<id>/text`. The chat
+  // synthesizer's `SourceHashVerifier` re-hashes the byte slice each
+  // citation covers (not the whole source) and compares to
+  // `citation.span.contentHash`. The previous seed used the whole-source
+  // hash for every citation, which never matched the slice hash and made
+  // every citation tripwire-fail. We now compute the real slice hash up
+  // front so seeded citations validate end-to-end.
+  const sourceTexts = new Map<string, string>();
+  for (const s of sources) {
+    const r = await fetch(`${API_BASE}/__source/${s.id}/text`);
+    if (r.ok) {
+      sourceTexts.set(s.id, await r.text());
+    }
+  }
+  const sliceHash = (sourceId: string, start: number, end: number): string => {
+    const text = sourceTexts.get(sourceId);
+    if (text == null) {
+      // Source text isn't loaded (seed-fixtures step skipped). Fall back to
+      // the whole-source hash so we don't synth obviously-wrong data; the
+      // verifier will still reject it, but at least we're not silently
+      // pretending the slice was hashed.
+      const src = sources.find((x) => x.id === sourceId);
+      return src ? src.contentHash : `sha256:${'0'.repeat(64)}`;
+    }
+    const safeEnd = Math.min(end, text.length);
+    const slice = text.slice(start, safeEnd);
+    return `sha256:${sha256Hex(slice)}`;
+  };
+
   const PAGE_TYPES = [
     {
       name: 'AnnualLetter',
@@ -110,7 +139,7 @@ const main = async () => {
             {
               id: randomUUID(),
               sourceId: src(3).id,
-              contentHash: src(3).contentHash,
+              contentHash: sliceHash(src(3).id, 1240, 1410),
               byteRangeStart: 1240,
               byteRangeEnd: 1410,
               label: '2023 letter, p.1',
@@ -126,7 +155,7 @@ const main = async () => {
             {
               id: randomUUID(),
               sourceId: src(0).id,
-              contentHash: src(0).contentHash,
+              contentHash: sliceHash(src(0).id, 2100, 2280),
               byteRangeStart: 2100,
               byteRangeEnd: 2280,
               label: '2020 letter, p.3',
@@ -155,7 +184,7 @@ const main = async () => {
             {
               id: randomUUID(),
               sourceId: src(4).id,
-              contentHash: src(4).contentHash,
+              contentHash: sliceHash(src(4).id, 800, 1100),
               byteRangeStart: 800,
               byteRangeEnd: 1100,
               label: '2024 letter, p.2',
@@ -183,7 +212,7 @@ const main = async () => {
             {
               id: randomUUID(),
               sourceId: src(4).id,
-              contentHash: src(4).contentHash,
+              contentHash: sliceHash(src(4).id, 200, 400),
               byteRangeStart: 200,
               byteRangeEnd: 400,
               label: '2024 letter, p.1',

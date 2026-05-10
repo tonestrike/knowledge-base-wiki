@@ -23,6 +23,7 @@ export async function ask(
     turnId: id,
     wikiId: c.wikiId,
     question: input.question,
+    ...(deps.waitUntil ? { waitUntil: deps.waitUntil } : {}),
   });
   return { turnId: id };
 }

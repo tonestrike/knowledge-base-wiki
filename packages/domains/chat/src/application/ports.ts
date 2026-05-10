@@ -35,6 +35,13 @@ export interface WikiPageSummary {
 
 export interface WikiReader {
   searchPages(args: { wikiId: WikiId; query: string; limit: number }): Promise<WikiPageSummary[]>;
+  /**
+   * Returns the first `limit` pages from the wiki regardless of any query.
+   * Used as a fallback when `searchPages` returns empty so the chat can
+   * surface a "here's what this wiki covers" suggestion list instead of
+   * a dead-end "no results" message.
+   */
+  listSamplePages(args: { wikiId: WikiId; limit: number }): Promise<WikiPageSummary[]>;
   getPage(id: WikiPageId): Promise<WikiPageSummary | null>;
 }
 
@@ -76,6 +83,20 @@ export interface TurnRepository {
   toWire(t: Turn): TurnWire;
 }
 
+/**
+ * Prior turn rendered into the form the Synthesizer sees: each turn is one
+ * user `question` paired with the assistant's prose response (citation
+ * markers and artifact tool calls flattened back into a single plain-text
+ * answer). The Synthesizer threads these through as `user`/`assistant`
+ * messages before the live question so pronouns and topic continuations
+ * resolve. Bounded short-context only — the Researcher already supplies the
+ * grounded findings for the *current* question.
+ */
+export interface PriorTurn {
+  question: string;
+  answerText: string;
+}
+
 export interface SynthesizerInput {
   question: string;
   findings: ReadonlyArray<{
@@ -83,6 +104,12 @@ export interface SynthesizerInput {
     citationIds: string[];
     citations: Citation[];
   }>;
+  /**
+   * Optional chronological transcript of earlier turns in the same
+   * Conversation, oldest first. Bounded by the use-case (most recent N
+   * turns) to keep the prompt under control.
+   */
+  history?: ReadonlyArray<PriorTurn>;
 }
 
 /**
@@ -141,6 +168,12 @@ export interface ResearcherOutput {
     citationIds: string[];
     citations: Citation[];
   }>;
+  /**
+   * Populated only when the question matched no pages. Carries a sample of
+   * what the wiki contains so the synthesizer can guide the user to a
+   * useful follow-up question instead of saying "nothing found".
+   */
+  suggestionPages?: WikiPageSummary[];
 }
 
 export interface Researcher {
@@ -148,10 +181,27 @@ export interface Researcher {
 }
 
 /**
+ * Anchor a background promise to the current request's lifetime. On Cloudflare
+ * Workers this maps to `ExecutionContext.waitUntil`, which keeps the isolate
+ * alive (and lets async I/O continue) after the response has been sent. In
+ * tests / non-Workers runtimes it can be a no-op.
+ *
+ * The chat dispatcher needs this because `chat.ask` returns the `turnId`
+ * immediately and the actual research + synthesis runs asynchronously; the
+ * SSE `streamAnswer` request that consumes the resulting events is a separate
+ * HTTP call. Without `waitUntil`, workerd cancels new I/O for the orphaned
+ * promise the moment `ask` responds, leaving the run frozen mid-`await`.
+ */
+export type WaitUntil = (p: Promise<unknown>) => void;
+
+/**
  * Async fan-out for `AnswerEvent`s. `start` kicks off a Turn run; `subscribe`
  * yields the live stream (and any tape replay so a late subscriber catches up).
  * In-process: the dispatcher itself drives the run. In production: a Cloudflare
  * Durable Object hosts the run and the dispatcher is a thin client.
+ *
+ * `start` accepts an optional `waitUntil` so the caller can keep the
+ * fire-and-forget `run` promise alive past the originating request's response.
  */
 export interface ConversationDispatcher {
   start(args: {
@@ -159,6 +209,7 @@ export interface ConversationDispatcher {
     turnId: TurnId;
     wikiId: WikiId;
     question: string;
+    waitUntil?: WaitUntil;
   }): Promise<void>;
   subscribe(args: {
     conversationId: ConversationId;
@@ -178,6 +229,8 @@ export interface ChatWriteDeps {
   dispatcher: ConversationDispatcher;
   newId: () => string;
   now: () => Date;
+  /** Per-request keepalive; supplied by the Hono middleware in production. */
+  waitUntil?: WaitUntil;
 }
 
 /** Dependencies for the read endpoints (`get*`, `list*`). */

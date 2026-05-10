@@ -31,13 +31,36 @@ type Env = WikiBindings & {
   DB: D1Database;
   CACHE: KVNamespace;
   STORAGE: R2Bucket;
+  // Drive OAuth credentials. Both prefixed (`GOOGLE_OAUTH_*`) and bare
+  // (`GOOGLE_*`) names are accepted so the Worker reads whichever shape the
+  // Infisical secret tree happens to use today — see `googleOAuthConfig`.
   GOOGLE_OAUTH_CLIENT_ID?: string;
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_OAUTH_REDIRECT?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT?: string;
   // SF1: required in every non-test environment. Boot-time check below throws
   // when missing so production never silently falls back to a zero key.
   OAUTH_TOKEN_KEY_BASE64: string;
 };
+
+/**
+ * Resolve the Drive OAuth credentials from the Worker env, accepting either
+ * the `GOOGLE_OAUTH_*` or bare `GOOGLE_*` secret names. The Infisical project
+ * has carried both shapes at different points; the chat / drive flow only
+ * cares that *some* matching trio is present.
+ */
+const googleOAuthConfig = (
+  env: Env,
+): { clientId: string; clientSecret: string; redirectUri: string } => ({
+  clientId: env.GOOGLE_OAUTH_CLIENT_ID ?? env.GOOGLE_CLIENT_ID ?? '',
+  clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET ?? '',
+  redirectUri:
+    env.GOOGLE_OAUTH_REDIRECT ??
+    env.GOOGLE_REDIRECT ??
+    'http://localhost:8787/rpc/ingestion/authCallback',
+});
 
 // Single-user demo: every signed-in identity collapses to this UserId.
 // Multi-user comes later.
@@ -109,12 +132,13 @@ const refreshGoogleAccessToken = async (
   env: Env,
   refreshToken: string,
 ): Promise<{ accessToken: string; expiresAt: string; refreshToken?: string }> => {
+  const oauth = googleOAuthConfig(env);
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: env.GOOGLE_OAUTH_CLIENT_ID ?? '',
-      client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET ?? '',
+      client_id: oauth.clientId,
+      client_secret: oauth.clientSecret,
       refresh_token: refreshToken,
       grant_type: 'refresh_token',
     }),
@@ -173,13 +197,16 @@ const buildIngestionContext = (env: Env): IngestionContext => {
   };
 
   return {
-    drive: createGoogleDriveConnector({
-      clientId: env.GOOGLE_OAUTH_CLIENT_ID ?? '',
-      clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET ?? '',
-      redirectUri: env.GOOGLE_OAUTH_REDIRECT ?? 'http://localhost:8787/rpc/ingestion/authCallback',
-      resolveUserId: () => DEMO_USER_ID,
-      getCurrentAccessToken,
-    }),
+    drive: (() => {
+      const oauth = googleOAuthConfig(env);
+      return createGoogleDriveConnector({
+        clientId: oauth.clientId,
+        clientSecret: oauth.clientSecret,
+        redirectUri: oauth.redirectUri,
+        resolveUserId: () => DEMO_USER_ID,
+        getCurrentAccessToken,
+      });
+    })(),
     storage: createR2SourceStorage(env.STORAGE),
     sources: createD1SourceRepository(env.DB),
     folders: createD1FolderRepository(env.DB),
@@ -281,7 +308,18 @@ app.use('/rpc/*', async (c, next) => {
       sources: wiki.sources,
     });
   } else if (slug === 'chat') {
-    Object.assign(flat, { dispatcher: chatContext.dispatcher });
+    // `c.executionCtx.waitUntil` keeps the workerd isolate alive (and
+    // scheduling I/O) past the response of `chat.ask`. The dispatcher's
+    // fire-and-forget research/synthesis loop is started inside that handler;
+    // without `waitUntil` workerd cancels new I/O the moment the response
+    // flushes and the first `await` on D1 hangs forever. See SF-CHAT-11 in
+    // `in-memory-dispatcher.ts`.
+    Object.assign(flat, {
+      dispatcher: chatContext.dispatcher,
+      waitUntil: c.executionCtx?.waitUntil
+        ? (p: Promise<unknown>) => c.executionCtx.waitUntil(p)
+        : undefined,
+    });
   } else if (slug === 'verification') {
     Object.assign(flat, { runs: verification.runs });
   } else if (slug === 'ingestion') {
@@ -503,8 +541,13 @@ app.post('/__seed/wiki', async (c) => {
     .run();
 
   for (const p of body.pages) {
-    const r2Key = `wiki_pages/${p.id}.md`;
-    await env.STORAGE.put(r2Key, p.body, { httpMetadata: { contentType: 'text/markdown' } });
+    // Align with `d1-wiki-page-repo.insertMany` which writes bodies at
+    // `storage.put(p.id, p.body)` and reads them back via `storage.get(p.id)`.
+    // The seed previously stored under `wiki_pages/<id>.md`, diverging from
+    // the canonical writer and breaking the chat reader that hydrates wiki
+    // pages by id. Keep the key identical to the page id so any consumer
+    // (chat search, future re-rank) can hit one canonical R2 location.
+    await env.STORAGE.put(p.id, p.body, { httpMetadata: { contentType: 'text/markdown' } });
     await env.DB.prepare(
       'INSERT INTO wiki_pages (id, wiki_id, subtype, page_type, slug, title, body_r2_key, source_id, question, index_entries_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
@@ -515,7 +558,7 @@ app.post('/__seed/wiki', async (c) => {
         p.pageType,
         p.slug,
         p.title,
-        r2Key,
+        p.id,
         p.sourceId,
         p.question,
         p.indexEntriesJson,
