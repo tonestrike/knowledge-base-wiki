@@ -44,9 +44,14 @@ describe('LintFinding', () => {
     expect(f.resolvedAt).toBeUndefined();
   });
 
-  it('"contradicted" findings MUST carry a Correction', () => {
+  it('"contradicted" findings MUST carry a Correction (runtime check defends against `as any` callers)', () => {
+    // The discriminated-union type already requires `correction` for
+    // contradicted/unsupported variants. This test asserts that the runtime
+    // guard inside LintFinding.create still rejects callers that bypass the
+    // type system.
+    const bypass = LintFinding.create as unknown as (props: Record<string, unknown>) => unknown;
     expect(() =>
-      LintFinding.create({
+      bypass({
         id: lintFindingId('88888888-2222-4333-8444-000000000001'),
         lintRunId: lintRunId('77777777-2222-4333-8444-555555555555'),
         wikiPageId: claim.wikiPageId,

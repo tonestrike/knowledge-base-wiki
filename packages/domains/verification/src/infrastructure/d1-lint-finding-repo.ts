@@ -35,17 +35,33 @@ const fromRow = (row: LintFindingRow): LintFinding => {
         newCitationLabel: correctionRaw.newCitationLabel,
       })
     : undefined;
-  const finding = LintFinding.create({
+  const base = {
     id: lintFindingId(row.id),
     lintRunId: lintRunId(row.lint_run_id),
     wikiPageId: wikiPageId(row.wiki_page_id),
     claimId: claimId(row.claim_id),
     claim,
-    verdict: row.verdict,
     evidenceText: row.evidence_text,
     citedSpans,
-    correction,
-  });
+  };
+  // Dispatch on the persisted verdict so the discriminated-union variant is
+  // constructed correctly (PR #6 type-design: LintFinding is a discriminated
+  // union; `correction` is required on non-supported variants).
+  let finding: LintFinding;
+  switch (row.verdict) {
+    case 'supported':
+      finding = LintFinding.create({ ...base, verdict: 'supported' });
+      break;
+    case 'unsupported':
+    case 'contradicted':
+      if (!correction) {
+        throw new Error(
+          `lint_findings row ${row.id}: verdict=${row.verdict} requires a stored correction_json`,
+        );
+      }
+      finding = LintFinding.create({ ...base, verdict: row.verdict, correction });
+      break;
+  }
   return row.resolved_at ? LintFinding.resolve(finding, row.resolved_at) : finding;
 };
 

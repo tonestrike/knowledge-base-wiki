@@ -7,20 +7,24 @@ describe('LintRun', () => {
   const wid = wikiId('44444444-2222-4333-8444-555555555555');
 
   it('starts pending, advances through running → finished', () => {
-    let r = LintRun.start({
+    const pending = LintRun.start({
       id,
       wikiId: wid,
       totalClaims: 47,
       startedAt: '2026-05-09T12:05:00.000Z',
     });
-    expect(r.status).toBe('pending');
-    r = LintRun.run(r);
-    expect(r.status).toBe('running');
-    r = LintRun.tally(r, { auditedDelta: 1, unsupportedDelta: 0, contradictedDelta: 0 });
-    expect(r.audited).toBe(1);
-    r = LintRun.finish(r, '2026-05-09T12:06:30.000Z');
-    expect(r.status).toBe('finished');
-    expect(r.endedAt).toBe('2026-05-09T12:06:30.000Z');
+    expect(pending.status).toBe('pending');
+    const running = LintRun.run(pending);
+    expect(running.status).toBe('running');
+    const tallied = LintRun.tally(running, {
+      auditedDelta: 1,
+      unsupportedDelta: 0,
+      contradictedDelta: 0,
+    });
+    expect(tallied.audited).toBe(1);
+    const finished = LintRun.finish(tallied, '2026-05-09T12:06:30.000Z');
+    expect(finished.status).toBe('finished');
+    expect(finished.endedAt).toBe('2026-05-09T12:06:30.000Z');
   });
 
   it('refuses to run twice', () => {

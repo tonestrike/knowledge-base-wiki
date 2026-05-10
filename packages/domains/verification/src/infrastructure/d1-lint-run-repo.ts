@@ -1,7 +1,8 @@
 import { type LintRunId, type WikiId, lintRunId, wikiId } from '@package/contracts/shared';
 import type { LintRun as LintRunWire } from '@package/contracts/verification';
+import { z } from 'zod';
 import type { LintRunRepository } from '../application/ports.ts';
-import type { LintRun, LintRunStatus } from '../domain/lint-run.ts';
+import { LintRun, type LintRun as LintRunDomain, type LintRunStatus } from '../domain/lint-run.ts';
 
 // Minimal D1 binding shape — apps/api injects `env.DB`. Defined locally to
 // keep the framework dependency out of the repo file's interface contract.
@@ -28,20 +29,92 @@ interface LintRunRow {
   failure_message: string | null;
 }
 
-const fromRow = (row: LintRunRow): LintRun => ({
-  id: lintRunId(row.id),
-  wikiId: wikiId(row.wiki_id),
-  status: row.status as LintRunStatus,
-  totalClaims: row.total_claims,
-  audited: row.audited,
-  unsupportedCount: row.unsupported_count,
-  contradictedCount: row.contradicted_count,
-  startedAt: row.started_at,
-  endedAt: row.ended_at ?? undefined,
-  failureMessage: row.failure_message ?? undefined,
-});
+const LintRunStatusSchema: z.ZodType<LintRunStatus> = z.enum([
+  'pending',
+  'running',
+  'finished',
+  'failed',
+]);
 
-const toWire = (r: LintRun): LintRunWire => ({
+// Reconstructs a LintRun from a stored row. Each status maps to a different
+// variant of the LintRun discriminated union, so per-status invariants
+// (`endedAt` mandatory on finished/failed, `failureMessage` mandatory on
+// failed) are enforced by construction. Throws on a row whose persisted
+// state is inconsistent — that indicates a writer bug, never silently
+// repairable here.
+const fromRow = (row: LintRunRow): LintRunDomain => {
+  // PR #6 type-design finding — Zod-parse the status string instead of
+  // casting; an unknown status from a future schema migration must light up
+  // here, not silently propagate as `LintRunStatus`.
+  const status = LintRunStatusSchema.parse(row.status);
+  const id = lintRunId(row.id);
+  const wid = wikiId(row.wiki_id);
+  const startedAt = row.started_at;
+
+  switch (status) {
+    case 'pending':
+    case 'running': {
+      const base = LintRun.start({
+        id,
+        wikiId: wid,
+        totalClaims: row.total_claims,
+        startedAt,
+      });
+      const tallied = LintRun.tally(base, {
+        auditedDelta: row.audited,
+        unsupportedDelta: row.unsupported_count,
+        contradictedDelta: row.contradicted_count,
+      });
+      return status === 'running' ? LintRun.run(tallied) : tallied;
+    }
+    case 'finished': {
+      if (!row.ended_at) {
+        throw new Error(`lint_runs row ${row.id}: status=finished requires ended_at`);
+      }
+      const tallied = LintRun.tally(
+        LintRun.run(
+          LintRun.start({
+            id,
+            wikiId: wid,
+            totalClaims: row.total_claims,
+            startedAt,
+          }),
+        ),
+        {
+          auditedDelta: row.audited,
+          unsupportedDelta: row.unsupported_count,
+          contradictedDelta: row.contradicted_count,
+        },
+      );
+      return LintRun.finish(tallied, row.ended_at);
+    }
+    case 'failed': {
+      if (!row.ended_at || !row.failure_message) {
+        throw new Error(
+          `lint_runs row ${row.id}: status=failed requires ended_at and failure_message`,
+        );
+      }
+      const tallied = LintRun.tally(
+        LintRun.run(
+          LintRun.start({
+            id,
+            wikiId: wid,
+            totalClaims: row.total_claims,
+            startedAt,
+          }),
+        ),
+        {
+          auditedDelta: row.audited,
+          unsupportedDelta: row.unsupported_count,
+          contradictedDelta: row.contradicted_count,
+        },
+      );
+      return LintRun.fail(tallied, row.failure_message, row.ended_at);
+    }
+  }
+};
+
+const toWire = (r: LintRunDomain): LintRunWire => ({
   id: r.id,
   wikiId: r.wikiId,
   status: r.status,
