@@ -23,7 +23,12 @@ export interface IngestFolderOutput {
 }
 
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
-  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  // Web Crypto requires a BufferSource backed by ArrayBuffer (not SharedArrayBuffer).
+  // Bun's strict types reject a bare Uint8Array<ArrayBufferLike>; copy into a fresh
+  // ArrayBuffer to keep the digest call portable across runtimes.
+  const ab = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(ab).set(bytes);
+  const buf = await crypto.subtle.digest('SHA-256', ab);
   return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 };
 
