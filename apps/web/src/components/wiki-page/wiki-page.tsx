@@ -1,6 +1,8 @@
 import type { Citation, Claim } from '@package/contracts/shared';
 import type { WikiPage } from '@package/contracts/wiki';
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { CitationChip } from '../citation/citation-chip.tsx';
 import { Sidebar } from './sidebar.tsx';
@@ -8,6 +10,8 @@ import { Sidebar } from './sidebar.tsx';
 export interface WikiPageViewProps {
   page: WikiPage;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Convert a heading like "Markets at Issue" → "markets-at-issue".
@@ -77,6 +81,55 @@ const sliceIntoSections = (page: WikiPage): { sections: BodySection[]; orphans: 
 export function WikiPageView({ page }: WikiPageViewProps) {
   const { sections, orphans } = sliceIntoSections(page);
 
+  // Custom markdown <a> renderer that rewrites IndexBuilder's `/<uuid>`
+  // links into proper React Router routes (`/wiki/<wikiId>/page/<uuid>`)
+  // and uses <Link> so navigation stays SPA-fast. External links are
+  // kept as raw <a target="_blank">.
+  const components = useMemo(
+    () => ({
+      a: ({
+        href,
+        children,
+        ...rest
+      }: {
+        href?: string;
+        children?: React.ReactNode;
+      } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+        if (!href) return <span {...rest}>{children}</span>;
+        const internalUuid = href.match(/^\/([0-9a-f-]+)$/i);
+        if (internalUuid && UUID_RE.test(internalUuid[1] ?? '')) {
+          return (
+            <Link
+              to={`/wiki/${page.wikiId}/page/${internalUuid[1]}`}
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              {children}
+            </Link>
+          );
+        }
+        if (href.startsWith('/')) {
+          return (
+            <Link to={href} className="text-accent underline-offset-4 hover:underline">
+              {children}
+            </Link>
+          );
+        }
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent underline-offset-4 hover:underline"
+            {...rest}
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [page.wikiId],
+  );
+
   return (
     <article className="mx-auto grid max-w-6xl grid-cols-1 gap-12 px-6 py-12 md:grid-cols-[minmax(0,60ch)_280px]">
       <div>
@@ -92,7 +145,9 @@ export function WikiPageView({ page }: WikiPageViewProps) {
           {sections.map((s, i) => (
             <section key={`${s.heading}-${i}`} className="mt-8 first:mt-0">
               {s.heading ? <h2>{s.heading}</h2> : null}
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.markdown}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+                {s.markdown}
+              </ReactMarkdown>
               {s.claims.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {s.claims.flatMap((c) =>

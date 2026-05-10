@@ -8,6 +8,31 @@ export const AnswerStarted = z.object({
   turnId: TurnId,
 });
 
+// Intermediate progress events let the UI render a live "agent thoughts" log
+// without inferring phases from sparse segment-arrival timestamps. The chat
+// dispatcher emits one ResearchStarted before the Researcher prompt fires,
+// one ResearchCompleted when the Researcher returns (carrying candidate +
+// finding counts so the user sees what was actually grounded), and one
+// SynthesisStarted before the first AnswerSegment.
+export const ResearchStarted = z.object({
+  kind: z.literal('ResearchStarted'),
+  turnId: TurnId,
+  model: z.string().min(1),
+});
+
+export const ResearchCompleted = z.object({
+  kind: z.literal('ResearchCompleted'),
+  turnId: TurnId,
+  candidatePageCount: z.number().int().nonnegative(),
+  findingCount: z.number().int().nonnegative(),
+});
+
+export const SynthesisStarted = z.object({
+  kind: z.literal('SynthesisStarted'),
+  turnId: TurnId,
+  model: z.string().min(1),
+});
+
 export const AnswerSegmentEmitted = z.object({
   kind: z.literal('AnswerSegment'),
   turnId: TurnId,
@@ -35,6 +60,9 @@ export const AnswerFinished = z.object({
 
 export const AnswerEvent = z.discriminatedUnion('kind', [
   AnswerStarted,
+  ResearchStarted,
+  ResearchCompleted,
+  SynthesisStarted,
   AnswerSegmentEmitted,
   AnswerProseDelta,
   AnswerFailed,

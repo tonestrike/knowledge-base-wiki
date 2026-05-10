@@ -1,5 +1,5 @@
-import type { AnswerEvent } from '@package/contracts/chat';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { TimedAnswerEvent } from './use-answer-stream.ts';
 
 interface LogEntry {
   id: string;
@@ -20,15 +20,8 @@ interface DerivedLog {
   segments: number;
 }
 
-const RESEARCH_HINTS = [
-  'querying wiki page index',
-  'scoring candidate pages by token overlap',
-  'reading body + citations from R2',
-  'extracting findings into the prompt',
-];
-
 export function deriveLog(
-  events: ReadonlyArray<AnswerEvent>,
+  events: ReadonlyArray<TimedAnswerEvent>,
   question: string,
   startedAt: number,
 ): DerivedLog {
@@ -44,37 +37,43 @@ export function deriveLog(
     tone: 'info',
   });
 
-  // Synthetic Researcher narration. The chat dispatcher doesn't (yet) emit
-  // intermediate "found N candidates" events, so we narrate the step from
-  // the wall-clock between AnswerStarted and the first AnswerSegment.
-  let lastResearchHintIdx = -1;
-
-  for (const e of events) {
-    const at = Date.now(); // server timestamps would be better; this is fine for a live log
+  for (const timed of events) {
+    const e = timed.event;
+    const at = timed.arrivedAt;
     if (e.kind === 'AnswerStarted') {
       entries.push({
         id: 'started',
         at,
-        text: 'Researcher started — searching for grounded findings',
+        text: 'Turn dispatched — orchestrating Researcher and Synthesizer',
+        tone: 'info',
+      });
+      status = 'researching';
+    } else if (e.kind === 'ResearchStarted') {
+      entries.push({
+        id: 'research-start',
+        at,
+        text: `Researcher started (${e.model})`,
         tone: 'work',
       });
       status = 'researching';
+    } else if (e.kind === 'ResearchCompleted') {
+      entries.push({
+        id: 'research-done',
+        at,
+        text: `Researcher returned · ${e.candidatePageCount} candidate page${
+          e.candidatePageCount === 1 ? '' : 's'
+        } scored, ${e.findingCount} finding${e.findingCount === 1 ? '' : 's'} extracted`,
+        tone: 'success',
+      });
+    } else if (e.kind === 'SynthesisStarted') {
+      entries.push({
+        id: 'synth-start',
+        at,
+        text: `Synthesizer started (${e.model}) — composing answer in segments`,
+        tone: 'work',
+      });
+      status = 'synthesizing';
     } else if (e.kind === 'AnswerSegment') {
-      if (status === 'researching') {
-        entries.push({
-          id: 'research-done',
-          at,
-          text: 'Researcher returned findings — handing off to Synthesizer',
-          tone: 'success',
-        });
-        entries.push({
-          id: 'synth-start',
-          at,
-          text: 'Synthesizer composing answer in segments',
-          tone: 'work',
-        });
-        status = 'synthesizing';
-      }
       segments++;
       const seg = e.segment;
       if (seg.kind === 'prose') {
@@ -114,26 +113,10 @@ export function deriveLog(
       entries.push({
         id: 'finished',
         at,
-        text: `Answer finished — ${segments} segment${segments === 1 ? '' : 's'} streamed`,
+        text: `Answer finished · ${segments} segment${segments === 1 ? '' : 's'} streamed`,
         tone: 'success',
       });
       status = 'finished';
-    }
-  }
-
-  // While Researcher is in flight without sub-events, rotate through hints
-  // so the log shows visible progress.
-  if (status === 'researching') {
-    const elapsedSec = (Date.now() - startedAt) / 1000;
-    const idx = Math.min(RESEARCH_HINTS.length - 1, Math.floor(elapsedSec / 2));
-    if (idx > lastResearchHintIdx && RESEARCH_HINTS[idx]) {
-      lastResearchHintIdx = idx;
-      entries.push({
-        id: `hint-${idx}`,
-        at: Date.now(),
-        text: RESEARCH_HINTS[idx],
-        tone: 'info',
-      });
     }
   }
 

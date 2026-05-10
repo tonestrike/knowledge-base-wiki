@@ -200,6 +200,12 @@ function ConnectDriveCard() {
             </div>
           ) : register.isError ? (
             <p className="text-xs text-destructive">{String((register.error as Error).message)}</p>
+          ) : authStart.isError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+              <p className="text-xs text-destructive">
+                {String((authStart.error as Error).message)}
+              </p>
+            </div>
           ) : null}
         </CardContent>
       </Card>
