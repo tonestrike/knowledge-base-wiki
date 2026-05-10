@@ -2,6 +2,7 @@ import { lintRunId, wikiId } from '@package/contracts/shared';
 import { LintEvent } from '@package/contracts/verification';
 import { lintWiki } from '../../application/lint-wiki.ts';
 import type { LintRuntimeDeps } from '../../application/ports.ts';
+import { LintRun } from '../../domain/lint-run.ts';
 
 // Minimal Durable Object surface — defined locally to keep
 // @cloudflare/workers-types out of this package's dependency graph.
@@ -58,21 +59,32 @@ export const createLintRunDOClass = <Env>({ buildDeps }: LintRunDOFactoryArgs<En
     }
 
     private subscribe(): Response {
+      const subscribers = this.subscribers;
+      const storage = this.state.storage;
       const stream = new ReadableStream<Uint8Array>({
-        start: (controller) => {
+        async start(controller) {
           const encoder = new TextEncoder();
           const send = (e: LintEvent) => {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
           };
-          this.subscribers.add(send);
+          subscribers.add(send);
           // Replay the persisted tape (if any) before live events.
-          this.state.storage.get<LintEvent[]>(TAPE_KEY).then((tape) => {
+          // Awaited so a storage rejection surfaces as a stream error to the
+          // SSE consumer instead of being silently dropped (see PR #6
+          // silent-failure-hunter finding 2).
+          try {
+            const tape = await storage.get<LintEvent[]>(TAPE_KEY);
             for (const e of tape ?? []) send(e);
-          });
+          } catch (err) {
+            controller.error(err);
+            subscribers.delete(send);
+          }
         },
-        cancel: () => {
-          // best-effort: clear all senders on cancel; in practice each
-          // subscriber gets its own controller closure.
+        cancel() {
+          // Note: each subscriber owns its own `send` closure; we cannot
+          // identify which one to remove from here. Detached subscribers are
+          // pruned in the emit() send loop on the next event when their
+          // `controller.enqueue` throws.
         },
       });
       return new Response(stream, {
@@ -86,29 +98,49 @@ export const createLintRunDOClass = <Env>({ buildDeps }: LintRunDOFactoryArgs<En
 
     private async run(cmd: StartCommand) {
       const tape: LintEvent[] = [];
+      const subscribers = this.subscribers;
+      const storage = this.state.storage;
       const emit = async (raw: LintEvent) => {
         const e = LintEvent.parse(raw);
         tape.push(e);
-        await this.state.storage.put(TAPE_KEY, tape);
-        for (const send of this.subscribers) {
+        await storage.put(TAPE_KEY, tape);
+        // Iterate a snapshot so deletions during iteration are safe.
+        for (const send of [...subscribers]) {
           try {
             send(e);
-          } catch {
-            // detached subscriber; let GC clean up
+          } catch (err) {
+            // The most common cause is a detached subscriber whose stream
+            // controller has closed — drop them from the set so the Set
+            // doesn't grow without bound (see PR #6 silent-failure-hunter
+            // finding 4). Any other error is surfaced to console so it does
+            // not vanish.
+            subscribers.delete(send);
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!/detached|closed|invalid state/i.test(msg)) {
+              console.error('[LintRunDO] subscriber send failed', err);
+            }
           }
         }
       };
       const deps = buildDeps(this.env, emit);
+      const id = lintRunId(cmd.lintRunId);
       try {
-        await lintWiki(deps, {
-          lintRunId: lintRunId(cmd.lintRunId),
-          wikiId: wikiId(cmd.wikiId),
-        });
+        await lintWiki(deps, { lintRunId: id, wikiId: wikiId(cmd.wikiId) });
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Keep the persisted LintRun in sync with the LintRunFailed event.
+        // If there is no row yet (e.g. listClaimsForWiki rejected before
+        // insert) the update is a no-op against the repo's WHERE id=? — that
+        // is acceptable; the SSE tape still records the failure.
+        const existing = await deps.runs.findById(id);
+        if (existing && (existing.status === 'pending' || existing.status === 'running')) {
+          const failed = LintRun.fail(existing, message, deps.now().toISOString());
+          await deps.runs.update(failed);
+        }
         await emit({
           kind: 'LintRunFailed',
-          lintRunId: lintRunId(cmd.lintRunId),
-          message: err instanceof Error ? err.message : String(err),
+          lintRunId: id,
+          message,
         });
       }
     }
