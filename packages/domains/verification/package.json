@@ -15,9 +15,11 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^2.9.0",
     "@orpc/server": "^1.14.2",
     "@package/contracts": "workspace:*",
     "@package/shared-kernel": "workspace:*",
+    "ai": "^6.0.177",
     "zod": "^3.24.1"
   },
   "devDependencies": {
