@@ -14,6 +14,24 @@ const driveFolderIdFrom = (input: string): string => {
 
 const DEMO_WIKI_ID = '44444444-2222-4333-8444-555555555555';
 
+// Heuristic to detect Drive auth failure from the error payload. The
+// oRPC server emits a typed error code which surfaces in the message;
+// we match common shapes so a future server-side rename doesn't silently
+// stop us from showing the Re-connect button (SF8).
+const isDriveAuthError = (e: unknown): boolean => {
+  const msg = (e as Error | undefined)?.message ?? '';
+  return /NOT_AUTHENTICATED|missing Drive token|drive_unauthorized|401/i.test(msg);
+};
+
+const triggerDriveOauth = () => {
+  // Re-routes through the API which serves the OAuth start flow. The API
+  // sets the cookie and 302s back to '/'. If the route doesn't exist yet
+  // (mock/MSW), the browser will navigate to /api/auth/drive and 404 —
+  // which is still strictly better UX than a raw error string, because
+  // the user understands an auth action is required.
+  window.location.assign('/api/auth/drive');
+};
+
 export function RootRoute() {
   const nav = useNavigate();
   const [url, setUrl] = useState('');
@@ -21,6 +39,8 @@ export function RootRoute() {
     ...orpc.ingestion.registerFolder.mutationOptions(),
     onSuccess: (data) => nav(`/wiki/${data.folderId}`),
   });
+
+  const authFailure = register.isError && isDriveAuthError(register.error);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-16">
@@ -56,7 +76,17 @@ export function RootRoute() {
               {register.isPending ? 'Connecting…' : 'Connect'}
             </Button>
           </form>
-          {register.error ? (
+          {/* SF8 — auth failure used to render a raw "NOT_AUTHENTICATED:
+              missing Drive token" string. Now we recognize the code and
+              offer a Re-connect button that triggers the OAuth flow. */}
+          {authFailure ? (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-verdict-contradicted/40 bg-verdict-contradicted/5 px-3 py-2">
+              <p className="text-xs">Drive isn&apos;t connected yet. Reconnect to continue.</p>
+              <Button variant="outline" size="sm" onClick={triggerDriveOauth}>
+                Re-connect Drive
+              </Button>
+            </div>
+          ) : register.isError ? (
             <p className="mt-2 text-xs text-verdict-contradicted">
               {String((register.error as Error).message)}
             </p>
