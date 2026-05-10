@@ -14,7 +14,6 @@ interface BasePage {
   readonly citations: ReadonlyArray<Citation>;
   readonly backlinks: ReadonlyArray<Backlink>;
   readonly updatedAt: string;
-  readonly pageType?: string;
 }
 
 export interface ConceptPage extends BasePage {
@@ -89,7 +88,6 @@ export const WikiPage = {
       title: props.title,
       body: props.body,
       updatedAt: props.updatedAt,
-      pageType: props.pageType,
       subtype: 'Summary' as const,
       citations: collectCitations(props.claims),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),
@@ -107,7 +105,6 @@ export const WikiPage = {
       title: props.title,
       body: props.body,
       updatedAt: props.updatedAt,
-      pageType: props.pageType,
       subtype: 'Answer' as const,
       citations: collectCitations(props.claims),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),

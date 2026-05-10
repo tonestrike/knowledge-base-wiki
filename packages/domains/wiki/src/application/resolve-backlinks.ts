@@ -15,7 +15,11 @@ export function resolveBacklinks(
   relations: ReadonlyArray<Relation>,
 ): { backlinks: Backlink[]; arityErrors: string[] } {
   const knownIds = new Set<WikiPageId>(pages.map((p) => p.id));
-  const byPageType = new Map<WikiPageId, string>(pages.map((p) => [p.id, p.pageType ?? '']));
+  // Only Concept + Index pages carry a pageType; Summary/Answer pages have
+  // none, so they can't participate as either end of a typed Relation.
+  const pageTypeOf = (p: WikiPage): string =>
+    p.subtype === 'Concept' || p.subtype === 'Index' ? p.pageType : '';
+  const byPageType = new Map<WikiPageId, string>(pages.map((p) => [p.id, pageTypeOf(p)]));
   const out: Backlink[] = [];
 
   for (const page of pages) {

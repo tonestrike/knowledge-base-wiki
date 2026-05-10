@@ -67,7 +67,7 @@ const baseDeps = (): WikiDeps => {
         id: p.id,
         wikiId: p.wikiId,
         subtype: p.subtype,
-        pageType: p.pageType,
+        pageType: p.subtype === 'Concept' || p.subtype === 'Index' ? p.pageType : undefined,
         slug: p.slug,
         title: p.title,
         body: p.body,
