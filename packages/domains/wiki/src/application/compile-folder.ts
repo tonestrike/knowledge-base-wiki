@@ -271,6 +271,17 @@ export async function compileFolder(
       });
     }
 
+    // Structural guard (TD2): every drafted page must declare a pageType
+    // that's in the wiki's schema. The Drafter is constrained by prompt to
+    // pick from `schema.pageTypes`, but a structural assertion here makes
+    // that invariant load-bearing — drift surfaces as a thrown error
+    // (which the outer try/catch turns into a CompileFailed event) rather
+    // than silently inserting a page that no schema-filtered query can
+    // return.
+    for (const p of [...conceptsWithLinks, ...indexPages]) {
+      Wiki.assertPageTypeKnown(wiki, p);
+    }
+
     await deps.pages.insertMany([...conceptsWithLinks, ...indexPages] as Array<
       ConceptPage | IndexPage
     >);
