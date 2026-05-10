@@ -29,13 +29,22 @@ Hard rules:
 
 Return JSON only.`;
 
+// Trim each page body to keep the Researcher prompt bounded — full Drafter
+// bodies can be 5K+ chars each, and 8 candidates × full body would push the
+// prompt past 50K tokens and stall Sonnet's structured-output mode.
+const PAGE_BODY_CHAR_CAP = 4000;
+
 const renderPages = (pages: ResearcherOutput['pages']): string =>
   pages
     .map((p) => {
       const citations = p.citations
         .map((c) => `<citation id="${c.id}" label="${c.label}"/>`)
         .join('\n');
-      return `<page id="${p.id}" type="${p.pageType ?? ''}" title="${p.title}">\n${citations}\n${p.body}\n</page>`;
+      const body =
+        p.body.length > PAGE_BODY_CHAR_CAP
+          ? `${p.body.slice(0, PAGE_BODY_CHAR_CAP)}…[truncated]`
+          : p.body;
+      return `<page id="${p.id}" type="${p.pageType ?? ''}" title="${p.title}">\n${citations}\n${body}\n</page>`;
     })
     .join('\n');
 
@@ -81,15 +90,24 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
       return { pages: [], findings: [] };
     }
 
-    // Vercel AI SDK doesn't enforce its own request timeout, so a hung
-    // OpenRouter call would freeze the dispatcher indefinitely (the user
-    // sees "Researcher started · +0s" stuck for minutes). Wrap with an
-    // AbortController so we surface a typed error instead of waiting forever.
+    // Vercel AI SDK + OpenRouter doesn't reliably honor abortSignal on
+    // generateObject (the signal aborts the SDK wrapper but not the
+    // in-flight HTTP request). Promise.race against a hard wall-clock
+    // timeout so we surface a typed error and the dispatcher's outer
+    // catch can turn it into AnswerFailed before the user gives up.
+    const timeoutMs = opts.timeoutMs ?? 60_000;
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 60_000);
-    let result: { object: z.infer<typeof RawResearcherOutput> };
-    try {
-      result = await generateObject({
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(`Researcher LLM call timed out after ${timeoutMs}ms — wiki=${input.wikiId}`),
+          ),
+        timeoutMs,
+      ),
+    );
+    const result = (await Promise.race([
+      generateObject({
         model: opts.model,
         schema: RawResearcherOutput,
         schemaName: 'ResearchOutput',
@@ -100,17 +118,9 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
         maxTokens: opts.maxTokens ?? 1500,
         maxRetries: 1,
         abortSignal: ac.signal,
-      });
-    } catch (err) {
-      clearTimeout(timer);
-      if (ac.signal.aborted) {
-        throw new Error(
-          `Researcher LLM call timed out after ${opts.timeoutMs ?? 60_000}ms — wiki=${input.wikiId}`,
-        );
-      }
-      throw err;
-    }
-    clearTimeout(timer);
+      }),
+      timeoutPromise,
+    ])) as { object: z.infer<typeof RawResearcherOutput> };
 
     const byPageId = new Map(candidates.map((p) => [p.id, p]));
     const findings: ResearcherOutput['findings'] = [];
