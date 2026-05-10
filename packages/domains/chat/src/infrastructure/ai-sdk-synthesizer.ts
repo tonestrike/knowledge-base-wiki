@@ -79,6 +79,8 @@ export interface AiSdkSynthesizerOptions {
   maxTokens?: number;
   /** Optional model identifier for log lines (e.g. 'anthropic/claude-sonnet-4.6'). */
   modelName?: string;
+  /** Per-call timeout. Defaults to 90s. */
+  timeoutMs?: number;
 }
 
 const errorId = (): string => {
@@ -107,6 +109,11 @@ const errorId = (): string => {
  */
 export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesizer => ({
   async *stream(input: SynthesizerInput): AsyncIterable<SynthesizerEvent> {
+    // Same timeout treatment as the Researcher — without an abortSignal a
+    // hung OpenRouter call would freeze the SSE stream forever and the
+    // user just sees the shimmering placeholder.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 90_000);
     let result: ReturnType<typeof streamObject<z.infer<typeof RawSegmentSchema>>>;
     try {
       result = streamObject({
@@ -119,8 +126,11 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
         prompt: `Question: ${input.question}\n\nFindings:\n${renderFindings(input)}`,
         temperature: opts.temperature ?? 0.4,
         maxTokens: opts.maxTokens ?? 4000,
+        maxRetries: 1,
+        abortSignal: ac.signal,
       });
     } catch (err) {
+      clearTimeout(timer);
       const id = errorId();
       console.error('[chat.ai-sdk-synthesizer] streamObject construction failed', {
         errorId: id,
@@ -146,7 +156,12 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
         err:
           err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
       });
+      if (ac.signal.aborted) {
+        throw new Error(`Synthesizer LLM stream timed out after ${opts.timeoutMs ?? 90_000}ms`);
+      }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   },
 });

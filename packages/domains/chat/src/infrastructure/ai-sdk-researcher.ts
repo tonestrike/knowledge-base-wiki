@@ -47,6 +47,8 @@ export interface AiSdkResearcherOptions {
   candidateLimit?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Per-call timeout. Defaults to 60s. */
+  timeoutMs?: number;
 }
 
 /**
@@ -79,16 +81,36 @@ export const createAiSdkResearcher = (opts: AiSdkResearcherOptions): Researcher 
       return { pages: [], findings: [] };
     }
 
-    const result = await generateObject({
-      model: opts.model,
-      schema: RawResearcherOutput,
-      schemaName: 'ResearchOutput',
-      schemaDescription: 'Findings extracted from candidate wiki pages.',
-      system: opts.systemPrompt ?? SYSTEM,
-      prompt: `Question: ${input.question}\n\nPages:\n${renderPages({ pages: candidates, findings: [] }.pages)}`,
-      temperature: opts.temperature ?? 0.1,
-      maxTokens: opts.maxTokens ?? 1500,
-    });
+    // Vercel AI SDK doesn't enforce its own request timeout, so a hung
+    // OpenRouter call would freeze the dispatcher indefinitely (the user
+    // sees "Researcher started · +0s" stuck for minutes). Wrap with an
+    // AbortController so we surface a typed error instead of waiting forever.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 60_000);
+    let result: { object: z.infer<typeof RawResearcherOutput> };
+    try {
+      result = await generateObject({
+        model: opts.model,
+        schema: RawResearcherOutput,
+        schemaName: 'ResearchOutput',
+        schemaDescription: 'Findings extracted from candidate wiki pages.',
+        system: opts.systemPrompt ?? SYSTEM,
+        prompt: `Question: ${input.question}\n\nPages:\n${renderPages({ pages: candidates, findings: [] }.pages)}`,
+        temperature: opts.temperature ?? 0.1,
+        maxTokens: opts.maxTokens ?? 1500,
+        maxRetries: 1,
+        abortSignal: ac.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (ac.signal.aborted) {
+        throw new Error(
+          `Researcher LLM call timed out after ${opts.timeoutMs ?? 60_000}ms — wiki=${input.wikiId}`,
+        );
+      }
+      throw err;
+    }
+    clearTimeout(timer);
 
     const byPageId = new Map(candidates.map((p) => [p.id, p]));
     const findings: ResearcherOutput['findings'] = [];
