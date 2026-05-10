@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { citationId, claimId, sourceId, wikiId, wikiPageId } from '@package/contracts/shared';
+import {
+  citationId,
+  claimId,
+  contentHash,
+  sourceId,
+  wikiId,
+  wikiPageId,
+} from '@package/contracts/shared';
 import { WikiPage } from './wiki-page.ts';
 
 const sampleClaim = {
@@ -14,7 +21,7 @@ const sampleClaim = {
       span: {
         sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
         byteRange: { start: 0, end: 50 },
-        contentHash: 'sha256:abc',
+        contentHash: contentHash('sha256:abc'),
       },
     },
   ],

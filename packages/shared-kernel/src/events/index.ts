@@ -5,9 +5,11 @@
 //
 // Each bounded context's slice that introduces a new event extends
 // `DomainEventMap` here. Slice 2.A owns `SourceIngested` /
-// `SourceIngestionFailed`. Slices 2.D / 3.x / chat will add their own entries
-// (e.g. `CorrectionAccepted`, `CompileFinished`, `AnswerProduced`) when their
-// PRs land.
+// `SourceIngestionFailed`; slice 2.B owns `CompileFinished`. Slices 2.D /
+// 3.x / chat will add their own entries (e.g. `CorrectionAccepted`,
+// `AnswerProduced`) when their PRs land — until then, 2.B's cross-context
+// subscribers register against the placeholder shapes below so flipping
+// the handlers on doesn't require rewiring the bus.
 export interface DomainEventMap {
   SourceIngested: {
     sourceId: string;
@@ -23,6 +25,24 @@ export interface DomainEventMap {
     driveFileId: string;
     reason: 'fetch' | 'extract' | 'storage' | 'persist' | 'unknown';
     message: string;
+  };
+  // 2.B — cross-context fan-out target for the verification pass.
+  CompileFinished: {
+    compileRunId: string;
+    wikiId: string;
+    pageCount: number;
+  };
+  // Placeholder shapes for v1.1 — subscribers register against these names
+  // today as loud stubs (see wiki/cross-context-subscriptions.ts SF9). The
+  // shapes will firm up when chat (2.C) and verification (2.D) land their
+  // producer slices.
+  AnswerProduced: {
+    answerId: string;
+    sessionId: string;
+  };
+  CorrectionAccepted: {
+    claimId: string;
+    correctedClaimText: string;
   };
 }
 

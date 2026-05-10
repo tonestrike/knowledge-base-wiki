@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { sourceId } from '@package/contracts/shared';
+import { contentHash, sourceId } from '@package/contracts/shared';
 import { draftPage } from './draft-page.ts';
 import type { LlmClient } from './ports.ts';
 
@@ -40,7 +40,7 @@ describe('draftPage', () => {
             sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
             sourceFilename: 'q3-minutes.pdf',
             sourceText: '...',
-            sourceContentHash: 'sha256:fixtureq3boardminutes',
+            sourceContentHash: contentHash('sha256:abcdef0123456789'),
             evidence: 'The board approved a $2M cap.',
             spanStart: 1240,
             spanEnd: 1410,
@@ -53,7 +53,7 @@ describe('draftPage', () => {
     expect(out.draft.claims).toHaveLength(1);
     expect(out.draft.claims[0]?.citations[0]?.label).toBe('Q3 minutes, p.4');
     expect(out.draft.claims[0]?.citations[0]?.sourceContentHash).toBe(
-      'sha256:fixtureq3boardminutes',
+      contentHash('sha256:abcdef0123456789'),
     );
   });
 
@@ -93,7 +93,7 @@ describe('draftPage', () => {
               sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
               sourceFilename: 'q3-minutes.pdf',
               sourceText: '...',
-              sourceContentHash: 'sha256:abc',
+              sourceContentHash: contentHash('sha256:abc'),
               evidence: 'x',
               spanStart: 0,
               spanEnd: 1,

@@ -1,6 +1,6 @@
 import { mockTurn } from '@package/contracts/chat';
 import type { Artifact, ArtifactKind, Citation } from '@package/contracts/shared';
-import { citationId, sourceId } from '@package/contracts/shared';
+import { citationId, contentHash, sourceId } from '@package/contracts/shared';
 import { mockLintFinding, mockUnsupportedFinding } from '@package/contracts/verification';
 import { mockWikiPage } from '@package/contracts/wiki';
 import type { ReactNode } from 'react';
@@ -34,7 +34,7 @@ const FIXTURE_CITATION: Citation = {
   span: {
     sourceId: sourceId('11111111-2222-4333-8444-000000000001'),
     byteRange: { start: 1240, end: 1410 },
-    contentHash: 'sha256:fixtureq3boardminutes',
+    contentHash: contentHash('sha256:abcdef0123456789'),
   },
 };
 

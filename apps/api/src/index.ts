@@ -207,7 +207,13 @@ app.use(
   }),
 );
 
-const handler = new RPCHandler(router, {
+// Each sub-router is bound to its own `$context<X>` type. RPCHandler can't
+// unify those into a single nominal context, so we erase the router's type
+// at construction. The per-handler `.handler(...)` callbacks still see
+// their own typed context slice — only the multi-context spread at handle
+// time is unsafe, and we control what we pass there.
+// biome-ignore lint/suspicious/noExplicitAny: cross-context router type erasure
+const handler = new RPCHandler(router as any, {
   interceptors: [
     onError((error) => {
       console.error('[orpc]', error);
@@ -232,13 +238,21 @@ app.use('/rpc/*', async (c, next) => {
   const ingestion = buildIngestionContext(env);
   bootstrapSubscriptions(env);
   const wiki = buildWikiContext(env, systemClock);
+  // Spread wiki BEFORE ingestion so a name collision (`sources`) resolves to
+  // ingestion's SourceRepository (the wiki context never reads `sources`
+  // through the oRPC handlers — only inside CompileRunDO, which builds its
+  // own deps via `buildCompileRuntimeDeps`). The handler's type wants a
+  // single context type but each sub-router is bound to its own; we union
+  // them at runtime and cast — the per-handler `.handler` calls still
+  // type-check the slice of context they read.
   const { matched, response } = await handler.handle(c.req.raw, {
     prefix: '/rpc',
     context: {
-      ...ingestion,
       ...wiki,
+      ...ingestion,
       clock: systemClock,
-    },
+      // biome-ignore lint/suspicious/noExplicitAny: cross-context union, see comment above
+    } as any,
   });
   if (matched) {
     return c.newResponse(response.body, response);
