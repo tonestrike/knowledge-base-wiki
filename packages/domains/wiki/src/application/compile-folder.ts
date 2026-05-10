@@ -319,19 +319,19 @@ export async function compileFolder(
     >);
 
     // 8. Finalize ----------------------------------------------------------
+    // SF3 — publish-first / mark-finished-after.
+    // Pages are already persisted to R2+D1 above. We now (a) publish the
+    // cross-context CompileFinished event, then (b) mark the run + wiki
+    // finished. If the cross-context publish throws, the outer catch sees
+    // the failure and the run is recorded as failed instead of silently
+    // persisting "finished" with downstream contexts (e.g. 2.D verification)
+    // never having received the notification. Once the run is marked
+    // finished, both the SSE tape emit and the bus publish have already
+    // happened — making this section idempotent on a retry (re-issuing
+    // CompileFinished against an already-finished run is a no-op for any
+    // handler that dedupes on compileRunId).
     const endedAt = deps.now().toISOString();
-    run = CompileRun.finish(run, { wikiId: wid, endedAt });
-    await deps.runs.update(run);
     const totalPages = conceptsWithLinks.length + indexPages.length;
-    const finalWiki = Wiki.recordCompile(wiki, endedAt, totalPages);
-    await deps.wikis.update(finalWiki);
-
-    await deps.emit({
-      kind: 'CompileFinished',
-      compileRunId: input.compileRunId,
-      wikiId: wid,
-      pageCount: totalPages,
-    });
 
     await deps.eventBus.publish({
       name: 'CompileFinished',
@@ -341,6 +341,18 @@ export async function compileFolder(
         wikiId: wid,
         pageCount: totalPages,
       },
+    });
+
+    run = CompileRun.finish(run, { wikiId: wid, endedAt });
+    await deps.runs.update(run);
+    const finalWiki = Wiki.recordCompile(wiki, endedAt, totalPages);
+    await deps.wikis.update(finalWiki);
+
+    await deps.emit({
+      kind: 'CompileFinished',
+      compileRunId: input.compileRunId,
+      wikiId: wid,
+      pageCount: totalPages,
     });
 
     return { wikiId: wid };
