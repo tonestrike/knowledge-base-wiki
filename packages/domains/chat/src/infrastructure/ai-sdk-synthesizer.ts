@@ -141,10 +141,32 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
       throw err;
     }
 
+    // Hard wall-clock deadline so a hung stream surfaces an error
+    // instead of a perpetually-spinning placeholder. The OpenRouter
+    // provider doesn't reliably honor abortSignal mid-stream.
+    const deadline = Date.now() + (opts.timeoutMs ?? 90_000);
+    const iterator = result.elementStream[Symbol.asyncIterator]();
     let index = 0;
     try {
-      for await (const element of result.elementStream) {
-        yield { kind: 'segment', index, segment: toRawSegment(element) };
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new Error(`Synthesizer LLM stream timed out after ${opts.timeoutMs ?? 90_000}ms`);
+        }
+        const next = (await Promise.race([
+          iterator.next(),
+          new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(`Synthesizer LLM stream timed out after ${opts.timeoutMs ?? 90_000}ms`),
+                ),
+              remaining,
+            ),
+          ),
+        ])) as IteratorResult<z.infer<typeof RawSegmentSchema>>;
+        if (next.done) break;
+        yield { kind: 'segment', index, segment: toRawSegment(next.value) };
         index += 1;
       }
     } catch (err) {
@@ -156,9 +178,6 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
         err:
           err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
       });
-      if (ac.signal.aborted) {
-        throw new Error(`Synthesizer LLM stream timed out after ${opts.timeoutMs ?? 90_000}ms`);
-      }
       throw err;
     } finally {
       clearTimeout(timer);
