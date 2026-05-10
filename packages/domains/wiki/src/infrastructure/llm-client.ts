@@ -18,6 +18,14 @@ export interface LlmClientConfig {
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
+  /**
+   * Per-call timeout in ms. The Vercel AI SDK never gives up on a stuck
+   * upstream request, so a single hung Researcher call would freeze the
+   * whole CompileRunDO until the 30s subrequest CPU budget tripped. We
+   * abort each call here so the caller can surface a typed error and the
+   * orchestrator can move on to the next source. Default 120s.
+   */
+  timeoutMs?: number;
 }
 
 // SF8 — match transient HTTP failures off the AI SDK error surface. The
@@ -81,6 +89,7 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
   const maxAttempts = config.retry?.maxAttempts ?? 3;
   const baseDelay = config.retry?.baseDelayMs ?? 500;
   const maxDelay = config.retry?.maxDelayMs ?? 8_000;
+  const timeoutMs = config.timeoutMs ?? 120_000;
 
   return {
     async generateObject<TSchema extends z.ZodTypeAny>({
@@ -105,6 +114,8 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
       let attempt = 0;
       while (true) {
         attempt++;
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), timeoutMs);
         try {
           const res = await generateObject({
             model: openrouter.chat(model),
@@ -121,13 +132,21 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
             // orchestrator skip that source rather than hang for 60-90s
             // per task on retries that historically don't recover.
             maxRetries: 0,
+            abortSignal: ac.signal,
           });
+          clearTimeout(timer);
           return {
             result: res.object as z.infer<TSchema>,
             inputTokens: res.usage?.promptTokens ?? 0,
             outputTokens: res.usage?.completionTokens ?? 0,
           };
         } catch (err) {
+          clearTimeout(timer);
+          // AbortController fires on timeout — surface as a typed error
+          // so the orchestrator can move on to the next source.
+          if (ac.signal.aborted) {
+            throw new Error(`LLM call timed out after ${timeoutMs}ms (model=${model})`);
+          }
           // Don't retry validation errors — the prompt isn't going to
           // suddenly produce a different shape on the next attempt.
           if (isValidationError(err)) throw err;
