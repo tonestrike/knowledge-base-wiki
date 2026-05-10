@@ -127,24 +127,46 @@ export async function compileFolder(
     run = CompileRun.advance(run, 'researching', deps.now().toISOString());
     await deps.runs.update(run);
 
-    const findingsBySource = await Promise.all(
-      tasks.map(async (t): Promise<EnrichedFinding[]> => {
+    // SF1 — per-source isolation. allSettled keeps successful Researcher
+    // findings even if other sources throw; each failure becomes a typed
+    // ResearchFailed event so the user sees which source broke and why.
+    const settled = await Promise.allSettled(
+      tasks.map(async (t): Promise<{ sourceId: SourceId; findings: EnrichedFinding[] }> => {
         const src = allTexts.find((s) => s.sourceId === t.sourceId);
-        if (!src) return [];
+        if (!src) return { sourceId: t.sourceId, findings: [] };
         const { findings } = await researchSource(
           { llm: deps.llm },
           { source: src, pageTypes: t.pageTypes },
         );
-        return findings.map((f) => ({
-          ...f,
+        return {
           sourceId: src.sourceId,
-          sourceFilename: src.filename,
-          sourceText: src.text,
-          sourceContentHash: ensureContentHash(src.contentHash),
-        }));
+          findings: findings.map((f) => ({
+            ...f,
+            sourceId: src.sourceId,
+            sourceFilename: src.filename,
+            sourceText: src.text,
+            sourceContentHash: ensureContentHash(src.contentHash),
+          })),
+        };
       }),
     );
-    const allFindings: EnrichedFinding[] = findingsBySource.flat();
+    const allFindings: EnrichedFinding[] = [];
+    for (let i = 0; i < settled.length; i++) {
+      const s = settled[i];
+      const t = tasks[i];
+      if (!s || !t) continue;
+      if (s.status === 'fulfilled') {
+        allFindings.push(...s.value.findings);
+      } else {
+        const message = s.reason instanceof Error ? s.reason.message : String(s.reason);
+        await deps.emit({
+          kind: 'ResearchFailed',
+          compileRunId: input.compileRunId,
+          sourceId: t.sourceId,
+          message,
+        });
+      }
+    }
 
     // 5. Draft per (PageType, title) bucket --------------------------------
     run = CompileRun.advance(run, 'drafting', deps.now().toISOString());
