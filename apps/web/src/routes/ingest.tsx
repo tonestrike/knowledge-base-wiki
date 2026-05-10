@@ -25,6 +25,15 @@ export function IngestRoute() {
   const { folderId = '' } = useParams();
   const nav = useNavigate();
 
+  // Refs + state declared first so the `sources` query below can read
+  // `hasIngestResolved` in its `refetchInterval` callback without hitting
+  // the temporal dead zone — `useQuery`'s options object is evaluated
+  // during render and dereferences the ref synchronously.
+  const hasIngestResolved = useRef(false);
+  const hasStartedIngest = useRef(false);
+  const [phase, setPhase] = useState<'ingesting' | 'compiling' | 'error'>('ingesting');
+  const [error, setError] = useState<Error | null>(null);
+
   const folder = useQuery({
     ...orpc.ingestion.getFolder.queryOptions({ input: { id: folderId } }),
     enabled: !!folderId,
@@ -50,10 +59,6 @@ export function IngestRoute() {
   // false on success and we'd lose the "phase=compiling" hand-off).
   const ingest = useMutation({ ...orpc.ingestion.ingestFolder.mutationOptions() });
   const compile = useMutation({ ...orpc.wiki.startCompile.mutationOptions() });
-  const hasIngestResolved = useRef(false);
-  const hasStartedIngest = useRef(false);
-  const [phase, setPhase] = useState<'ingesting' | 'compiling' | 'error'>('ingesting');
-  const [error, setError] = useState<Error | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire-once on mount; not parameterized on identifiers that change.
   useEffect(() => {
