@@ -56,6 +56,15 @@ export function deriveLog(
         tone: 'work',
       });
       status = 'researching';
+    } else if (e.kind === 'ResearchProgress') {
+      entries.push({
+        id: `research-progress-${e.findingsExtracted}`,
+        at,
+        text: `Researcher · ${e.findingsExtracted} finding${
+          e.findingsExtracted === 1 ? '' : 's'
+        } extracted so far`,
+        tone: 'output',
+      });
     } else if (e.kind === 'ResearchCompleted') {
       entries.push({
         id: 'research-done',

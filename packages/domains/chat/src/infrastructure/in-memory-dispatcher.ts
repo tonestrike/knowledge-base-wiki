@@ -113,6 +113,13 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
       const { findings, pages } = await researchQuestion(deps, {
         wikiId: args.wikiId,
         question: args.question,
+        onPartial: ({ findings: count }) => {
+          emit(key, {
+            kind: 'ResearchProgress',
+            turnId: args.turnId,
+            findingsExtracted: count,
+          });
+        },
       });
 
       emit(key, {

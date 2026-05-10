@@ -27,6 +27,16 @@ export const ResearchCompleted = z.object({
   findingCount: z.number().int().nonnegative(),
 });
 
+// Mid-stream progress fired as the Researcher's partialObjectStream parses
+// each new finding from the model's incremental JSON output. Lets the UI
+// surface real per-finding progress instead of a static "researching..."
+// spinner during the 20-90s the LLM call takes.
+export const ResearchProgress = z.object({
+  kind: z.literal('ResearchProgress'),
+  turnId: TurnId,
+  findingsExtracted: z.number().int().nonnegative(),
+});
+
 export const SynthesisStarted = z.object({
   kind: z.literal('SynthesisStarted'),
   turnId: TurnId,
@@ -61,6 +71,7 @@ export const AnswerFinished = z.object({
 export const AnswerEvent = z.discriminatedUnion('kind', [
   AnswerStarted,
   ResearchStarted,
+  ResearchProgress,
   ResearchCompleted,
   SynthesisStarted,
   AnswerSegmentEmitted,

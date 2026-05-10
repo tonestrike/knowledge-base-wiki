@@ -9,7 +9,11 @@ import type { Researcher, ResearcherOutput, WikiReader } from './ports.ts';
  */
 export async function researchQuestion(
   deps: { researcher: Researcher; wikiReader: WikiReader },
-  input: { wikiId: WikiId; question: string },
+  input: {
+    wikiId: WikiId;
+    question: string;
+    onPartial?: (partial: { findings: number }) => void;
+  },
 ): Promise<ResearcherOutput> {
   const out = await deps.researcher.research(input);
 
