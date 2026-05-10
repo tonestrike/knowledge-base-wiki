@@ -7,7 +7,8 @@ import { z } from 'zod';
 import type { LlmClient } from './ports.ts';
 
 // Drafter — prose quality is the surface a reader judges.
-export const DRAFTER_MODEL = 'anthropic/claude-sonnet-4.5';
+// Pinned to 4.6 per spec §5.1.1 + the 1.A risk spike.
+export const DRAFTER_MODEL = 'anthropic/claude-sonnet-4.6';
 
 const DraftOutput = z.object({
   title: z.string().min(1).max(200),

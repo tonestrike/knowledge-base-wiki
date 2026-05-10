@@ -8,7 +8,8 @@ import { z } from 'zod';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // SchemaInferrer model — quality matters; one inference per CompileRun.
-export const SCHEMA_MODEL = 'anthropic/claude-sonnet-4.5';
+// Pinned to 4.6 per spec §5.1.1 + the 1.A risk spike.
+export const SCHEMA_MODEL = 'anthropic/claude-sonnet-4.6';
 
 // We re-compose the schema rather than `.and()`-ing onto WikiSchema because
 // WikiSchema uses superRefine (zod refinements survive .and(), but the
