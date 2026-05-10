@@ -27,7 +27,10 @@ export const ArtifactRegistry: Registry = {
 };
 
 export function ArtifactView({ artifact }: { artifact: Artifact }) {
-  // Discriminated dispatch — TS narrows artifact.kind so each branch's component matches.
+  // Discriminated dispatch — TS narrows artifact.kind so each branch's
+  // component matches. The `default` arm holds an `assertNever` so adding
+  // a new ArtifactKind to the contract blocks at typecheck (TD3) instead
+  // of falling through to a silent ComparisonTable rewrite or `undefined`.
   switch (artifact.kind) {
     case 'ComparisonTable':
       return <ComparisonTable artifact={artifact} />;
@@ -45,5 +48,9 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
       return <Quote artifact={artifact} />;
     case 'Markdown':
       return <Markdown artifact={artifact} />;
+    default: {
+      const _exhaustive: never = artifact;
+      return _exhaustive;
+    }
   }
 }
