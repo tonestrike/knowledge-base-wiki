@@ -231,12 +231,22 @@ const bootstrapSubscriptions = (env: Partial<WikiBindings>) => {
   subscribeWikiEvents(ctx.eventBus);
 };
 
-// Single-instance chat context: in-memory bindings persist across requests for
-// the duration of the worker process. Phase 3 swaps these for D1 + DO.
-// The chat EventBus is the same shared-kernel InMemoryEventBus the wiki
-// context subscribes against, so `AnswerProduced` events flow into the wiki
-// cross-context handlers.
-const chatContext = buildChatContext({ eventBus: getSharedEventBus() });
+// Single-instance chat context, built lazily on first request and cached for
+// subsequent ones. The dispatcher's in-memory tape lives on this instance —
+// rebuilding it per request would lose in-flight chat conversations.
+let chatContextSingleton: ReturnType<typeof buildChatContext> | null = null;
+const ensureChatContext = (env: Env) => {
+  if (chatContextSingleton) return chatContextSingleton;
+  chatContextSingleton = buildChatContext({
+    eventBus: getSharedEventBus(),
+    bindings: {
+      db: env.DB,
+      storage: env.STORAGE,
+      openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
+    },
+  });
+  return chatContextSingleton;
+};
 
 app.use('/rpc/*', async (c, next) => {
   // c.env is undefined when running under bun:test without executionContext;
@@ -247,6 +257,7 @@ app.use('/rpc/*', async (c, next) => {
   const ingestion = buildIngestionContext(env);
   bootstrapSubscriptions(env);
   const wiki = buildWikiContext(env, systemClock);
+  const chatContext = ensureChatContext(env);
   const verification = buildVerificationContext(
     env as unknown as Parameters<typeof buildVerificationContext>[0],
     getSharedEventBus(),
