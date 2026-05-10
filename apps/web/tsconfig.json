@@ -2,7 +2,11 @@
   "extends": "@tooling/tsconfig/react.json",
   "compilerOptions": {
     "moduleResolution": "Bundler",
-    "types": ["bun"]
+    "types": ["bun"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*", "vite.config.ts", "test/**/*"]
 }
