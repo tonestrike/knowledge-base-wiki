@@ -27,8 +27,11 @@ const DraftOutput = z.object({
           .array(
             z.object({
               sourceId: z.string().uuid(),
-              spanStart: z.number().int().nonnegative(),
-              spanEnd: z.number().int().positive(),
+              // Anthropic's output_config.format.schema rejects `minimum`
+              // on integer fields; the orchestrator clamps the byteRange
+              // before persisting (see `Math.max(cite.spanStart + 1, …)`).
+              spanStart: z.number().int(),
+              spanEnd: z.number().int(),
               label: z.string().min(1).max(200),
             }),
           )

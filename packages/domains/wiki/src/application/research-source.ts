@@ -9,12 +9,20 @@ export const RESEARCHER_MODEL = 'anthropic/claude-haiku-4.5';
 // (4-of-5 sources rejected with "No object generated"); the LLM occasionally
 // emits 21+ findings or evidence over the 800-char ceiling. Constraints are
 // now hints in the prompt, not gates in the schema.
+//
+// We also can't put `nonnegative()` / `positive()` on the integer fields:
+// Anthropic's `output_config.format.schema` validator rejects `minimum`
+// constraints on integer types ("For 'integer' type, property 'minimum'
+// is not supported"). The orchestrator already clamps spans to
+// `[0, source.length]` post-stream (see `clamp` below) so the validator
+// constraints are redundant — and stripping them is the only way through
+// the Anthropic-direct path.
 const FindingSchema = z.object({
   pageType: z.string(),
   title: z.string().min(1),
   evidence: z.string().min(1),
-  spanStart: z.number().int().nonnegative(),
-  spanEnd: z.number().int().positive(),
+  spanStart: z.number().int(),
+  spanEnd: z.number().int(),
 });
 
 const ResearchOutput = z.object({

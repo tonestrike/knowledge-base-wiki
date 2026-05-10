@@ -121,6 +121,18 @@ export async function compileFolder(
     );
 
     // 2. Wiki record --------------------------------------------------------
+    // The `wikis` table has UNIQUE(folder_id), so a re-compile against a
+    // folder that already has a wiki would 500 with a raw D1 constraint
+    // error. Detect that case up-front and throw a recoverable message
+    // instead — the dispatcher reshapes it into a CompileFailed event,
+    // and the operator can drop the existing wiki via D1 before retrying.
+    // (A "delete wiki" UI / repo method is the right long-term fix.)
+    const existingWiki = await deps.wikis.findByFolderId(input.folderId);
+    if (existingWiki) {
+      throw new Error(
+        `Folder ${input.folderId} already has a compiled wiki (id=${existingWiki.id}). Delete it before re-compiling.`,
+      );
+    }
     const wid = parseWikiId(deps.newId());
     const wiki = Wiki.create({
       id: wid,

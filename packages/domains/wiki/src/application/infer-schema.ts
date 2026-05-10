@@ -15,13 +15,32 @@ export const SCHEMA_MODEL = 'anthropic/claude-sonnet-4.6';
 // WikiSchema uses superRefine (zod refinements survive .and(), but the
 // generateObject call lifts schema description from .shape — flat shape is
 // friendlier to JSON-Schema generation in @ai-sdk/anthropic).
+//
+// Important: Anthropic's `output_config.format.schema` validator rejects
+// `maxItems` on arrays ("For 'array' type, property 'maxItems' is not
+// supported"). The previous `.min(1).max(20)` / `.max(40)` constraints
+// compiled to that and 400-ed the whole compile. The caps now live in
+// the system prompt and are enforced with a Zod `.refine` (which is a
+// post-stream validation, not part of the JSON Schema).
 const InferOutput = z
   .object({
-    pageTypes: z.array(PageType).min(1).max(20),
-    relations: z.array(Relation).max(40),
+    pageTypes: z.array(PageType).min(1),
+    relations: z.array(Relation),
     reason: z.string().min(1).max(800),
   })
   .superRefine((s, ctx) => {
+    if (s.pageTypes.length > 20) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `too many PageTypes: ${s.pageTypes.length} (cap 20)`,
+      });
+    }
+    if (s.relations.length > 40) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `too many Relations: ${s.relations.length} (cap 40)`,
+      });
+    }
     const known = new Set(s.pageTypes.map((p) => p.name));
     for (const r of s.relations) {
       if (!known.has(r.from) || !known.has(r.to)) {

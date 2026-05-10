@@ -1,23 +1,32 @@
-// pdfjs-dist 4.10's legacy build is the portable Node-friendly entry. It avoids
-// browser-only APIs (DOMMatrix, OffscreenCanvas) that the standard build needs.
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+// PDF extraction using `unpdf`, a community fork of pdfjs purpose-built
+// for serverless / edge runtimes. Why not stock `pdfjs-dist`?
+//
+//   - pdfjs's `PDFWorker._setupFakeWorkerGlobal` does a runtime
+//     `import(workerSrc)` to load `pdf.worker.mjs`. workerd resolves
+//     modules at bundle time so the dynamic import fails with
+//     "No such module 'pdf.worker.mjs'".
+//   - We tried `import * as w from 'pdfjs-dist/.../pdf.worker.mjs'` +
+//     `globalThis.pdfjsWorker = w` to short-circuit the import — that
+//     bundles a ~2 MB worker module whose top-level side effects wedge
+//     the workerd isolate (it boots, binds the port, but never responds).
+//
+// `unpdf` ships pdfjs with the worker bundle inlined and the missing
+// edge-runtime polyfills stitched in (FinalizationRegistry, etc.). It
+// loads cleanly in workerd, has zero native deps, and exposes
+// `extractTextItems` which gives us per-page text-item structure to
+// build our outline against.
+//
+// Note: `unpdf` is imported lazily inside `extract()`, NOT at the top
+// of the module. Importing it at module scope wedges workerd's isolate
+// boot — bound port, no responses — because the inlined worker bundle's
+// top-level side effects (postMessage handlers, FinalizationRegistry
+// setup) take ~seconds and block whatever signal workerd needs to mark
+// the Worker "ready". A dynamic import inside the function defers the
+// load until the first PDF arrives; from then on it's hot in the
+// isolate and subsequent extract() calls are fast.
 import type { Extractor } from '../application/extract-source.ts';
 import type { OutlineNode } from '../domain/outline.ts';
 import { Outline, outlineLevel } from '../domain/outline.ts';
-
-// PDF extraction in workerd: pdfjs's `PDFWorker._setupFakeWorkerGlobal`
-// does a dynamic `import(workerSrc)` to load `pdf.worker.mjs`, which
-// fails in workerd ("No such module 'pdf.worker.mjs'") because workerd
-// resolves modules at bundle time. We attempted a static
-// `import * as pdfjsWorker from 'pdfjs-dist/.../pdf.worker.mjs'` with the
-// idea of stashing `globalThis.pdfjsWorker = pdfjsWorker` so pdfjs would
-// short-circuit the dynamic import — but the worker bundle (~2 MB) has
-// boot-time side effects that wedge the workerd isolate (it boots, binds
-// the port, but never responds to requests). The proper fix is a
-// non-pdfjs PDF extractor for the api Worker (e.g. an external service,
-// or a WASM extractor). Tracked in the project doc; for now PDFs in
-// uploaded Drive folders are unreadable from this api and the ingest
-// page's "No documents we can read" guard catches that case loudly.
 
 const isHeading = (raw: string): boolean => {
   const t = raw.trim();
@@ -30,20 +39,26 @@ const isHeading = (raw: string): boolean => {
 
 export const createPdfExtractor = (): Extractor => ({
   async extract({ bytes }) {
-    // pdfjs mutates the input buffer; pass a copy so callers can keep theirs.
+    // Lazy import — see module-top comment.
+    const { extractTextItems, getDocumentProxy } = await import('unpdf');
+    // `extractTextItems` returns text grouped by page, preserving the
+    // structural information pdfjs's `getTextContent()` would have given
+    // us — we use it to keep the heading-outline behavior the previous
+    // implementation produced.
     const data = new Uint8Array(bytes.byteLength);
     data.set(bytes);
-    const doc = await getDocument({ data, isEvalSupported: false }).promise;
-    const pageCount = doc.numPages;
+    const doc = await getDocumentProxy(data);
+    const { totalPages, items: pages } = await extractTextItems(doc);
+
     const nodes: OutlineNode[] = [];
     let cursor = 0;
     let full = '';
 
-    for (let p = 1; p <= pageCount; p++) {
-      const page = await doc.getPage(p);
-      const content = await page.getTextContent();
-      for (const item of content.items) {
-        if (!('str' in item)) continue;
+    for (let p = 0; p < pages.length; p++) {
+      const pageItems = pages[p];
+      if (!pageItems) continue;
+      const oneIndexedPage = p + 1;
+      for (const item of pageItems) {
         const t = item.str;
         if (!t) continue;
         const start = cursor;
@@ -54,7 +69,7 @@ export const createPdfExtractor = (): Extractor => ({
             level: outlineLevel(2),
             title: t.trim(),
             byteRange: { start, end },
-            page: p,
+            page: oneIndexedPage,
           });
         }
         full += `${t} `;
@@ -67,7 +82,7 @@ export const createPdfExtractor = (): Extractor => ({
     return {
       text: full,
       outline: Outline.fromNodes(nodes),
-      pageCount,
+      pageCount: totalPages,
       // Server-side page-image rendering needs node-canvas + a worker; we
       // defer that to the web client (Phase 2.E uses pdfjs in-browser).
       pageImages: [],

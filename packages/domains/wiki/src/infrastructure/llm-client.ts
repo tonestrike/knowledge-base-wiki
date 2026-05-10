@@ -118,7 +118,18 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
         const timer = setTimeout(() => ac.abort(), timeoutMs);
         try {
           const res = await generateObject({
-            model: openrouter.chat(model),
+            // Pin OpenRouter routing to Anthropic-direct. OpenRouter
+            // otherwise picks the cheapest provider; today
+            // anthropic/claude-* falls back to Amazon Bedrock, which
+            // rejects `output_config.format.schema` shapes the chat /
+            // wiki domains depend on ("For 'array' type, property
+            // 'maxItems' is not supported", empty-`{}` rejection, etc.).
+            // `allow_fallbacks: false` makes the failure mode a loud 400
+            // from OpenRouter instead of a silent degradation.
+            model: openrouter.chat(model, {
+              provider: { order: ['anthropic'], allow_fallbacks: false },
+              // biome-ignore lint/suspicious/noExplicitAny: provider-package cast — see comment in build-chat-context.ts.
+            }) as any,
             system,
             prompt,
             schema,
