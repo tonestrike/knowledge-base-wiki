@@ -24,14 +24,21 @@ export function useAnswerStream(turnId: string | null): AnswerStreamState {
   // render and abort the in-flight stream).
   const config = useMemo<EventStreamConfig<AnswerEvent>>(
     () => ({
-      parse: (raw) => AnswerEvent.parse(raw),
+      parse: (raw) =>
+        AnswerEvent.parse(
+          typeof raw === 'object' && raw !== null && 'json' in raw
+            ? (raw as { json: unknown }).json
+            : raw,
+        ),
       failedKinds: FAILED,
       finishedKinds: FINISHED,
+      method: 'POST',
+      body: { json: { turnId } },
     }),
-    [],
+    [turnId],
   );
   const liveResult = useEventStream<AnswerEvent>(
-    mode.kind === 'live' && turnId ? `/rpc/turns/${turnId}/answer/events` : null,
+    mode.kind === 'live' && turnId ? '/rpc/chat/streamAnswer' : null,
     config,
   );
   const mockResult = useAsyncIterableStream<AnswerEvent>(

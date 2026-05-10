@@ -16,16 +16,25 @@ export function useCompileStream(compileRunId: string | null): {
   error: string | null;
 } {
   const { mode } = useLiveMode();
+  // SSE comes back as oRPC RPC frames whose payload is wrapped in `{ json: ... }`.
+  // Unwrap before handing the raw event to Zod so the discriminated union parses.
   const config = useMemo<EventStreamConfig<CompileEvent>>(
     () => ({
-      parse: (raw) => CompileEvent.parse(raw),
+      parse: (raw) =>
+        CompileEvent.parse(
+          typeof raw === 'object' && raw !== null && 'json' in raw
+            ? (raw as { json: unknown }).json
+            : raw,
+        ),
       failedKinds: FAILED,
       finishedKinds: FINISHED,
+      method: 'POST',
+      body: { json: { compileRunId } },
     }),
-    [],
+    [compileRunId],
   );
   const liveResult = useEventStream<CompileEvent>(
-    mode.kind === 'live' && compileRunId ? `/rpc/compile-runs/${compileRunId}/events` : null,
+    mode.kind === 'live' && compileRunId ? '/rpc/wiki/streamCompileEvents' : null,
     config,
   );
   const mockResult = useAsyncIterableStream<CompileEvent>(
