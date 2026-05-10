@@ -50,8 +50,17 @@ export const createCfLintRunDispatcher = (
         try {
           const parsed = LintEvent.parse(JSON.parse(dataLine.slice(6)));
           yield parsed;
-        } catch {
-          // skip malformed
+        } catch (err) {
+          // Surface malformed frames to the operator log instead of silently
+          // dropping them. A malformed frame indicates either a Verifier
+          // schema bug, a JSON encoding bug, or DO/SSE corruption — none are
+          // safe to swallow (see PR #6 silent-failure-hunter finding 3).
+          // Skip the bad frame rather than abort the stream so an isolated
+          // bad event does not poison live events that follow.
+          console.error('[cf-lint-run-dispatcher] dropped malformed SSE frame', {
+            error: err instanceof Error ? err.message : String(err),
+            preview: dataLine.slice(0, 200),
+          });
         }
       }
     }
