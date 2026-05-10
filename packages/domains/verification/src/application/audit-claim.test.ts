@@ -44,17 +44,19 @@ describe('auditClaim', () => {
     expect(out.correction).toBeUndefined();
   });
 
-  it('substitutes "<missing>" when SourceTextReader returns null', async () => {
+  it('throws CitationUnreadableError when SourceTextReader returns null (rather than feeding the Verifier a sentinel)', async () => {
     const reader: SourceTextReader = { readSlice: async () => null };
-    let captured: ReadonlyArray<{ citationId: string; sliceText: string }> = [];
+    let auditCalled = 0;
     const verifier: AnthropicVerifier = {
-      audit: async ({ citedSlices }) => {
-        captured = citedSlices;
+      audit: async () => {
+        auditCalled++;
         return { verdict: 'supported', evidenceText: 'ok' };
       },
     };
-    await auditClaim({ verifier, sourceText: reader }, { claim });
-    expect(captured[0]?.sliceText).toBe('<missing>');
+    await expect(auditClaim({ verifier, sourceText: reader }, { claim })).rejects.toThrow(
+      /unreadable/,
+    );
+    expect(auditCalled).toBe(0);
   });
 
   it('demands a Correction for non-supported verdicts (Verifier MUST provide one)', async () => {
