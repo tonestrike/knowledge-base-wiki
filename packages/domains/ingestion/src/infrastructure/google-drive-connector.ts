@@ -96,14 +96,17 @@ const withAuth = (init: RequestInit | undefined, token: string): RequestInit => 
 
 export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): DriveConnector => ({
   async startAuth() {
-    // Surface a typed error when GOOGLE_OAUTH_CLIENT_ID isn't configured —
+    // Surface a typed error when no Google OAuth client id is configured —
     // otherwise we'd hand the user an authorizationUrl with `client_id=`
     // empty and Google would render its own 400 "Missing required
     // parameter: client_id" page, which the user has no way to recover
-    // from inside our app.
+    // from inside our app. The api boundary accepts either
+    // `GOOGLE_OAUTH_CLIENT_ID` or bare `GOOGLE_CLIENT_ID` as the secret
+    // name (both are common shapes in our Infisical project at
+    // `/apps/api`).
     if (!cfg.clientId) {
       throw new Error(
-        'Drive OAuth is not configured: GOOGLE_OAUTH_CLIENT_ID is unset. Provision a Google Cloud OAuth client for this environment via Infisical.',
+        'Drive OAuth is not configured: set GOOGLE_CLIENT_ID (or GOOGLE_OAUTH_CLIENT_ID) and the matching CLIENT_SECRET / REDIRECT in Infisical at /apps/api for this environment.',
       );
     }
     const state = crypto.randomUUID();

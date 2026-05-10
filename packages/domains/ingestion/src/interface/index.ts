@@ -24,7 +24,17 @@ export interface IngestionContext extends IngestionDeps {
 const os = implement(ingestionContract).$context<IngestionContext>();
 
 export const ingestionRouter = {
-  authStart: os.authStart.handler(({ context }) => startDriveAuth(context)),
+  authStart: os.authStart.handler(async ({ context }) => {
+    try {
+      return await startDriveAuth(context);
+    } catch (err) {
+      // Surface the actionable cause (e.g. "GOOGLE_OAUTH_CLIENT_ID is unset")
+      // instead of letting oRPC wrap the throw into a generic 500. The
+      // connector throws a typed Error with a sentence the user can act on.
+      const message = err instanceof Error ? err.message : 'Drive OAuth start failed.';
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message });
+    }
+  }),
 
   authCallback: os.authCallback.handler(({ context, input }) => completeDriveAuth(context, input)),
 
