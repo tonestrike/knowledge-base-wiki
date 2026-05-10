@@ -81,10 +81,10 @@ const finishedRun = LintRun.finish(
   '2026-05-09T12:06:00.000Z',
 );
 
-const wireRun = (r: typeof finishedRun): LintRunWire => ({
+const wireRun = (r: import('../domain/lint-run.ts').LintRun): LintRunWire => ({
   id: r.id,
   wikiId: r.wikiId,
-  status: r.status === 'pending' ? 'pending' : r.status,
+  status: r.status,
   startedAt: r.startedAt,
   endedAt: r.endedAt,
   totalClaims: r.totalClaims,
@@ -200,6 +200,22 @@ describe('applyCorrection', () => {
     await expect(applyCorrection(deps, { lintFindingId: unsupportedFinding.id })).rejects.toThrow(
       /already resolved/,
     );
+  });
+
+  it('does NOT mark resolved when the eventBus.publish rejects (consistency: publish-then-persist)', async () => {
+    const { deps, store } = buildDeps();
+    const failingBus: typeof deps.eventBus = {
+      publish: async () => {
+        throw new Error('queue down');
+      },
+      subscribe: () => () => undefined,
+    };
+    const failingDeps: typeof deps = { ...deps, eventBus: failingBus };
+    await expect(
+      applyCorrection(failingDeps, { lintFindingId: unsupportedFinding.id }),
+    ).rejects.toThrow(/queue down/);
+    // The finding must remain unresolved so the caller can retry.
+    expect(store.findings.get(unsupportedFinding.id)?.resolvedAt).toBeUndefined();
   });
 });
 
