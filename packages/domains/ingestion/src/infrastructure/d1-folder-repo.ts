@@ -12,12 +12,21 @@ interface FolderRow {
 
 export const createD1FolderRepository = (db: D1DatabaseLike): FolderRepository => ({
   async upsert({ folderId, userId, driveFolderId, name }) {
-    await db
+    // I1: ON CONFLICT preserves the existing row's `id`, then RETURNING reads
+    // it back. Without this, callers received a stale id and downstream
+    // lookups (`folders.findById`) returned null because the id never existed.
+    const row = await db
       .prepare(
-        'INSERT INTO folders (id, user_id, drive_folder_id, name) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, drive_folder_id) DO UPDATE SET name = excluded.name',
+        'INSERT INTO folders (id, user_id, drive_folder_id, name) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, drive_folder_id) DO UPDATE SET name = excluded.name RETURNING id',
       )
       .bind(folderId, userId, driveFolderId, name)
-      .run();
+      .first<{ id: string }>();
+    if (!row) {
+      // Should be unreachable — INSERT ... RETURNING always produces a row in
+      // SQLite. Defensive throw so callers don't silently get the candidate id.
+      throw new Error('folder upsert RETURNING produced no row');
+    }
+    return { folderId: parseFolderId(row.id) };
   },
   async findById(id: FolderId) {
     const r = await db

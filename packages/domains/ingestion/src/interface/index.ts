@@ -43,13 +43,14 @@ export const ingestionRouter = {
     if (!folder) {
       throw new ORPCError('NOT_FOUND', { message: 'Folder not registered.' });
     }
-    // Phase 2.A treats a folder's children as the seed list. Sub-folders are
-    // ignored in v1; recursive walk lands later.
-    const list = await context.drive.listFolders({
+    // C1: enumerate documents inside the folder via `listFiles` (NOT
+    // `listFolders`, which only returns sub-folders). Sub-folder recursion is
+    // out of scope for v1.
+    const list = await context.drive.listFiles({
       parentId: folder.driveFolderId,
       limit: 200,
     });
-    const ids = list.folders.map((f) => f.driveFolderId);
+    const ids = list.files.map((f) => f.driveFileId);
     const out = await ingestFolder(
       { ...context, extractors: context.extractors },
       { folderId: input.folderId, driveFileIds: ids },

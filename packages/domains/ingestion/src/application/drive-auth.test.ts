@@ -27,6 +27,7 @@ const fakeDeps = (): IngestionDeps => {
         };
       },
       listFolders: async () => ({ folders: [] }),
+      listFiles: async () => ({ files: [] }),
       fetch: async () => {
         throw new Error('not used');
       },

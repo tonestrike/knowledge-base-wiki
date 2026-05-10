@@ -1,5 +1,7 @@
 import type { UserId } from '@package/contracts/shared';
+import { isoTimestamp } from '@package/contracts/shared';
 import type { DriveConnector } from '../application/ports.ts';
+import { Manifest } from '../domain/manifest.ts';
 
 export interface GoogleDriveConnectorConfig {
   readonly clientId: string;
@@ -8,9 +10,15 @@ export interface GoogleDriveConnectorConfig {
   // Resolves a Drive identity (email) to our internal UserId.
   // For the single-user demo this is a constant; multi-user maps email → row.
   resolveUserId(driveProfileEmail: string): UserId;
-  // Per-request access token resolver. The Worker context binds this from the
-  // authenticated session; tests pass a stub. Returning null forces re-auth.
-  getCurrentAccessToken(): Promise<string>;
+  // Per-request access-token resolver. The Worker context binds this from the
+  // authenticated session; tests pass a stub.
+  //
+  // SF6/SF7: the resolver MUST honor `forceRefresh=true` by exchanging the
+  // stored refresh_token for a fresh access_token (and persisting it). The
+  // connector calls with `forceRefresh=true` after a 401 and retries the
+  // request once. The default-call path may also refresh proactively when
+  // `expiresAt` is near.
+  getCurrentAccessToken(opts?: { forceRefresh?: boolean }): Promise<string>;
 }
 
 interface DriveTokenResponse {
@@ -32,6 +40,16 @@ interface DriveFolderListResponse {
   readonly nextPageToken?: string;
 }
 
+interface DriveFileListResponse {
+  readonly files: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly modifiedTime: string;
+  }>;
+  readonly nextPageToken?: string;
+}
+
 interface DriveFileMetaResponse {
   readonly name: string;
   readonly mimeType: string;
@@ -40,6 +58,41 @@ interface DriveFileMetaResponse {
 }
 
 const escapeDriveQuery = (raw: string): string => raw.replaceAll("'", "\\'");
+
+// SF6: send Drive a request with bearer token; if it returns 401 (token
+// expired/invalidated), refresh and retry exactly once. If it returns 429
+// (quota), surface Retry-After in the error so the caller can back off
+// instead of mis-classifying as a permanent failure.
+const driveFetchWithRefresh = async (
+  cfg: GoogleDriveConnectorConfig,
+  build: (token: string) => { url: string | URL; init?: RequestInit },
+  label: string,
+): Promise<Response> => {
+  let token = await cfg.getCurrentAccessToken();
+  let { url, init } = build(token);
+  let res = await fetch(url, withAuth(init, token));
+  if (res.status === 401) {
+    token = await cfg.getCurrentAccessToken({ forceRefresh: true });
+    ({ url, init } = build(token));
+    res = await fetch(url, withAuth(init, token));
+  }
+  if (res.status === 429) {
+    const retryAfter = res.headers.get('Retry-After') ?? '';
+    throw new Error(`drive ${label} 429 quota — retry-after=${retryAfter}`);
+  }
+  if (!res.ok) {
+    throw new Error(`drive ${label} ${res.status}`);
+  }
+  return res;
+};
+
+const withAuth = (init: RequestInit | undefined, token: string): RequestInit => ({
+  ...(init ?? {}),
+  headers: {
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+    authorization: `Bearer ${token}`,
+  },
+});
 
 export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): DriveConnector => ({
   async startAuth() {
@@ -91,7 +144,6 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
   },
 
   async listFolders({ parentId, query, limit }) {
-    const accessToken = await cfg.getCurrentAccessToken();
     const q = [
       "mimeType = 'application/vnd.google-apps.folder'",
       'trashed = false',
@@ -100,16 +152,17 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     ]
       .filter(Boolean)
       .join(' and ');
-    const u = new URL('https://www.googleapis.com/drive/v3/files');
-    u.searchParams.set('q', q);
-    u.searchParams.set('fields', 'files(id,name,modifiedTime),nextPageToken');
-    u.searchParams.set('pageSize', String(limit));
-    const res = await fetch(u, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      throw new Error(`drive listFolders ${res.status}`);
-    }
+    const res = await driveFetchWithRefresh(
+      cfg,
+      () => {
+        const u = new URL('https://www.googleapis.com/drive/v3/files');
+        u.searchParams.set('q', q);
+        u.searchParams.set('fields', 'files(id,name,modifiedTime),nextPageToken');
+        u.searchParams.set('pageSize', String(limit));
+        return { url: u };
+      },
+      'listFolders',
+    );
     const j = (await res.json()) as DriveFolderListResponse;
     return {
       folders: j.files.map((f) => ({
@@ -121,15 +174,46 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     };
   },
 
-  async fetch({ driveFileId }) {
-    const accessToken = await cfg.getCurrentAccessToken();
-    const metaRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${driveFileId}?fields=id,name,mimeType,size,modifiedTime`,
-      { headers: { authorization: `Bearer ${accessToken}` } },
+  async listFiles({ parentId, limit, pageToken }) {
+    // C1: complement to `listFolders` — returns NON-folder children of a parent.
+    // This is what `ingestFolder` actually wants: documents to download.
+    const q = [
+      "mimeType != 'application/vnd.google-apps.folder'",
+      'trashed = false',
+      `'${escapeDriveQuery(parentId)}' in parents`,
+    ].join(' and ');
+    const res = await driveFetchWithRefresh(
+      cfg,
+      () => {
+        const u = new URL('https://www.googleapis.com/drive/v3/files');
+        u.searchParams.set('q', q);
+        u.searchParams.set('fields', 'files(id,name,mimeType,modifiedTime),nextPageToken');
+        u.searchParams.set('pageSize', String(limit));
+        if (pageToken) u.searchParams.set('pageToken', pageToken);
+        return { url: u };
+      },
+      'listFiles',
     );
-    if (!metaRes.ok) {
-      throw new Error(`drive metadata fetch ${metaRes.status}`);
-    }
+    const j = (await res.json()) as DriveFileListResponse;
+    return {
+      files: j.files.map((f) => ({
+        driveFileId: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        modifiedAt: f.modifiedTime,
+      })),
+      nextPageToken: j.nextPageToken,
+    };
+  },
+
+  async fetch({ driveFileId }) {
+    const metaRes = await driveFetchWithRefresh(
+      cfg,
+      () => ({
+        url: `https://www.googleapis.com/drive/v3/files/${driveFileId}?fields=id,name,mimeType,size,modifiedTime`,
+      }),
+      'metadata',
+    );
     const meta = (await metaRes.json()) as DriveFileMetaResponse;
     const isGoogleNative = meta.mimeType.startsWith('application/vnd.google-apps.');
     const exportMime = isGoogleNative
@@ -142,31 +226,24 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     const downloadUrl = exportMime
       ? `https://www.googleapis.com/drive/v3/files/${driveFileId}/export?mimeType=${encodeURIComponent(exportMime)}`
       : `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
-    const res = await fetch(downloadUrl, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      throw new Error(`drive fetch ${res.status}`);
-    }
+    const res = await driveFetchWithRefresh(cfg, () => ({ url: downloadUrl }), 'fetch');
     const bytes = new Uint8Array(await res.arrayBuffer());
     // Google-native files are exported to a different MIME than their source;
     // we record the original Google MIME so the extractor router picks the
     // right path. (The bytes themselves are text/plain or text/csv or PDF.)
-    return {
-      manifest: {
-        driveFileId,
-        filename: meta.name,
-        mime: meta.mimeType as
-          | 'application/pdf'
-          | 'application/vnd.google-apps.document'
-          | 'application/vnd.google-apps.spreadsheet'
-          | 'application/vnd.google-apps.presentation'
-          | 'text/plain'
-          | 'text/markdown',
-        sizeBytes: meta.size ? Number(meta.size) : bytes.length,
-        modifiedAt: meta.modifiedTime,
-      },
-      bytes,
-    };
+    const manifest = Manifest.create({
+      driveFileId,
+      filename: meta.name,
+      mime: meta.mimeType as
+        | 'application/pdf'
+        | 'application/vnd.google-apps.document'
+        | 'application/vnd.google-apps.spreadsheet'
+        | 'application/vnd.google-apps.presentation'
+        | 'text/plain'
+        | 'text/markdown',
+      sizeBytes: meta.size ? Number(meta.size) : bytes.length,
+      modifiedAt: isoTimestamp(meta.modifiedTime),
+    });
+    return { manifest, bytes };
   },
 });
