@@ -1,3 +1,4 @@
+import { completeDriveAuth } from '@domain/ingestion';
 import {
   type SecretCipher,
   createD1FolderRepository,
@@ -235,6 +236,32 @@ app.use(
     credentials: true,
   }),
 );
+
+// Google OAuth callback. Must be registered BEFORE the `/rpc/*` oRPC
+// dispatcher below: the contract defines `ingestion.authCallback` as POST
+// (typed RPC clients send the code/state in the body), but Google
+// redirects the user-agent here with a GET carrying `?code=...&state=...`.
+// Without this Hono GET, the dispatcher matches the path, sees the wrong
+// method, and returns 405. We run the same use-case as the POST handler
+// and 302 back to the app's root on success so the freshly stored Drive
+// tokens are immediately usable.
+app.get('/rpc/ingestion/authCallback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  if (!code || !state) {
+    return c.text('Missing code or state in Google callback.', 400);
+  }
+  try {
+    const env = c.env as Env;
+    const ingestion = buildIngestionContext(env);
+    await completeDriveAuth(ingestion, { code, state });
+    return c.redirect('/', 302);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Drive OAuth callback failed.';
+    console.error('[ingestion.authCallback.GET] failed', { err: message });
+    return c.text(`Drive sign-in failed: ${message}`, 400);
+  }
+});
 
 // Each sub-router is bound to its own `$context<X>` type. RPCHandler can't
 // unify those into a single nominal context, so we erase the router's type
