@@ -1,3 +1,4 @@
+import { lintWiki } from '@domain/verification';
 import {
   createAnthropicVerifier,
   createD1LintFindingRepository,
@@ -5,8 +6,24 @@ import {
   createR2SourceTextReader,
 } from '@domain/verification/infrastructure';
 import type { VerificationContext } from '@domain/verification/interface';
-import type { ClaimReader, LintRunDispatcher } from '@domain/verification/ports';
-import type { Citation, Claim, ClaimId, WikiId, WikiPageId } from '@package/contracts/shared';
+import type {
+  AnthropicVerifier,
+  ClaimReader,
+  LintFindingRepository,
+  LintRunDispatcher,
+  LintRunRepository,
+  LintRuntimeDeps,
+  SourceTextReader,
+} from '@domain/verification/ports';
+import type {
+  Citation,
+  Claim,
+  ClaimId,
+  LintRunId,
+  WikiId,
+  WikiPageId,
+} from '@package/contracts/shared';
+import type { LintEvent } from '@package/contracts/verification';
 import type { EventBus } from '@package/shared-kernel';
 import { newId } from '@package/shared-kernel';
 
@@ -16,107 +33,88 @@ export interface VerificationBindings {
   OPEN_ROUTER_API_KEY?: string;
 }
 
-// In-memory lint dispatcher for local dev (no LINT_RUN DO yet). For the demo,
-// every `start` call copies the pre-seeded `__seed/lint` template findings
-// into a new lint_run row keyed by the requested lintRunId — so clicking
-// "Run audit" always shows the planted contradiction without burning real
-// Opus 4.7 calls. The DO-based dispatcher (createCfLintRunDispatcher) is
-// the production path; this stub holds the line until that ships.
-const SEED_TEMPLATE_LINT_RUN_ID = '33333333-3333-4333-8333-333333333333';
-const createInMemoryLintDispatcher = (db: D1Database): LintRunDispatcher => {
+const TERMINAL_KINDS: ReadonlySet<LintEvent['kind']> = new Set([
+  'LintRunFinished',
+  'LintRunFailed',
+]);
+
+/**
+ * In-process LintRunDispatcher backed by a per-lintRunId in-memory tape.
+ * `start` kicks `lintWiki` and resolves immediately so the oRPC handler
+ * doesn't block. The use-case writes findings + run rows to D1 as it goes;
+ * the tape buffers the LintEvent stream so a slightly-late SSE subscriber
+ * (the user clicks "Run audit" then the page renders the stream hook on the
+ * next paint) sees every event.
+ *
+ * For the demo this lives in the api process. The production path is a
+ * LintRunDO that holds the same tape per-instance — same protocol, different
+ * persistence story.
+ */
+const createLintDispatcher = (deps: {
+  verifier: AnthropicVerifier;
+  claims: ClaimReader;
+  sourceText: SourceTextReader;
+  runs: LintRunRepository;
+  findings: LintFindingRepository;
+  eventBus: EventBus;
+  newId: () => string;
+  now: () => Date;
+  concurrency?: number;
+}): LintRunDispatcher => {
+  interface Tape {
+    events: LintEvent[];
+    waiters: Array<() => void>;
+    finished: boolean;
+  }
+  const tapes = new Map<LintRunId, Tape>();
+  const ensureTape = (id: LintRunId): Tape => {
+    const t = tapes.get(id);
+    if (t) return t;
+    const fresh: Tape = { events: [], waiters: [], finished: false };
+    tapes.set(id, fresh);
+    return fresh;
+  };
+
   return {
     async start({ lintRunId, wikiId }) {
-      console.info(`[verification] in-memory dispatch lintRunId=${lintRunId} wikiId=${wikiId}`);
-      // Find the template run + its findings (pre-seeded via __seed/lint).
-      const template = await db
-        .prepare('SELECT * FROM lint_runs WHERE id = ?')
-        .bind(SEED_TEMPLATE_LINT_RUN_ID)
-        .first<{
-          id: string;
-          status: string;
-          total_claims: number;
-          audited: number;
-          unsupported_count: number;
-          contradicted_count: number;
-        }>();
-      if (!template) {
-        // No template seeded yet — write a finished empty run so the UI
-        // doesn't hang in 'pending'.
-        const now = new Date().toISOString();
-        await db
-          .prepare(
-            'INSERT OR REPLACE INTO lint_runs (id, wiki_id, status, total_claims, audited, unsupported_count, contradicted_count, started_at, ended_at) VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?)',
-          )
-          .bind(lintRunId, wikiId, 'finished', now, now)
-          .run();
-        return;
-      }
-      const templateFindings = await db
-        .prepare(
-          'SELECT id, wiki_page_id, claim_id, claim_json, verdict, evidence_text, cited_spans_json, correction_json FROM lint_findings WHERE lint_run_id = ?',
-        )
-        .bind(SEED_TEMPLATE_LINT_RUN_ID)
-        .all<{
-          id: string;
-          wiki_page_id: string;
-          claim_id: string;
-          claim_json: string;
-          verdict: 'supported' | 'unsupported' | 'contradicted';
-          evidence_text: string;
-          cited_spans_json: string;
-          correction_json: string | null;
-        }>();
-      const now = new Date().toISOString();
-      await db
-        .prepare(
-          'INSERT OR REPLACE INTO lint_runs (id, wiki_id, status, total_claims, audited, unsupported_count, contradicted_count, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        )
-        .bind(
-          lintRunId,
-          wikiId,
-          'finished',
-          template.total_claims,
-          template.audited,
-          template.unsupported_count,
-          template.contradicted_count,
-          now,
-          now,
-        )
-        .run();
-      for (const f of templateFindings.results) {
-        await db
-          .prepare(
-            'INSERT INTO lint_findings (id, lint_run_id, wiki_page_id, claim_id, claim_json, verdict, evidence_text, cited_spans_json, correction_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          )
-          .bind(
-            crypto.randomUUID(),
-            lintRunId,
-            f.wiki_page_id,
-            f.claim_id,
-            f.claim_json,
-            f.verdict,
-            f.evidence_text,
-            f.cited_spans_json,
-            f.correction_json,
-          )
-          .run();
-      }
+      const tape = ensureTape(lintRunId);
+      const runtimeDeps: LintRuntimeDeps = {
+        ...deps,
+        concurrency: deps.concurrency ?? 4,
+        lintDispatcher: {} as LintRunDispatcher, // unused inside lintWiki
+        async emit(event: LintEvent) {
+          tape.events.push(event);
+          if (TERMINAL_KINDS.has(event.kind)) tape.finished = true;
+          const ws = tape.waiters.splice(0);
+          for (const w of ws) w();
+        },
+      };
+
+      // Fire and forget — start resolves immediately so the oRPC handler can
+      // return the lintRunId. Errors are routed through the tape as a
+      // LintRunFailed event so subscribers see the failure instead of an
+      // un-terminated stream.
+      lintWiki(runtimeDeps, { lintRunId, wikiId }).catch(async (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        await runtimeDeps.emit({ kind: 'LintRunFailed', lintRunId, message });
+      });
     },
-    subscribe: async function* () {
-      // Empty event stream — real DO yields LintEvent's; the in-memory
-      // stub yields nothing so the SSE consumer terminates cleanly.
+    async *subscribe(lintRunId) {
+      const tape = ensureTape(lintRunId);
+      let cursor = 0;
+      while (true) {
+        while (cursor < tape.events.length) {
+          const ev = tape.events[cursor];
+          cursor++;
+          if (ev) yield ev;
+        }
+        if (tape.finished) return;
+        await new Promise<void>((resolve) => tape.waiters.push(resolve));
+      }
     },
   };
 };
 
-// Builds the api-side verification context. The dispatcher routes lint runs
-// to the LintRunDO (which holds the verifier + repos itself); the api-side
-// context provides only the read-side handlers (listFindings, getLintRun,
-// applyCorrection, plus start/streamLintEvents which delegate to the DO).
-//
-// claims: an in-process ClaimReader that reads from D1's claims+citations
-// tables directly (the orpc-claim-reader is also available but we already
-// have the bindings here, so a direct reader is faster for local dev).
 export const buildVerificationContext = (
   env: VerificationBindings,
   eventBus: EventBus,
@@ -129,7 +127,17 @@ export const buildVerificationContext = (
   const sourceText = createR2SourceTextReader(env.STORAGE);
   const runs = createD1LintRunRepository(env.DB);
   const findings = createD1LintFindingRepository(env.DB);
-  const lintDispatcher = createInMemoryLintDispatcher(env.DB);
+  const lintDispatcher = createLintDispatcher({
+    verifier,
+    claims,
+    sourceText,
+    runs,
+    findings,
+    eventBus,
+    newId,
+    now: () => clock.now(),
+    concurrency: 4,
+  });
 
   return {
     clock,
