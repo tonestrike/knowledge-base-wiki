@@ -8,6 +8,8 @@ import {
   type WikiReader,
   createAiSdkResearcher,
   createAiSdkSynthesizer,
+  createD1ConversationRepository,
+  createD1TurnRepository,
   createInMemoryDispatcher,
   createMemorySourceHashVerifier,
 } from '@domain/chat';
@@ -250,8 +252,14 @@ export interface BuildChatContextOptions {
 }
 
 export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContext => {
-  const conversations = inMemoryConversations();
-  const turns = inMemoryTurns();
+  // Prefer D1-backed repos so conversations + turns survive wrangler reloads.
+  // Falls back to in-memory only when no DB binding is present (unit tests).
+  const conversations: ConversationRepository = opts.bindings
+    ? createD1ConversationRepository(opts.bindings.db)
+    : inMemoryConversations();
+  const turns: TurnRepository = opts.bindings
+    ? createD1TurnRepository(opts.bindings.db)
+    : inMemoryTurns();
   const sourceHashes = createMemorySourceHashVerifier({
     async readSourceText() {
       return null;
