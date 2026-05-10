@@ -2,7 +2,15 @@ import type { FolderId, WikiId, WikiSchema } from '@package/contracts/shared';
 import { type ArityViolation, type Backlink, partitionBacklinksByArity } from './backlink.ts';
 import type { ConceptPage, IndexPage } from './wiki-page.ts';
 
-export interface Wiki {
+// TD4 — `Wiki` carries a phantom brand so external code cannot synthesize
+// a Wiki literal that bypasses Wiki.create's invariants and freeze. The
+// brand is `unique symbol`-based and lives in module scope — there is no
+// way to construct a value of type `WikiBrand` without going through
+// Wiki.create.
+declare const wikiBrandSymbol: unique symbol;
+type WikiBrand = { readonly [wikiBrandSymbol]: 'Wiki' };
+
+export interface Wiki extends WikiBrand {
   readonly id: WikiId;
   readonly folderId: FolderId;
   readonly schema: WikiSchema;
@@ -46,7 +54,7 @@ export const Wiki = {
       updatedAt: props.updatedAt ?? props.createdAt,
       lastCompiledAt: props.lastCompiledAt,
       pageCount: props.pageCount ?? 0,
-    });
+    }) as Wiki;
   },
   // Structurally validates that a Concept/Index page's pageType is one of
   // the wiki's schema.pageTypes — the orchestrator must call this before
@@ -71,6 +79,6 @@ export const Wiki = {
     return partitionBacklinksByArity(candidates, wiki.schema.relations);
   },
   recordCompile(wiki: Wiki, at: string, pageCount: number): Wiki {
-    return Object.freeze({ ...wiki, updatedAt: at, lastCompiledAt: at, pageCount });
+    return Object.freeze({ ...wiki, updatedAt: at, lastCompiledAt: at, pageCount }) as Wiki;
   },
 };

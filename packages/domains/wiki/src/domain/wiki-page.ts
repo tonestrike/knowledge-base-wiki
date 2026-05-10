@@ -3,7 +3,20 @@ import type { Backlink } from './backlink.ts';
 
 export type WikiPageSubtype = 'Concept' | 'Summary' | 'Answer' | 'Index';
 
-interface BasePage {
+// TD4 — phantom brand makes WikiPage.{concept,summary,answer,index} the
+// only constructors. External code can read fields off a WikiPage but
+// cannot synthesize a literal that bypasses freeze + invariant checks.
+declare const wikiPageBrandSymbol: unique symbol;
+type WikiPageBrand = { readonly [wikiPageBrandSymbol]: 'WikiPage' };
+
+// Factory-arg helper: drop the brand AND the fields the factory itself
+// computes/adds. Callers never see the brand symbol.
+type FactoryArgs<P, OmittedKeys extends keyof P> = Omit<
+  P,
+  OmittedKeys | typeof wikiPageBrandSymbol
+>;
+
+interface BasePage extends WikiPageBrand {
   readonly id: WikiPageId;
   readonly wikiId: WikiId;
   readonly subtype: WikiPageSubtype;
@@ -60,7 +73,9 @@ const collectCitations = (claims: ReadonlyArray<Claim>): ReadonlyArray<Citation>
 
 export const WikiPage = {
   concept(
-    props: Omit<ConceptPage, 'subtype' | 'citations' | 'backlinks'> & { backlinks?: Backlink[] },
+    props: FactoryArgs<ConceptPage, 'subtype' | 'citations' | 'backlinks'> & {
+      backlinks?: Backlink[];
+    },
   ): ConceptPage {
     if (!props.pageType) throw new Error('ConceptPage requires a pageType');
     return Object.freeze({
@@ -75,10 +90,12 @@ export const WikiPage = {
       citations: collectCitations(props.claims),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),
       claims: Object.freeze([...props.claims]),
-    });
+    }) as ConceptPage;
   },
   summary(
-    props: Omit<SummaryPage, 'subtype' | 'citations' | 'backlinks'> & { backlinks?: Backlink[] },
+    props: FactoryArgs<SummaryPage, 'subtype' | 'citations' | 'backlinks'> & {
+      backlinks?: Backlink[];
+    },
   ): SummaryPage {
     return Object.freeze({
       id: props.id,
@@ -92,10 +109,12 @@ export const WikiPage = {
       citations: collectCitations(props.claims),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),
       claims: Object.freeze([...props.claims]),
-    });
+    }) as SummaryPage;
   },
   answer(
-    props: Omit<AnswerPage, 'subtype' | 'citations' | 'backlinks'> & { backlinks?: Backlink[] },
+    props: FactoryArgs<AnswerPage, 'subtype' | 'citations' | 'backlinks'> & {
+      backlinks?: Backlink[];
+    },
   ): AnswerPage {
     return Object.freeze({
       id: props.id,
@@ -109,10 +128,10 @@ export const WikiPage = {
       citations: collectCitations(props.claims),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),
       claims: Object.freeze([...props.claims]),
-    });
+    }) as AnswerPage;
   },
   index(
-    props: Omit<IndexPage, 'subtype' | 'citations' | 'claims' | 'body' | 'backlinks'> & {
+    props: FactoryArgs<IndexPage, 'subtype' | 'citations' | 'claims' | 'body' | 'backlinks'> & {
       backlinks?: Backlink[];
     },
   ): IndexPage {
@@ -133,6 +152,6 @@ export const WikiPage = {
       citations: Object.freeze([] as Citation[]),
       backlinks: Object.freeze([...(props.backlinks ?? [])]),
       body,
-    });
+    }) as IndexPage;
   },
 };

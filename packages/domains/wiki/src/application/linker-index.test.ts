@@ -1,23 +1,21 @@
 import { describe, expect, it } from 'bun:test';
 import { wikiId, wikiPageId } from '@package/contracts/shared';
-import type { ConceptPage } from '../domain/wiki-page.ts';
+import { type ConceptPage, WikiPage } from '../domain/wiki-page.ts';
 import { buildIndexes } from './build-indexes.ts';
 import { resolveBacklinks } from './resolve-backlinks.ts';
 
 const WID = wikiId('44444444-2222-4333-8444-555555555555');
-const concept = (id: string, pageType: string, title: string, body?: string): ConceptPage => ({
-  id: wikiPageId(id),
-  wikiId: WID,
-  subtype: 'Concept',
-  pageType,
-  slug: title.toLowerCase().replaceAll(' ', '-'),
-  title,
-  body: body ?? 'Refers to [Q3 board](/dddddddd-1111-4222-8333-444444444450).',
-  claims: [],
-  citations: [],
-  backlinks: [],
-  updatedAt: '2026-05-09T12:00:00.000Z',
-});
+const concept = (id: string, pageType: string, title: string, body?: string): ConceptPage =>
+  WikiPage.concept({
+    id: wikiPageId(id),
+    wikiId: WID,
+    pageType,
+    slug: title.toLowerCase().replaceAll(' ', '-'),
+    title,
+    body: body ?? 'Refers to [Q3 board](/dddddddd-1111-4222-8333-444444444450).',
+    claims: [],
+    updatedAt: '2026-05-09T12:00:00.000Z',
+  });
 
 describe('resolveBacklinks', () => {
   it('infers backlinks from markdown link targets', () => {
