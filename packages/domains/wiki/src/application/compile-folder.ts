@@ -341,6 +341,7 @@ export async function compileFolder(
       payload: {
         compileRunId: input.compileRunId,
         wikiId: wid,
+        finishedAt: endedAt,
         pageCount: totalPages,
       },
     });
