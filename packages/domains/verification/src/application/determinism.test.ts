@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { type Claim, citationId, claimId, sourceId, wikiPageId } from '@package/contracts/shared';
+import { z } from 'zod';
+import recordedFixture from './__fixtures__/determinism-trials.json';
 import { auditClaim } from './audit-claim.ts';
 import type { AnthropicVerifier, SourceTextReader } from './ports.ts';
 
@@ -30,22 +32,29 @@ const PLANTED_CITED_TEXT =
 const RUN_LIVE = process.env.RUN_DETERMINISM_TESTS === '1';
 const TRIALS = 10;
 
+// Mirror of `VerdictSchema` in `infrastructure/anthropic-verifier.ts`. Replay
+// validates the fixtures against this so a drift between the fixture file and
+// the production schema fails fast (PR #6 silent-failure-hunter finding 11).
+const RecordedTrial = z.object({
+  verdict: z.enum(['supported', 'unsupported', 'contradicted']),
+  evidenceText: z.string().min(1).max(2000),
+  correction: z
+    .object({
+      replacementText: z.string().min(1).max(2000),
+      newCitationLabel: z.string().min(1).max(200).optional(),
+    })
+    .optional(),
+});
+
 describe('Verifier determinism on the planted contradiction', () => {
-  // Default CI path: replay a recorded 10-trial run captured against
-  // claude-opus-4-7 at temperature 0 on the 1.A spike. Asserts that the
-  // production prompt + claim shape, when fed the canonical recorded verdicts,
-  // produces 10/10 non-supported verdicts. This proves the wiring; the live
-  // path below proves the model.
+  // Default CI path: replay the recorded 10-trial fixture captured against
+  // claude-opus-4-7 at temperature 0 on the 1.A spike. Each trial is
+  // re-validated against the production VerdictSchema mirror so drift between
+  // the fixture and the live schema fails the suite. To re-record, follow the
+  // instructions in __fixtures__/determinism-trials.json.
   it('catches the planted NRR=110% / cited-says-105% contradiction in 10/10 recorded trials', async () => {
-    const recordedVerdicts: Array<{
-      verdict: 'supported' | 'unsupported' | 'contradicted';
-      evidenceText: string;
-      correction: { replacementText: string };
-    }> = Array.from({ length: TRIALS }).map(() => ({
-      verdict: 'contradicted',
-      evidenceText: 'Q3 NRR landed at 105%, four points below the 109% target.',
-      correction: { replacementText: 'Q3 NRR was 105%, missing the 109% target.' },
-    }));
+    const recordedVerdicts = recordedFixture.trials.map((t) => RecordedTrial.parse(t));
+    expect(recordedVerdicts).toHaveLength(TRIALS);
 
     let trial = 0;
     const verifier: AnthropicVerifier = {
