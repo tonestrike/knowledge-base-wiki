@@ -26,6 +26,19 @@ This is the canonical glossary for the **wiki** bounded context. Every term used
 | CompileRun | A single invocation of `Compile`. Has status, started-at, ended-at, schema-inferred-at; emits `CompileEvent`s. | |
 | CompileEvent | A streamed event during a `CompileRun`. e.g. `SchemaInferred`, `SourceIngested`, `PageDrafted`, `BacklinkResolved`, `IndexBuilt`, `CompileFinished`. Drives the live trace UI. | |
 | Compiler | The composite agent performing `Compile`: `SchemaInferrer` + Planner + `Researcher`s + `Drafter` + `Linker` + `IndexBuilder`. | Application-layer concept. |
+| Cardinality | The arity attribute of a `Relation` (one-to-one, one-to-many, many-to-one, many-to-many). | Value object on `Relation`. |
+| IndexEntry | One row in an `IndexPage` — a `(WikiPageId, title, summary?)` tuple. | Value object inside `IndexPage`. |
+| ResearchFinding | A typed extraction emitted by a `Researcher` for a single `(Source, PageType)` pair. Carries the verbatim evidence and its byte range. | Application-layer DTO. |
+| Drafter | LLM agent that composes `ConceptPage`/`SummaryPage` markdown from `ResearchFinding`s. | Sonnet 4.6. |
+| Planner | LLM agent that decomposes a `CompileRun` into per-`Source` research tasks against the `WikiSchema`. | Haiku 4.5. |
+| LlmClient | Application port exposing `generateObject(...)` over the Vercel AI SDK + OpenRouter. Each agent calls it. | Infrastructure: `infrastructure/llm-client.ts`. |
+| CompileRunDispatcher | Application port that boots a `CompileRun` on a Durable Object and exposes a stream of `CompileEvent`s. | Bridges interface ↔ `CompileRunDO`. |
+| CompileRunDO | Durable Object that hosts a single `CompileRun` so it can outlive Workers' 30s request limit. Persists the event tape. | Per spec §3.1. |
+| SourceReader | Application port exposing the per-`Folder` `Source` listing and the per-`Source` extracted text — read across the contract seam from ingestion's R2/D1. | Read-only: wiki never writes to ingestion's storage. |
+| WikiRepository | Application port for `Wiki` aggregate persistence. | D1 adapter. |
+| WikiPageRepository | Application port for `WikiPage` persistence (rows, claims, citations, backlinks; markdown body in R2). | D1 + R2 adapter. |
+| CompileRunRepository | Application port for `CompileRun` aggregate persistence. | D1 adapter. |
+| WikiPageBodyStorage | Application port for `WikiPage` markdown body persistence. | R2 adapter. |
 
 ## Banned synonyms
 

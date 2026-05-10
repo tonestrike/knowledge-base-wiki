@@ -69,6 +69,29 @@ export const BacklinkResolved = z.object({
   relationName: z.string().optional(),
 });
 
+// SF5 / TD1 — arity violations are dropped from the Wiki, but emitted as
+// a typed event so downstream surfaces (live theater + 2.D verification)
+// can show "we tried to link X→Y as relation R but cardinality forbade it".
+export const BacklinkArityViolated = z.object({
+  kind: z.literal('BacklinkArityViolated'),
+  compileRunId: CompileRunId,
+  fromPageId: WikiPageId,
+  toPageId: WikiPageId,
+  relationName: z.string(),
+  cardinality: z.string(),
+  reason: z.string(),
+});
+
+// SF1 — per-source Researcher failures don't kill the run; we drop the
+// source's findings and emit one ResearchFailed so the user sees which
+// source broke and why.
+export const ResearchFailed = z.object({
+  kind: z.literal('ResearchFailed'),
+  compileRunId: CompileRunId,
+  sourceId: SourceId,
+  message: z.string(),
+});
+
 export const IndexBuilt = z.object({
   kind: z.literal('IndexBuilt'),
   compileRunId: CompileRunId,
@@ -94,6 +117,8 @@ export const CompileEvent = z.discriminatedUnion('kind', [
   SchemaInferredEvent,
   PageDrafted,
   BacklinkResolved,
+  BacklinkArityViolated,
+  ResearchFailed,
   IndexBuilt,
   CompileFailed,
   CompileFinishedEvent,

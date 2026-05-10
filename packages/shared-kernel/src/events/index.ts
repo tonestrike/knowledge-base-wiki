@@ -5,9 +5,11 @@
 //
 // Each bounded context's slice that introduces a new event extends
 // `DomainEventMap` here. Slice 2.A owns `SourceIngested` /
-// `SourceIngestionFailed`. Slices 2.D / 3.x / chat will add their own entries
-// (e.g. `CorrectionAccepted`, `CompileFinished`, `AnswerProduced`) when their
-// PRs land.
+// `SourceIngestionFailed`; slice 2.B owns `CompileFinished`. Slices 2.D /
+// 3.x / chat will add their own entries (e.g. `CorrectionAccepted`,
+// `AnswerProduced`) when their PRs land — until then, 2.B's cross-context
+// subscribers register against the placeholder shapes below so flipping
+// the handlers on doesn't require rewiring the bus.
 export interface DomainEventMap {
   SourceIngested: {
     sourceId: string;
@@ -24,16 +26,15 @@ export interface DomainEventMap {
     reason: 'fetch' | 'extract' | 'storage' | 'persist' | 'unknown';
     message: string;
   };
-  // Slice 2.D — verification context. The wiki context emits CompileFinished
-  // when a CompileRun completes; verification subscribes to auto-trigger a
-  // LintRun for the affected Wiki. LintRunFinished / LintRunFailed mirror the
-  // run-level outcome so downstream telemetry / UIs can react without polling.
-  // CorrectionAccepted is emitted when a user applies a Correction; the wiki
-  // context's handler patches the WikiPage paragraph (eventually consistent).
+  // CompileFinished — wiki context emits when a CompileRun completes;
+  // verification subscribes to auto-trigger a LintRun for the affected Wiki.
+  // pageCount surfaces alongside finishedAt so downstream consumers can size
+  // the lint run without a follow-up read.
   CompileFinished: {
     compileRunId: string;
     wikiId: string;
     finishedAt: string;
+    pageCount: number;
   };
   LintRunFinished: {
     lintRunId: string;
@@ -47,11 +48,20 @@ export interface DomainEventMap {
     failureMessage: string;
     failedAt: string;
   };
+  // CorrectionAccepted — emitted when a user applies a Correction; wiki
+  // context's handler patches the WikiPage paragraph (eventually consistent).
   CorrectionAccepted: {
     lintFindingId: string;
     wikiPageId: string;
     replacementText: string;
     acceptedAt: string;
+  };
+  // 2.C placeholder — chat context emits this when it produces an Answer.
+  // The wiki context optionally files the Answer as an AnswerPage (v1.1).
+  // Shape will firm up when 2.C lands; v1 is a loud stub.
+  AnswerProduced: {
+    answerId: string;
+    sessionId: string;
   };
 }
 

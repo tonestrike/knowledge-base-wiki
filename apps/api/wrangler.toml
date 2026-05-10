@@ -33,6 +33,16 @@ id = "TODO_run_wrangler_kv_create"
 binding = "STORAGE"
 bucket_name = "tenex"
 
+# CompileRunDO orchestrates the multi-minute Compile so it can outlive the
+# 30s Workers request limit. Per spec §3.1.
+[[durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CompileRunDO"]
+
 [env.dev]
 [env.dev.vars]
 ENVIRONMENT = "development"
@@ -50,6 +60,10 @@ id = "TODO_run_wrangler_kv_create"
 binding = "STORAGE"
 bucket_name = "tenex"
 
+[[env.dev.durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
+
 # Production: same Worker serves /rpc/* (api) and apps/web/dist (SPA).
 # Per ADR-0002. Scoped to env.prod so `wrangler dev` (top-level config)
 # never touches the assets dir, which may not exist locally.
@@ -61,6 +75,10 @@ ENVIRONMENT = "production"
 
 [env.prod.observability]
 enabled = true
+
+[[env.prod.durable_objects.bindings]]
+name = "COMPILE_RUN"
+class_name = "CompileRunDO"
 
 [env.prod.assets]
 directory = "../web/dist"

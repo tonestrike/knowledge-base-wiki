@@ -36,6 +36,7 @@ describe('subscribeCompileFinished', () => {
         compileRunId: compileRunId('99999999-2222-4333-8444-555555555555'),
         wikiId: targetWiki,
         finishedAt: '2026-05-09T12:00:00.000Z',
+        pageCount: 12,
       },
     });
 
@@ -70,6 +71,7 @@ describe('subscribeCompileFinished', () => {
         compileRunId: compileRunId('99999999-2222-4333-8444-555555555555'),
         wikiId: wikiId('44444444-2222-4333-8444-555555555555'),
         finishedAt: '2026-05-09T12:00:00.000Z',
+        pageCount: 12,
       },
     });
 
