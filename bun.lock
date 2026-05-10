@@ -24,6 +24,7 @@
         "@domain/ingestion": "workspace:*",
         "@domain/verification": "workspace:*",
         "@domain/wiki": "workspace:*",
+        "@openrouter/ai-sdk-provider": "^0.7.2",
         "@orpc/server": "^1.14.2",
         "@package/contracts": "workspace:*",
         "@package/shared-kernel": "workspace:*",
