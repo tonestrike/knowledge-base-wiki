@@ -6,12 +6,12 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App.tsx';
 
 const enableMocks = async () => {
-  if (import.meta.env.DEV) {
+  // MSW is opt-in via VITE_USE_MSW=true so the real API isn't shadowed by
+  // the mock service worker in dev. Earlier this was always-on in dev,
+  // which meant every /rpc/* call returned an unhandled-request error and
+  // the page silently broke against the running wrangler backend.
+  if (import.meta.env.DEV && import.meta.env.VITE_USE_MSW === 'true') {
     const { worker } = await import('./mocks/browser.ts');
-    // SF6 — error on any unhandled `/rpc/*` request so a missed mock
-    // route in dev blows up loudly instead of silently returning a 404.
-    // Non-rpc traffic (HTML, vite assets, /api/*) is still bypassed so
-    // the rest of the app works normally.
     await worker.start({
       onUnhandledRequest: (req, print) => {
         if (new URL(req.url).pathname.startsWith('/rpc/')) {
@@ -19,6 +19,17 @@ const enableMocks = async () => {
         }
       },
     });
+    return;
+  }
+  // If a previous session installed the service worker, unregister it so a
+  // hard reload doesn't leave the page intercepted forever.
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const r of registrations) {
+      if (r.active?.scriptURL.endsWith('/mockServiceWorker.js')) {
+        await r.unregister();
+      }
+    }
   }
 };
 
