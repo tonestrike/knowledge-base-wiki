@@ -24,9 +24,11 @@ describe('six spectacular elements render without throwing', () => {
 
   it('WikiPageView (magazine layout) renders title and citation chip', () => {
     const page = mockWikiPage();
-    const { getByRole, getByText } = render(wrap(<WikiPageView page={page} />));
+    const { getByRole, getAllByText } = render(wrap(<WikiPageView page={page} />));
     expect(getByRole('heading', { level: 1, name: page.title })).toBeTruthy();
-    expect(getByText(/Q3 minutes/)).toBeTruthy();
+    // The citation appears in both the inline body (or orphans footer) and
+    // the sidebar — assert at least one occurrence.
+    expect(getAllByText(/Q3 minutes/).length).toBeGreaterThan(0);
   });
 
   it('CompileTheater renders three lanes', () => {
