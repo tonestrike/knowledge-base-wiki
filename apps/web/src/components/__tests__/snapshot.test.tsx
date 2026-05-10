@@ -12,7 +12,7 @@ import { LintRibbon } from '../lint/lint-ribbon.tsx';
 import { WikiPageView } from '../wiki-page/wiki-page.tsx';
 
 const wrap = (ui: React.ReactNode) => (
-  <LiveModeProvider initial={false}>
+  <LiveModeProvider initial={{ kind: 'static' }}>
     <CitationFlightProvider>{ui}</CitationFlightProvider>
   </LiveModeProvider>
 );
@@ -65,27 +65,51 @@ describe('six spectacular elements render without throwing', () => {
 });
 
 describe('SpanShimmer span-scoping (spec §4.3 #6)', () => {
+  const VALID_A = 'aaaaaaaa-1111-4222-8333-444444444444';
+  const VALID_B = 'bbbbbbbb-1111-4222-8333-444444444444';
+
   it('returns a single plain run when no markers are present', () => {
     const runs = tokenizeProse('Q3 NRR landed at 110%.');
     expect(runs).toHaveLength(1);
-    expect(runs[0]?.citationId).toBeUndefined();
+    expect(runs[0]?.kind).toBe('plain');
   });
 
   it('extracts cited runs from [[cite:id]]…[[/cite]] markers', () => {
     const runs = tokenizeProse(
-      'Q3 NRR landed at [[cite:abc-123]]110%[[/cite]], four points above target.',
+      `Q3 NRR landed at [[cite:${VALID_A}]]110%[[/cite]], four points above target.`,
     );
-    expect(runs.map((r) => r.text).join('')).toBe(
-      'Q3 NRR landed at 110%, four points above target.',
-    );
-    const cited = runs.filter((r) => r.citationId);
+    const cited = runs.filter((r) => r.kind === 'cited');
     expect(cited).toHaveLength(1);
-    expect(cited[0]?.citationId).toBe('abc-123');
-    expect(cited[0]?.text).toBe('110%');
+    const first = cited[0];
+    expect(first?.kind === 'cited' ? String(first.citationId) : null).toBe(VALID_A);
+    expect(first?.text).toBe('110%');
   });
 
   it('handles multiple cited runs in a single segment', () => {
-    const runs = tokenizeProse('[[cite:a]]One[[/cite]] and [[cite:b]]two[[/cite]] cites.');
-    expect(runs.filter((r) => r.citationId)).toHaveLength(2);
+    const runs = tokenizeProse(
+      `[[cite:${VALID_A}]]One[[/cite]] and [[cite:${VALID_B}]]two[[/cite]] cites.`,
+    );
+    expect(runs.filter((r) => r.kind === 'cited')).toHaveLength(2);
+  });
+
+  // SF11 — the malformed pathologies must surface as `broken` runs so
+  // bad markers no longer silently disappear from the rendered prose.
+  it('emits broken run for invalid (non-UUID) citation id', () => {
+    const runs = tokenizeProse('foo [[cite:abc-123]]inner[[/cite]] bar');
+    const broken = runs.find((r) => r.kind === 'broken');
+    expect(broken).toBeTruthy();
+    expect(broken?.text).toBe('inner');
+  });
+
+  it('emits broken run for unterminated cite marker', () => {
+    const runs = tokenizeProse(`prefix [[cite:${VALID_A}]] no close tag here`);
+    const broken = runs.find((r) => r.kind === 'broken');
+    expect(broken).toBeTruthy();
+  });
+
+  it('emits broken run for empty cite content', () => {
+    const runs = tokenizeProse(`prefix [[cite:${VALID_A}]][[/cite]] suffix`);
+    const broken = runs.find((r) => r.kind === 'broken');
+    expect(broken).toBeTruthy();
   });
 });

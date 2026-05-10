@@ -113,7 +113,8 @@ const sections: Section[] = [
 ];
 
 export function DesignSystemRoute() {
-  const { live, setLive } = useLiveMode();
+  const { mode, setMode } = useLiveMode();
+  const live = mode.kind === 'live';
   return (
     <main className="mx-auto max-w-6xl space-y-16 px-6 py-12">
       <header className="flex items-start justify-between">
@@ -131,7 +132,7 @@ export function DesignSystemRoute() {
             <input
               type="checkbox"
               checked={live}
-              onChange={(e) => setLive(e.target.checked)}
+              onChange={(e) => setMode({ kind: e.target.checked ? 'live' : 'static' })}
               className="accent-accent"
             />
             <span className="font-mono uppercase tracking-widest">
@@ -170,10 +171,23 @@ function findArtifactFixture(kind: ArtifactKind): Artifact | undefined {
  * Minimal fallbacks for kinds the contract mocks don't yet exercise. Keeps
  * the gallery exhaustive (eight kinds × at least one fixture each) so the
  * snapshot story doesn't regress when the registry is extended.
+ *
+ * The switch is now exhaustive (SF12) — adding a new ArtifactKind blocks
+ * at typecheck via the `assertNever` arm, instead of silently rewriting
+ * the new kind into a ComparisonTable.
  */
 function synthesizeFixture(kind: ArtifactKind): Artifact {
   const citations = [FIXTURE_CITATION];
   switch (kind) {
+    case 'ComparisonTable':
+      return {
+        kind: 'ComparisonTable',
+        props: {
+          columns: ['Metric', 'Value'],
+          rows: [{ cells: [{ value: 'Q3 NRR' }, { value: '110%' }] }],
+        },
+        citations,
+      };
     case 'Timeline':
       return {
         kind: 'Timeline',
@@ -266,15 +280,9 @@ function synthesizeFixture(kind: ArtifactKind): Artifact {
         },
         citations,
       };
-    default:
-      // ComparisonTable already comes from mockTurn(); fall through to a minimal table.
-      return {
-        kind: 'ComparisonTable',
-        props: {
-          columns: ['Metric', 'Value'],
-          rows: [{ cells: [{ value: 'Q3 NRR' }, { value: '110%' }] }],
-        },
-        citations,
-      };
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
   }
 }
