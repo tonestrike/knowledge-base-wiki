@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { folderId, contentHash as parseContentHash, sourceId } from '@package/contracts/shared';
+import {
+  folderId,
+  isoTimestamp,
+  contentHash as parseContentHash,
+  sourceId,
+} from '@package/contracts/shared';
+import { Manifest } from '../domain/manifest.ts';
 import { Source } from '../domain/source.ts';
 import { SourceNotFoundError, getSource } from './get-source.ts';
 import { listSources } from './list-sources.ts';
@@ -11,16 +17,16 @@ const sid = sourceId('11111111-2222-4333-8444-000000000001');
 const sample = Source.create({
   id: sid,
   folderId: fid,
-  manifest: {
+  manifest: Manifest.create({
     driveFileId: 'drive:abc',
     filename: 'q3.pdf',
     mime: 'application/pdf',
     sizeBytes: 1,
-    modifiedAt: '2026-05-09T11:00:00.000Z',
+    modifiedAt: isoTimestamp('2026-05-09T11:00:00.000Z'),
     pageCount: 1,
-  },
+  }),
   contentHash: parseContentHash('sha256:abc'),
-  fetchedAt: '2026-05-09T12:00:00.000Z',
+  fetchedAt: isoTimestamp('2026-05-09T12:00:00.000Z'),
 });
 
 const makeDeps = (): IngestionDeps => ({
