@@ -1,5 +1,6 @@
 import type { UserId } from '@package/contracts/shared';
 import type { OAuthRepository } from '../application/ports.ts';
+import { OAuthTokenUnreadable } from '../application/ports.ts';
 import type { D1DatabaseLike } from './cloudflare-bindings.ts';
 
 export interface SecretCipher {
@@ -35,10 +36,16 @@ export const createD1OAuthRepository = (
       .bind(userId)
       .first<TokenRow>();
     if (!r) return null;
-    return {
-      refreshToken: await cipher.decrypt(r.encrypted_refresh_token),
-      accessToken: await cipher.decrypt(r.encrypted_access_token),
-      expiresAt: r.expires_at,
-    };
+    // SF2: classify decrypt failure separately from "no row". A decrypt fail
+    // means the row exists but the cipher rejects it (key rotation, db
+    // corruption, AAD mismatch). Re-auth is the recovery; opaque 500s aren't.
+    try {
+      const refreshToken = await cipher.decrypt(r.encrypted_refresh_token);
+      const accessToken = await cipher.decrypt(r.encrypted_access_token);
+      return { refreshToken, accessToken, expiresAt: r.expires_at };
+    } catch (err) {
+      console.error('[oauth] decrypt failed for user', userId, err);
+      throw new OAuthTokenUnreadable(userId, err);
+    }
   },
 });
