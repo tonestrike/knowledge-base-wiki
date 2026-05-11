@@ -21,39 +21,47 @@ ingest time. Cheap questions, deeper answers.
 
 ## System at a glance
 
+Every node below links to the implementation file (click the
+shape to jump to the source line on GitHub).
+
 ```mermaid
 flowchart LR
-    User((User)) --> Web["apps/web (React + Vite)"]
-    Web -->|"oRPC over HTTP"| API["apps/api (Hono on Workers)"]
+    User((User)) --> Web["apps/web App.tsx"]
+    Web -->|"oRPC over HTTP"| API["apps/api index.ts"]
 
-    API --> Ingestion["@domain/ingestion"]
-    API --> Wiki["@domain/wiki"]
-    API --> Chat["@domain/chat"]
-    API --> Verification["@domain/verification"]
+    API --> Wiki["@domain/wiki compileFolder"]
+    API --> Chat["@domain/chat runChatTurn"]
 
-    Ingestion -->|"Drive walk + extract"| R2[("R2 sources")]
-    Ingestion --> D1S[("D1 sources")]
-
-    Wiki -->|"compile pipeline"| CompileDO["CompileRunDO (per-run state)"]
-    CompileDO --> OpenRouter["OpenRouter — Sonnet 4.6 / Haiku 4.5"]
+    Wiki -->|"per-compile DO"| CompileDO["CompileRunDO"]
+    CompileDO --> OpenRouter["OpenRouter / Sonnet + Haiku"]
     CompileDO --> R2W[("R2 wiki_pages")]
     CompileDO --> D1W[("D1 wikis + pages + citations")]
 
-    Chat -->|"per-turn"| ChatDO["ChatTurnDO (per-turn tape)"]
+    Chat -->|"per-turn DO"| ChatDO["ChatTurnDO"]
     ChatDO --> OpenRouter
     ChatDO --> D1W
     ChatDO --> R2W
-    ChatDO --> R2
+
+    click Web "../../apps/web/src/App.tsx" "App.tsx — wraps router + ChatDock in flex layout"
+    click API "../../apps/api/src/index.ts" "api entrypoint"
+    click Wiki "../../packages/domains/wiki/src/application/compile-folder.ts#L147" "compileFolder — the 5-stage orchestrator"
+    click Chat "../../packages/domains/chat/src/application/run-chat-turn.ts#L82" "runChatTurn — the chat-turn loop"
+    click CompileDO "../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts" "CompileRunDO factory"
+    click ChatDO "../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L87" "createChatTurnDOClass"
 
     classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
     classDef ctx fill:#2a1f3d,stroke:#a878d8,color:#fff;
     classDef store fill:#1f3d2a,stroke:#78d898,color:#fff;
     classDef do_ fill:#3d2a1f,stroke:#d89878,color:#fff;
     class User,Web,API edge;
-    class Ingestion,Wiki,Chat,Verification ctx;
-    class R2,R2W,D1S,D1W store;
+    class Wiki,Chat ctx;
+    class R2W,D1W store;
     class CompileDO,ChatDO do_;
 ```
+
+(`@domain/verification` exists — post-compile audit context that lints
+each Claim against its Citation — but it's orthogonal to the
+perspective story so it's omitted here.)
 
 ---
 
@@ -83,21 +91,20 @@ Below, the actual code that powers each step.
 
 ## 1. Perspective UX — pick a lens before compile
 
-**Where the user picks:** [`apps/web/src/routes/ingest.tsx`](../../apps/web/src/routes/ingest.tsx)
-
 After ingest finishes, the route pauses on a `'choosing-perspective'`
-phase (see the `phase` state machine in that file). It renders a
-`<PerspectivePicker>` with:
+phase and renders the picker:
 
-- A vertical radio-list of 5 presets (Business / Novel / Engineering /
-  Research / Custom) loaded from
-  [`apps/web/src/lib/perspective-presets.ts`](../../apps/web/src/lib/perspective-presets.ts)
-- An editable textarea pre-filled with the chosen preset's full prompt
-  text. **The user sees and can edit exactly what the model will be
-  told** before kicking off compile.
+- **State machine + page chrome:**
+  [`ingest.tsx`](../../apps/web/src/routes/ingest.tsx) — the route component
+- **Picker component:**
+  [`ingest.tsx:246` `PerspectivePicker`](../../apps/web/src/routes/ingest.tsx#L246) — left-column radio list + right-column textarea
+- **Preset bodies:**
+  [`perspective-presets.ts:37` `PERSPECTIVE_PRESETS`](../../apps/web/src/lib/perspective-presets.ts#L37) — 5 presets (Business / Novel / Engineering / Research / Custom)
 
-The "Custom" preset is just an empty starting canvas. The "Skip"
-button runs a generic compile with no perspective.
+The user sees and can edit **exactly what the model will be told**
+before kicking off compile. The "Custom" preset is just an empty
+starting canvas; the "Skip" button runs a generic compile with no
+perspective.
 
 **Why presets are full editable text (not labels mapped to fixed
 prompts):** transparency. The user can add domain notes inline (e.g.
@@ -108,43 +115,58 @@ prompts):** transparency. The user can add domain notes inline (e.g.
 ## 2. The compile pipeline
 
 **Entry point:** the user clicks "Compile with this perspective →"
-which calls `chat.startCompile({ folderId, perspective })` (the oRPC
+which calls `wiki.startCompile({ folderId, perspective })` (the oRPC
 procedure). That's wired in:
 
-- Contract: [`packages/contracts/src/wiki/compile.ts`](../../packages/contracts/src/wiki/compile.ts)
-  — `StartCompileInput` has an optional `perspective: z.string().min(1).max(4000).optional()`
-- Handler: [`packages/domains/wiki/src/interface/index.ts`](../../packages/domains/wiki/src/interface/index.ts)
-  — `startCompile` hands off to a `CompileRunDispatcher.start({ compileRunId, folderId, perspective })`
-- DO dispatcher client: [`packages/domains/wiki/src/infrastructure/cf-compile-run-dispatcher.ts`](../../packages/domains/wiki/src/infrastructure/cf-compile-run-dispatcher.ts)
-  — POSTs `/start` to a Durable Object, anchors the run with
-  `waitUntil` so it survives the response
+- **Contract:**
+  [`compile.ts:31` `StartCompileInput`](../../packages/contracts/src/wiki/compile.ts#L31) — Zod schema with optional `perspective: z.string().min(1).max(4000).optional()`
+- **Handler:**
+  [`interface/index.ts:59` `startCompile`](../../packages/domains/wiki/src/interface/index.ts#L59) — thin oRPC wrapper that mints a `compileRunId` and hands off to the dispatcher
+- **DO dispatcher client:**
+  [`cf-compile-run-dispatcher.ts`](../../packages/domains/wiki/src/infrastructure/cf-compile-run-dispatcher.ts) — POSTs `/start` to the CompileRunDO, anchors via `waitUntil` so the run outlives the response
 
-**The CompileRunDO** ([`packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts))
+**The CompileRunDO** ([`compile-run-do.ts`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts))
 hosts the multi-minute compile. Its `/start` calls
 `state.waitUntil(this.run(cmd))` and its `/subscribe` streams the
 event tape as SSE. This is necessary because Workers terminate after
 the response; a DO is the only addressable home that survives.
 
-The run executes [`compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts)
-which orchestrates **five stages**, each backed by an LLM call.
+The run executes
+[`compile-folder.ts:147` `compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L147),
+the orchestrator that drives **five stages**, each backed by an LLM call.
+
+Click any stage box to jump to its implementation.
 
 ```mermaid
 flowchart TD
-    Start([CompileStarted]) --> S1["A · SchemaInferrer<br/>reads head sources, picks PageTypes"]
-    S1 --> S2["B · Planner<br/>assigns PageTypes per source"]
-    S2 --> S3["C · Researcher<br/>extracts findings per (source, pageType)"]
-    S3 --> S4["D · Drafter<br/>one page per (pageType, title) bucket"]
-    S4 --> S5["E · Linker + IndexBuilder<br/>resolves [[backlinks]], builds indexes"]
-    S5 --> S6["Narrator<br/>opinionated thesis + glossary"]
-    S6 --> End([CompileFinished])
+    Start([CompileStarted]) --> S1["A · SchemaInferrer<br/>infer-schema.ts"]
+    S1 --> S2["B · Planner<br/>plan-compile.ts"]
+    S2 --> S3["C · Researcher<br/>research-source.ts"]
+    S3 --> S4["D · Drafter<br/>draft-page.ts"]
+    S4 --> S5["E1 · Linker<br/>resolve-backlinks.ts"]
+    S5 --> S6["E2 · IndexBuilder<br/>build-indexes.ts"]
+    S6 --> S7["E3 · Narrator<br/>narrate-indexes.ts"]
+    S7 --> End([CompileFinished])
+
+    click S1 "../../packages/domains/wiki/src/application/infer-schema.ts#L66" "inferSchema (Sonnet 4.6)"
+    click S2 "../../packages/domains/wiki/src/application/plan-compile.ts#L71" "planCompile (Haiku 4.5)"
+    click S3 "../../packages/domains/wiki/src/application/research-source.ts#L89" "researchSource (Haiku 4.5, per source)"
+    click S4 "../../packages/domains/wiki/src/application/draft-page.ts#L129" "draftPage (Sonnet 4.6, per bucket)"
+    click S5 "../../packages/domains/wiki/src/application/resolve-backlinks.ts#L15" "resolveBacklinks"
+    click S6 "../../packages/domains/wiki/src/application/build-indexes.ts#L27" "buildIndexes"
+    click S7 "../../packages/domains/wiki/src/application/narrate-indexes.ts#L64" "narrateIndexes (Haiku 4.5)"
 
     classDef stage fill:#2a1f3d,stroke:#a878d8,color:#fff;
-    class S1,S2,S3,S4,S5,S6 stage;
+    class S1,S2,S3,S4,S5,S6,S7 stage;
 ```
+
+Orchestrator: [`compile-folder.ts:147` `compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L147).
+Perspective enforcement scaffold:
+[`perspective-preamble.ts:138` `withPerspective`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L138).
 
 ### Stage A — SchemaInferrer
 
-[`packages/domains/wiki/src/application/infer-schema.ts`](../../packages/domains/wiki/src/application/infer-schema.ts)
+[`infer-schema.ts:66` `inferSchema`](../../packages/domains/wiki/src/application/infer-schema.ts#L66)
 
 Reads the first 10 sources and returns a typed schema:
 
@@ -163,7 +185,7 @@ because every downstream stage uses these names.
 
 ### Stage B — Planner
 
-[`packages/domains/wiki/src/application/plan-compile.ts`](../../packages/domains/wiki/src/application/plan-compile.ts)
+[`plan-compile.ts:71` `planCompile`](../../packages/domains/wiki/src/application/plan-compile.ts#L71)
 
 For each source, decides which PageTypes apply. Returns
 `{ tasks: [{ sourceId, pageTypes }] }`.
@@ -176,7 +198,7 @@ only Tool findings.
 
 ### Stage C — Researcher (per source, sequential)
 
-[`packages/domains/wiki/src/application/research-source.ts`](../../packages/domains/wiki/src/application/research-source.ts)
+[`research-source.ts:89` `researchSource`](../../packages/domains/wiki/src/application/research-source.ts#L89)
 
 For each `(source, pageTypes)` task, extracts findings:
 
@@ -191,26 +213,28 @@ that become citations downstream.
 
 ### Stage D — Drafter (per `(pageType, title)` bucket, parallel)
 
-[`packages/domains/wiki/src/application/draft-page.ts`](../../packages/domains/wiki/src/application/draft-page.ts)
+[`draft-page.ts:129` `draftPage`](../../packages/domains/wiki/src/application/draft-page.ts#L129)
 
 For each bucket of related findings, writes one Concept page in
 markdown. Each claim in the body is paired with citations whose byte
 ranges point back into the source.
 
-Bucketing logic (in `compile-folder.ts`):
+Bucketing logic lives in `compile-folder.ts` around the `byType` and
+`dispatchQueue` blocks just before the drafter dispatch:
 
 - Group findings by `(pageType, normalizedTitle)` — each group → one page
-- Cap at 24 total drafts, 8 per pageType, round-robin so no type
-  starves
+- Cap at 24 total drafts, 8 per pageType, round-robin so no type starves
+- See [`compile-folder.ts:147` `compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L147)
+  step 5 ("Draft per (PageType, title) bucket")
 
 ### Stage E — Linker + IndexBuilder
 
-- [`resolve-backlinks.ts`](../../packages/domains/wiki/src/application/resolve-backlinks.ts)
+- [`resolve-backlinks.ts:15` `resolveBacklinks`](../../packages/domains/wiki/src/application/resolve-backlinks.ts#L15)
   scans `[[link]]` markers in page bodies and resolves them through
   the schema's relation cardinality
-- [`build-indexes.ts`](../../packages/domains/wiki/src/application/build-indexes.ts)
+- [`build-indexes.ts:27` `buildIndexes`](../../packages/domains/wiki/src/application/build-indexes.ts#L27)
   generates one Index page per PageType (a table of contents)
-- [`narrate-indexes.ts`](../../packages/domains/wiki/src/application/narrate-indexes.ts)
+- [`narrate-indexes.ts:64` `narrateIndexes`](../../packages/domains/wiki/src/application/narrate-indexes.ts#L64)
   writes an opinionated thesis + per-section narrative + glossary,
   also under the perspective lens
 
@@ -218,9 +242,15 @@ Bucketing logic (in `compile-folder.ts`):
 
 ## 3. Perspective enforcement — the load-bearing prompt scaffold
 
-**File:** [`packages/domains/wiki/src/application/perspective-preamble.ts`](../../packages/domains/wiki/src/application/perspective-preamble.ts)
+The whole enforcement scaffold lives in one file:
 
-This is where the perspective gets enforced across all five stages.
+- [`perspective-preamble.ts:138` `withPerspective`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L138)
+  — the helper every stage wraps its system prompt with
+- [`perspective-preamble.ts:12` `STAGE_DIRECTIVES`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L12)
+  — the five stage-specific clauses
+- [`perspective-preamble.ts:166` `perspectiveUserHeader`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L166)
+  — the one-line reminder prepended to every USER message
+
 `withPerspective(systemPrompt, perspective, { stage })` prepends a
 HARD-CONSTRAINT block at the top of the system message:
 
@@ -256,9 +286,12 @@ short of fine-tuning.
 
 ## 4. Storage — D1 + R2
 
-**Tables** (migrations: [`packages/domains/wiki/src/infrastructure/migrations/`](../../packages/domains/wiki/src/infrastructure/migrations/)):
+**Tables** (full schema in
+[`001_init.sql`](../../packages/domains/wiki/src/infrastructure/migrations/001_init.sql)
+plus the perspective column from
+[`002_perspective.sql`](../../packages/domains/wiki/src/infrastructure/migrations/002_perspective.sql)):
 
-- `wikis` — id, folder_id, schema_json, perspective (added in `002_perspective.sql`)
+- `wikis` — id, folder_id, schema_json, perspective (added in `002`)
 - `wiki_pages` — id, wiki_id, subtype (Concept/Summary/Answer/Index), page_type, slug, title, body_r2_key
 - `claims` — wiki_page_id, paragraph_id, claim_text
 - `citations` — claim_id, source_id, byte_range_start/end, content_hash, label
@@ -276,7 +309,10 @@ short of fine-tuning.
   — `insertMany` writes R2 first, then D1 in one batch; rolls back R2
   if D1 fails
 - [`r2-wiki-page-storage.ts`](../../packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts)
-  — the canonical key contract: `wiki_pages/<id>.md`
+  — the canonical key contract: `wiki_pages/<id>.md` (the bare-id read
+  bug story below — search "R2 key bug")
+- [`d1-wiki-repo.ts`](../../packages/domains/wiki/src/infrastructure/d1-wiki-repo.ts)
+  — wiki record CRUD, including the `perspective` column
 
 ---
 
@@ -292,8 +328,8 @@ sequenceDiagram
     participant API as "apps/api oRPC"
     participant DO as "ChatTurnDO"
     participant Runner as "runChatTurn"
-    participant Agent as "AgenticResearcher (4 tools)"
-    participant Synth as "AiSdkSynthesizer (artifact tools)"
+    participant Agent as "AgenticResearcher"
+    participant Synth as "AiSdkSynthesizer"
     participant LLM as "OpenRouter / Sonnet 4.6"
 
     User->>Web: types question
@@ -320,9 +356,24 @@ sequenceDiagram
     Web-->>User: ai-elements rendered
 ```
 
+Sequence-diagram participants don't support clickable links, so here's
+the implementation index for each one:
+
+| Step | Implementation |
+|---|---|
+| Web · chat-dock + transport | [`chat-dock.tsx`](../../apps/web/src/components/chat-dock/chat-dock.tsx) · [`chat-transport.ts`](../../apps/web/src/lib/chat-transport.ts) |
+| ChatTurnDO factory | [`chat-turn-do.ts:87` `createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L87) |
+| Dispatcher client (Worker → DO) | [`cf-chat-turn-dispatcher.ts:17` `createCfChatTurnDispatcher`](../../packages/domains/chat/src/infrastructure/cf-chat-turn-dispatcher.ts#L17) |
+| Runner | [`run-chat-turn.ts:82` `runChatTurn`](../../packages/domains/chat/src/application/run-chat-turn.ts#L82) |
+| Agent (4 tools) | [`agentic-researcher.ts:170` `createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L170) |
+| Synth (artifact tools + citation parsing) | [`ai-sdk-synthesizer.ts:492` `createAiSdkSynthesizer`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L492) |
+| Citation tripwire | [`synthesize-answer.ts:163` `synthesizeAnswer`](../../packages/domains/chat/src/application/synthesize-answer.ts#L163) |
+| DirectWikiReader (R2/D1 reads behind tools) | [`build-chat-context.ts:168` `createDirectWikiReader`](../../apps/api/src/build-chat-context.ts#L168) |
+
 ### Why a Durable Object for chat too
 
-**File:** [`packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts)
+- **Factory:** [`chat-turn-do.ts:87` `createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L87)
+- **Worker → DO client:** [`cf-chat-turn-dispatcher.ts:17` `createCfChatTurnDispatcher`](../../packages/domains/chat/src/infrastructure/cf-chat-turn-dispatcher.ts#L17)
 
 The in-memory dispatcher kept the per-turn tape in a `Map` scoped to
 one Worker isolate. On Cloudflare, `chat.ask` and `chat.streamAnswer`
@@ -337,12 +388,9 @@ of which isolate handles each.
 - `POST /start` — kicks off `runChatTurn` inside `state.waitUntil`
 - `GET /subscribe` — replays the tape + streams live SSE
 
-The client adapter is
-[`cf-chat-turn-dispatcher.ts`](../../packages/domains/chat/src/infrastructure/cf-chat-turn-dispatcher.ts).
-
 ### The chat-turn runner
 
-**File:** [`packages/domains/chat/src/application/run-chat-turn.ts`](../../packages/domains/chat/src/application/run-chat-turn.ts)
+[`run-chat-turn.ts:82` `runChatTurn`](../../packages/domains/chat/src/application/run-chat-turn.ts#L82)
 
 Emits an ordered AnswerEvent stream:
 
@@ -361,7 +409,12 @@ subscriber gets a full replay.
 
 ### The agent — four tools
 
-**File:** [`packages/domains/chat/src/infrastructure/agentic-researcher.ts`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts)
+- [`agentic-researcher.ts:170` `createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L170)
+  — the agent factory
+- [`agentic-researcher.ts:123` `buildSystem`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L123)
+  — injects the wiki-taxonomy block into the system prompt
+- [`agentic-researcher.ts:224` `tools = { ... }`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L224)
+  — the four tool definitions
 
 Built on `streamText({ tools, stopWhen: stepCountIs(8) })`. The agent
 gets a system prompt with the wiki's **taxonomy block** (PageType
@@ -382,7 +435,10 @@ keyword-guessing failure mode.
 
 ### The synthesizer
 
-**File:** [`packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts)
+- [`ai-sdk-synthesizer.ts:492` `createAiSdkSynthesizer`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L492)
+  — the synth factory
+- [`ai-sdk-synthesizer.ts:262` `renderContextHeader`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L262)
+  — emits the `<wiki-context>` block prepended to the user message
 
 Built on `streamText({ tools })` where the tools are the **artifact
 registry** (ComparisonTable / Timeline / KeyMetric / Quote / etc).
@@ -407,11 +463,13 @@ Every claim in a synthesized answer must be backed by a verifiable
 citation. The tripwire:
 
 1. The synth emits `[[cite:UUID]]` markers in prose
-2. The use-case
-   [`synthesize-answer.ts`](../../packages/domains/chat/src/application/synthesize-answer.ts)
+2. [`synthesize-answer.ts:163` `synthesizeAnswer`](../../packages/domains/chat/src/application/synthesize-answer.ts#L163)
    resolves each UUID against the working set of findings
 3. Each Citation has a `contentHash` of the byte range it covers
-4. Before emission, [`SourceHashVerifier`](../../packages/domains/chat/src/application/verify-citation.ts)
+   (written at compile time by
+   [`compile-folder.ts:135` `sliceHash`](../../packages/domains/wiki/src/application/compile-folder.ts#L135))
+4. Before emission,
+   [`verify-citation.ts:20` `createMemorySourceHashVerifier`](../../packages/domains/chat/src/application/verify-citation.ts#L20)
    re-hashes the actual source text at that byte range and compares
 5. Hash mismatch → `CitationTripwireError` → turn aborts with
    `AnswerFailed`
@@ -419,33 +477,23 @@ citation. The tripwire:
 Source bodies live at `sources/<id>/text` in R2; the verifier reads
 them via the bindings the api already holds (no oRPC round-trip).
 Wired in
-[`apps/api/src/build-chat-context.ts`](../../apps/api/src/build-chat-context.ts)
-under `createMemorySourceHashVerifier`.
+[`build-chat-context.ts`](../../apps/api/src/build-chat-context.ts) at
+the `createMemorySourceHashVerifier({ readSourceText, sha256Hex })`
+call.
 
 ---
 
 ## 7. Frontend — chat dock + presentation
 
-**Layout:** [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx) wraps
-the router + `<ChatDock>` in a horizontal flex row. The dock is
-`sticky top-0 h-screen` so it always fills the viewport and stays in
-view as the user scrolls the wiki page next to it. Closing animates
-width to 0.
-
-**Chat transport:**
-[`apps/web/src/lib/chat-transport.ts`](../../apps/web/src/lib/chat-transport.ts)
-parses oRPC SSE frames and translates each AnswerEvent into the AI
-Elements `UIMessageChunk` shape:
-
-- `WikiPageRetrieved` → `reasoning-delta` + `data-wiki-page-retrieved`
-- `AnswerThinking` → `reasoning-delta` (live train-of-thought from synth)
-- `AnswerProseDelta` → `text-delta`
-- `AnswerSegment(citation)` → `data-citation`
-- `AnswerSegment(artifact)` → `data-artifact`
-
-**Presentation route:** [`apps/web/src/routes/present.tsx`](../../apps/web/src/routes/present.tsx)
-is the 14-slide non-technical talk at `/present`. Arrow keys to
-navigate, F for fullscreen.
+- [`App.tsx:9` `App`](../../apps/web/src/App.tsx#L9) — wraps router + `<ChatDock>` in a horizontal flex row
+- [`chat-dock.tsx:100` `ChatDock`](../../apps/web/src/components/chat-dock/chat-dock.tsx#L100) — `sticky top-0 h-screen` aside; drag handle resizes; width persists to localStorage; closing animates width to 0
+- [`chat-transport.ts`](../../apps/web/src/lib/chat-transport.ts) — parses oRPC SSE frames and translates each AnswerEvent into the AI Elements `UIMessageChunk` shape:
+  - `WikiPageRetrieved` → `reasoning-delta` + `data-wiki-page-retrieved`
+  - `AnswerThinking` → `reasoning-delta` (live train-of-thought from synth)
+  - `AnswerProseDelta` → `text-delta`
+  - `AnswerSegment(citation)` → `data-citation`
+  - `AnswerSegment(artifact)` → `data-artifact`
+- [`present.tsx`](../../apps/web/src/routes/present.tsx) — the 14-slide non-technical talk at `/present`. Arrow keys to navigate, F for fullscreen.
 
 ---
 
@@ -459,12 +507,14 @@ walkthrough.
 For a while, every wiki the chat surfaced returned "limited text
 fragments" no matter how rich the compiled pages were. Root cause:
 the chat reader was reading R2 at the bare page id (`<uuid>`) but the
-canonical writer (`createR2WikiPageStorage`) writes at
-`wiki_pages/<id>.md`. The chat's bodies came back empty; only the
-source-text excerpts appended by `expandWithSourceEvidence` made it
-into the synth prompt — and those were correctly limited to 600
-chars each. Fix:
-[`apps/api/src/build-chat-context.ts` `hydrate()`](../../apps/api/src/build-chat-context.ts).
+canonical writer
+([`r2-wiki-page-storage.ts:4` `key`](../../packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts#L4))
+writes at `wiki_pages/<id>.md`. The chat's bodies came back empty;
+only the source-text excerpts appended by
+[`build-chat-context.ts:233` `expandWithSourceEvidence`](../../apps/api/src/build-chat-context.ts#L233)
+made it into the synth prompt — and those were correctly limited to
+600 chars each. Fix:
+[`build-chat-context.ts:206` `hydrate`](../../apps/api/src/build-chat-context.ts#L206) — one-char path change.
 
 ### Cross-isolate dispatcher
 
@@ -472,7 +522,9 @@ Chat originally used an in-memory dispatcher with the tape kept in a
 per-isolate `Map`. `chat.ask` and `chat.streamAnswer` are separate
 HTTP requests that don't reliably hit the same isolate on Cloudflare
 — the second one would create a fresh empty tape and wait forever.
-Fix: the `ChatTurnDO` above.
+Fix: [`chat-turn-do.ts:87` `createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L87)
+keyed by `${conversationId}:${turnId}` + thin client at
+[`cf-chat-turn-dispatcher.ts:17`](../../packages/domains/chat/src/infrastructure/cf-chat-turn-dispatcher.ts#L17).
 
 ### Perspective enforcement too soft
 
@@ -480,47 +532,56 @@ First implementation was "bias toward this perspective." A music/AI
 corpus compiled under business-opportunities still produced
 Tool/Skill/Resource PageTypes because the model fell back to the
 corpus's literal shape. Fix: HARD CONSTRAINT preamble + per-stage
-clauses + USER-message repetition (see `perspective-preamble.ts`).
+clauses + USER-message repetition — see
+[`perspective-preamble.ts:138` `withPerspective`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L138)
+and the `STAGE_DIRECTIVES` table at
+[`perspective-preamble.ts:12`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L12).
 
 ### Researcher emitting findings for one PageType only
 
 The Planner would assign `[Tool]` for a source about a software tool,
 the Researcher would only extract Tool findings — and the
 Opportunity / Pain / Wedge sections of the compiled wiki would be
-empty. Fix: stage-specific clauses requiring the Planner to assign
-multiple angles per source and the Researcher to produce at least one
-finding per assigned PageType (the "reinterpret the same source
-through each angle" rule).
+empty. Fix: the `plan` and `research` entries in
+[`STAGE_DIRECTIVES`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L12)
+— the Planner now must assign multiple angles per source and the
+Researcher must produce at least one finding per assigned PageType
+(the "reinterpret the same source through each angle" rule).
 
 ### Agent keyword-guessing instead of browsing
 
 The agent would search "ring" against a wiki that had an entire
 Opportunity section and miss it because the user typed "business
-ideas." Fix: the wiki taxonomy is now injected into the agent's
-system prompt + the `listPagesByType` tool lets it browse by name.
+ideas." Fix: the wiki taxonomy is injected into the agent's system
+prompt by
+[`agentic-researcher.ts:123` `buildSystem`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L123)
+and the `listPagesByType` tool (added in the
+[`tools = { ... }`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L224) block)
+lets it browse by name.
 
 ---
 
 ## 9. Where to start the code tour
 
 If you're walking someone through the codebase for the first time,
-here's a 15-minute path that hits the high points:
+here's a 15-minute path that hits the high points (line-anchored —
+jump straight to the right function):
 
-1. [`apps/web/src/lib/perspective-presets.ts`](../../apps/web/src/lib/perspective-presets.ts)
+1. [`perspective-presets.ts:37` `PERSPECTIVE_PRESETS`](../../apps/web/src/lib/perspective-presets.ts#L37)
    — see what the user actually picks
-2. [`packages/contracts/src/wiki/compile.ts`](../../packages/contracts/src/wiki/compile.ts)
+2. [`compile.ts:31` `StartCompileInput`](../../packages/contracts/src/wiki/compile.ts#L31)
    — see how perspective enters the contract layer
-3. [`packages/domains/wiki/src/application/compile-folder.ts`](../../packages/domains/wiki/src/application/compile-folder.ts)
+3. [`compile-folder.ts:147` `compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L147)
    — read the orchestrator top to bottom (one function, ~600 lines)
-4. [`packages/domains/wiki/src/application/perspective-preamble.ts`](../../packages/domains/wiki/src/application/perspective-preamble.ts)
+4. [`perspective-preamble.ts:138` `withPerspective`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L138) + [`STAGE_DIRECTIVES`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L12)
    — the universal + stage-specific enforcement clauses
-5. [`packages/domains/wiki/src/application/infer-schema.ts`](../../packages/domains/wiki/src/application/infer-schema.ts)
+5. [`infer-schema.ts:66` `inferSchema`](../../packages/domains/wiki/src/application/infer-schema.ts#L66)
    — see `withPerspective(SYSTEM, perspective, { stage: 'schema' })` wire up
-6. [`packages/domains/chat/src/infrastructure/agentic-researcher.ts`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts)
-   — the four-tool agent + the wiki-taxonomy system-prompt injection
-7. [`packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts)
-   — the artifact-tool registry + the `<wiki-context>` block
-8. [`packages/domains/chat/src/application/synthesize-answer.ts`](../../packages/domains/chat/src/application/synthesize-answer.ts)
+6. [`agentic-researcher.ts:170` `createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L170)
+   — the four-tool agent + the wiki-taxonomy system-prompt injection at [`buildSystem`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L123)
+7. [`ai-sdk-synthesizer.ts:492` `createAiSdkSynthesizer`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L492)
+   — the artifact-tool registry + the `<wiki-context>` block at [`renderContextHeader`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L262)
+8. [`synthesize-answer.ts:163` `synthesizeAnswer`](../../packages/domains/chat/src/application/synthesize-answer.ts#L163)
    — the citation tripwire
 
 The architecture overview in
