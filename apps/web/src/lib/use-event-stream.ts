@@ -152,6 +152,23 @@ export function useEventStream<T>(
     // reconnects 12 times during its lifetime exhausts the budget even
     // if each segment between reconnects delivered hundreds of events.
     const attemptRef = { value: 0 };
+    // Reconnects replay the entire tape from the server-side DO; the
+    // dispatcher dedupes by `seq` within a single connection, but each
+    // reconnect starts fresh, so the consumer would otherwise append
+    // N copies of every event for N reconnects. Hash each parsed event
+    // (the raw JSON before our Zod parse, which is structurally
+    // identical across replays) and skip frames we've already kept.
+    const seenFingerprints = new Set<string>();
+    const fingerprint = (raw: unknown): string => {
+      try {
+        return JSON.stringify(raw);
+      } catch {
+        // Pathological: a circular object — fall back to a string the
+        // caller can never produce naturally. Keeping the frame is the
+        // safer default than dropping it on a stringify failure.
+        return `__circular_${Math.random()}`;
+      }
+    };
 
     const runOnce = async (): Promise<'terminal' | 'premature' | 'http-error'> => {
       const init: RequestInit = { signal: ac.signal };
@@ -202,13 +219,26 @@ export function useEventStream<T>(
               continue;
             }
             const kind = eventKind(raw);
+            // Dedupe replays: if we've already kept this exact event,
+            // still treat the frame as "alive" for reconnect-budget
+            // purposes, but don't push it into the events array a
+            // second time. Terminal events (failedKinds / finishedKinds)
+            // skip the dedup check — they're idempotent setters.
+            const fp = fingerprint(raw);
+            const isDuplicate = seenFingerprints.has(fp);
             if (kind && failedKinds.includes(kind)) {
               terminalSeen = true;
-              setEvents((prev) => [...prev, parsed]);
+              if (!isDuplicate) {
+                seenFingerprints.add(fp);
+                setEvents((prev) => [...prev, parsed]);
+              }
               setError(eventMessage(raw));
               return 'terminal';
             }
-            setEvents((prev) => [...prev, parsed]);
+            if (!isDuplicate) {
+              seenFingerprints.add(fp);
+              setEvents((prev) => [...prev, parsed]);
+            }
             // A successful frame proves the stream is alive; reset the
             // reconnect budget so a later wrangler reload still has 12
             // attempts even if we already burned several earlier.
