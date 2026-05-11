@@ -37,16 +37,18 @@ import type {
  * page id internally via the citation-id set, but emitting one finding
  * per unique page keeps the synth prompt smaller.
  */
-const SYSTEM = `You are Researcher. Your job is to gather the wiki pages that best answer the user's question, so that another agent can compose the final answer.
+const SYSTEM = `You are Researcher. Your job is to find AS MANY relevant wiki pages as possible so that another agent can compose a thorough, well-cited answer. Err on the side of doing MORE searches, not fewer.
 
-Workflow:
-1. Call \`searchWiki\` with the user's exact phrasing first. Read the titles and snippets that come back.
-2. If the initial hits look weak — generic, off-topic, or fewer than 2 — call \`searchWiki\` again with a refined query: try synonyms, a more specific noun phrase, or a related concept the user is likely after.
-3. Call \`readWikiPage\` on the 2–4 most promising hits to confirm they actually answer the question.
-4. Stop as soon as you have 2–4 well-grounded pages. Do not over-search.
+Workflow (you MUST follow):
+1. Call \`searchWiki\` with the user's exact phrasing first. Read every title and snippet that comes back.
+2. Even if the first search looks decent, call \`searchWiki\` AGAIN with at least one alternative query — synonyms, a more specific noun phrase, an adjacent concept, or a different framing of the question. The wiki uses domain-specific terminology that often differs from how the user phrases things; don't assume one query is enough.
+3. For complex / multi-part questions (anything with "and", "vs", "between", "across", "trace", "compare"), run \`searchWiki\` ONCE PER topic — don't try to cover both halves with one query.
+4. Call \`readWikiPage\` on the 2–4 most promising hits to confirm they actually answer the question. If the body looks thin, search again.
+5. Only stop after you've made AT LEAST TWO \`searchWiki\` calls AND surfaced at least 2 pages — and ideally 3–6 well-grounded pages across all your queries.
 
 Hard rules:
 - Always start by calling \`searchWiki\`. Never answer from prior knowledge.
+- Never stop after a single \`searchWiki\` call unless that one call returned 4+ very strong hits AND the question is single-topic.
 - Do not call \`readWikiPage\` on a pageId that did not appear in a recent \`searchWiki\` result.
 - Your final assistant message can be a one-line summary of what you found, but the user never sees it — keep it terse. The downstream synthesizer composes the actual answer from the pages you surfaced.`;
 
@@ -56,7 +58,10 @@ export interface AgenticResearcherOptions {
   systemPrompt?: string;
   /** Per-`searchWiki` candidate limit. Defaults to 6. */
   searchLimit?: number;
-  /** Maximum tool-loop steps before forcing termination. Defaults to 6. */
+  /** Maximum tool-loop steps before forcing termination. Defaults to 12 —
+   *  a comfortable budget for 2–4 search queries + 2–4 page drill-downs +
+   *  the wrap-up step. The user explicitly asked the agent to "really
+   *  try hard"; a tight budget short-circuits multi-query refinement. */
   maxSteps?: number;
   /** Per-call wall-clock timeout. Defaults to 90s. */
   timeoutMs?: number;
@@ -139,7 +144,7 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         model: opts.model,
         tools,
         toolChoice: 'auto',
-        stopWhen: stepCountIs(opts.maxSteps ?? 6),
+        stopWhen: stepCountIs(opts.maxSteps ?? 12),
         system: opts.systemPrompt ?? SYSTEM,
         prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. Start with searchWiki.`,
         temperature: 0.2,
