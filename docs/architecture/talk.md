@@ -1,8 +1,9 @@
 # Tenex — what it does and how it works
 
 A scroll-through of the system. Each section opens with a short
-context paragraph, then the diagrams and load-bearing code from that
-part of the codebase. File paths are deep-linked to the exact line on
+plain-English context paragraph, then the diagrams and code from
+that part of the codebase, with a short "what you're looking at" note
+under each block. File paths are deep-linked to the exact line on
 GitHub. For the full reference, see
 [`code-tour.md`](./code-tour.md) and
 [`perspective-flow.md`](./perspective-flow.md).
@@ -11,20 +12,34 @@ GitHub. For the full reference, see
 
 # The bet
 
-Most search systems take your query and run it against a generic index
-of the document. **Tenex flips that.** You give it a *perspective*
-before indexing, and the wiki gets built around your point of view.
-Three readers of the same book — a screenwriter, a philosopher, a
-linguist — would write three radically different sets of notes. The
-technical version of that bet: **move the agent loop upstream**. Pay
-the cost of interpretation once at ingest; get cheap, deep questions
-at chat time. Concretely — a music corpus compiled under "business
-opportunities" should produce **Opportunity / Pain / Wedge** sections,
-not Tool / Topic / Concept.
+Most search tools take your query and run it against a generic index
+of the document — same index for everyone. **Tenex flips that.**
+Before you index a single file, you tell the system what you're
+trying to *get out of* the corpus — a "perspective." The wiki gets
+built around that point of view.
 
-The perspective is a free-form text the user picks (or writes) before
-the compile starts. Below is one of the bundled presets — full
-editable text, so the user sees exactly what the model will be told.
+The analogy is three readers of the same book — a screenwriter, a
+philosopher, a linguist — sitting in three different chairs. Same
+source text, three radically different sets of notes. The
+screenwriter wants characters and scenes; the philosopher wants
+ideas about power and language; the linguist wants etymology.
+
+The technical version of the bet: **move the agent loop upstream**.
+Instead of having an AI agent figure out your perspective every time
+you ask a question (slow, repetitive, expensive), do that
+interpretation work once at ingest time. The resulting wiki has the
+lens already baked in, so chat questions can be cheap and the answers
+go deeper.
+
+Concretely — a music corpus compiled under "business opportunities"
+should produce sections named **Opportunity / Pain / Wedge**, not
+Tool / Topic / Concept. That's the test of whether the perspective
+actually landed.
+
+The perspective is just free-form text the user picks (or writes)
+before compile starts. Below is one of the bundled presets — every
+preset is editable, so the user can see and tune exactly what the
+model will be told.
 
 📄 [`apps/web/src/lib/perspective-presets.ts:37`](../../apps/web/src/lib/perspective-presets.ts#L37)
 
@@ -47,20 +62,35 @@ Naming conventions (use these — they shape every page):
 ];
 ```
 
+> **What you're looking at:** the literal text the AI sees. There's
+> nothing magic in our prompt — the user types instructions, we
+> attach them to every model call during compile. The presets are
+> just well-tuned starting points the user can edit.
+
 ---
 
 # System architecture
 
-React frontend, Hono Worker, oRPC for the contract layer with Zod —
-the same Zod schemas validate API requests and type the frontend
-client. The codebase is domain-driven: one package per bounded
-context (`ingestion`, `wiki`, `chat`, `verification`), each with its
-own glossary. The application layer is framework-free and
-dependencies inject through interfaces.
+The system is a React frontend talking to a backend that runs on
+Cloudflare Workers (a serverless edge runtime). The frontend and
+backend share their API definitions through a library called **oRPC**
+— you write the contract once using Zod schemas, and both sides get
+matching types. No drift between frontend and backend.
 
-Two paths from the frontend: compile a folder into a wiki, or chat
-with an existing wiki. Both paths route through Durable Objects so
-the multi-minute work survives the request lifecycle.
+The codebase is **domain-driven**: instead of one giant `src/`
+folder, the system is split into "bounded contexts" — `ingestion`,
+`wiki`, `chat`, `verification` — each in its own package with its
+own vocabulary. The chat code can't reach into the wiki code's
+internals; they communicate only through the shared contracts. Each
+context has its own glossary file enforcing the language.
+
+From the frontend, the user can do two things: **compile** a folder
+into a wiki, or **chat** with an already-compiled wiki. Both paths
+involve work that can take a few minutes (LLM calls, multi-stage
+pipelines). To survive that — Cloudflare Workers normally die after
+30 seconds — we route both flows through **Durable Objects**, a
+Cloudflare construct that hosts long-running state and outlives any
+single HTTP request.
 
 ```mermaid
 flowchart LR
@@ -76,6 +106,12 @@ flowchart LR
     ChatDO --> Store
 ```
 
+> **What you're looking at:** the flow of a request through the
+> system. The user hits the React app; the React app calls the API;
+> the API delegates to one of the bounded contexts; the slow work
+> happens inside a Durable Object; everything reads and writes to
+> Cloudflare's D1 (SQL) and R2 (blob storage).
+
 ```
 packages/
   contracts/                 # @package/contracts (oRPC + Zod)
@@ -87,14 +123,26 @@ packages/
     verification/            # claim audits
 ```
 
+> **What you're looking at:** the folder layout. Each domain package
+> owns its own vocabulary and never imports from another domain. The
+> contracts package is the shared seam they all communicate through.
+
 ---
 
 # The compile pipeline
 
-Compile turns a folder of source documents into a typed, cross-linked
-wiki shaped by the user's perspective. It's five LLM-backed stages
-running sequentially inside a Durable Object that hosts the per-run
-event tape so live progress streams to the UI.
+Compile is the work of turning a folder of source documents (PDFs,
+Google Docs, etc.) into a typed, cross-linked wiki shaped by the
+user's perspective. It's **five LLM-backed stages** that run one
+after another inside a Durable Object. The DO holds the per-run
+event stream so the live "what's happening right now" UI updates
+flow to the frontend as the work progresses.
+
+We use multiple smaller LLM calls instead of one big one because each
+stage has a different shape of output (structured schema vs. prose
+vs. lists of citations), and we want to use a cheaper model where we
+can — only the schema and drafter stages need Sonnet quality; the
+rest run on Haiku.
 
 ```mermaid
 flowchart LR
@@ -106,19 +154,29 @@ flowchart LR
     S5 --> End([CompileFinished])
 ```
 
-**Schema inference** reads the first ten sources and picks PageTypes —
-the section names of the wiki. **The planner** then decides which
-PageTypes each source supports; under a perspective it assigns
-multiple angles per source so one document about a tool produces
-Opportunity, Pain, and Wedge findings — not just Tool. **The
-researcher** extracts verbatim quotes with byte offsets; those byte
-ranges become citations the synthesizer will later need. **The
-drafter** writes one magazine-quality page per
-`(pageType, title)` bucket of findings. Finally **the linker, index
-builder, and narrator** resolve backlinks, generate one Index page per
-PageType, and write an opinionated thesis + glossary for the wiki.
+What each stage does:
 
-The orchestrator threads the perspective into every stage:
+- **SchemaInferrer** reads the first few sources and picks the
+  *sections* of the wiki — what we call "PageTypes." Under a
+  perspective, this is where Opportunity / Pain / Wedge gets named
+  instead of generic Tool / Topic.
+- **Planner** looks at every source and decides which sections each
+  one belongs in. Under a perspective, it deliberately assigns each
+  source to *multiple* sections — so one document about a software
+  tool produces Opportunity findings AND Pain findings AND Wedge
+  findings.
+- **Researcher** reads each source and extracts verbatim quotes
+  along with their exact byte position in the source. Those byte
+  positions matter — they become "citations" the synthesizer will
+  later rely on to prove its claims.
+- **Drafter** writes one magazine-quality page per cluster of related
+  findings (e.g. all findings about the same opportunity become one
+  page).
+- **Linker + Index + Narrator** resolves `[[wiki-links]]` between
+  pages, generates one table-of-contents page per section, and writes
+  an opinionated thesis + glossary for the whole wiki.
+
+The orchestrator passes the user's perspective into every stage:
 
 📄 [`compile-folder.ts:147` `compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L147)
 
@@ -144,17 +202,35 @@ export async function compileFolder(deps, input) {
 }
 ```
 
+> **What you're looking at:** every call to a stage gets the same
+> `perspective` string passed in. Each stage takes it from there. The
+> orchestrator's only job is to chain them in order and pass the
+> output of one into the next.
+
 ---
 
 # Perspective enforcement
 
-The perspective is wrapped around every stage's system prompt with a
-single helper. A naive "bias toward this perspective" prompt didn't
-work — the model would fall back to the corpus's literal shape. The
-real fix is a HARD CONSTRAINT preamble with explicit anti-patterns,
-plus a stage-specific clause sharpened for what each stage produces,
-plus a one-line reminder repeated on the USER message. Repetition is
-the most reliable enforcement we have short of fine-tuning.
+The hard part isn't *passing* the perspective into each stage — it's
+making the model actually *use* it. A naive prompt like "bias toward
+this perspective" doesn't work. The model reads the corpus and quickly
+notices it's about music or AI safety or whatever, then snaps back to
+producing sections that fit *the content's* natural shape, not the
+user's lens.
+
+We force the issue with three layers:
+
+1. A **HARD CONSTRAINT preamble** that opens every system prompt —
+   blunt rules like "generic alternatives are failures."
+2. A **stage-specific clause** that names the failure mode for that
+   particular stage (the schema clause is the most aggressive,
+   because schema choices cascade everywhere).
+3. A **one-line reminder** prepended to every user message. The
+   system prompt sets the rules; restating them on the user side
+   makes it stick. Repetition through both channels is the most
+   reliable enforcement we have short of fine-tuning.
+
+One helper wraps every stage's system prompt:
 
 📄 [`perspective-preamble.ts:138` `withPerspective`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L138)
 
@@ -175,7 +251,13 @@ ${systemPrompt}`;
 };
 ```
 
-The universal rules every stage sees:
+> **What you're looking at:** a tiny wrapper function. Every stage's
+> system prompt gets routed through it before going to the model.
+> Inside the giant `=====` block is the user's perspective text, the
+> universal rules, and the stage-specific clause. After the block,
+> the stage's original prompt follows untouched.
+
+The universal rules — same text in front of every stage's prompt:
 
 ```
 This perspective is a HARD CONSTRAINT, not a soft suggestion.
@@ -190,9 +272,14 @@ This perspective is a HARD CONSTRAINT, not a soft suggestion.
 5. Structural rules in the prompt below always win.
 ```
 
-The stage-specific clause for SchemaInferrer — the one that prevents
-the failure mode where a music corpus under "business" still produces
-Tool/Topic/Concept:
+> **What you're looking at:** the literal instructions the model
+> sees. Note rule 5 — the perspective can reshape WHAT we say, but
+> never break things like "every citation must include a byte range."
+> Lens > corpus shape, but structure always wins.
+
+The stage-specific clause for the SchemaInferrer — the one that
+prevents the most common failure (a music corpus compiled under
+"business" still producing Tool/Topic/Concept):
 
 📄 [`perspective-preamble.ts:12` `STAGE_DIRECTIVES.schema`](../../packages/domains/wiki/src/application/perspective-preamble.ts#L12)
 
@@ -209,16 +296,28 @@ cascade through every downstream step.
 - REJECT generic catch-all names unless the perspective endorses them.
 ```
 
+> **What you're looking at:** the in-prompt example tells the model
+> exactly the wrong answer to avoid. Concrete examples (with caps for
+> emphasis) work better than abstract rules for prompt steering.
+
 ---
 
 # The chat agent
 
-When a user asks a question, an agent loop runs inside a per-turn
-Durable Object. The agent has four tools at its disposal and a model
-chooses which to call and in what order — that's what distinguishes
-this from a fixed RAG pipeline. The Durable Object holds the per-turn
-event tape so the SSE response and the loop's emit calls share state
-even when they land on different Worker isolates.
+When a user asks a question of a compiled wiki, we run what's called
+an **agent loop**. Instead of one model call that tries to answer
+everything, we give the model a set of *tools* — small functions like
+"search the wiki" or "fetch a page" — and let it call them in
+whatever order makes sense for the question. It runs multiple model
+turns: think → call a tool → see the result → think again → call
+another tool → etc. The model decides what's next. That's what makes
+this an **agent** rather than a fixed retrieve-then-answer pipeline.
+
+The whole loop runs inside a per-turn Durable Object — same idea as
+the compile DO. Because the user's `chat.ask` call and the
+`chat.streamAnswer` call that follows might land on different Worker
+isolates (Cloudflare doesn't guarantee they share state), the DO is
+the single addressable place that holds the per-turn event stream.
 
 ```mermaid
 sequenceDiagram
@@ -241,16 +340,23 @@ sequenceDiagram
     Web-->>User: rendered
 ```
 
-The four tools:
+> **What you're looking at:** the order of operations for one chat
+> question. The agent does the research; the synthesizer composes
+> the answer. Both stream their progress back through the DO to the
+> frontend as Server-Sent Events.
 
-- **`listPagesByType`** — browse a wiki section by name. Used when
-  the user's question maps to one of the PageTypes (e.g. "business
-  ideas" → the `Opportunity` section).
-- **`searchWiki`** — token-overlap search across page titles + bodies.
-- **`readWikiPage`** — fetch one page's full body + citations by id.
-- **`searchSources`** — token search over the underlying PDF text,
-  used when the compiled-page vocabulary doesn't match the user's
-  words.
+The agent has four tools to choose from:
+
+- **`listPagesByType`** — browse a whole section of the wiki by name.
+  Used when the user's question maps to one of the section names
+  (e.g. asking about "business ideas" → enumerate everything in the
+  `Opportunity` section).
+- **`searchWiki`** — keyword search across page titles and bodies.
+  Standard fuzzy lookup.
+- **`readWikiPage`** — fetch one page's full body and citations by id.
+- **`searchSources`** — keyword search through the *original source
+  documents* (the PDFs the wiki was compiled from). Used when the
+  compiled-page vocabulary doesn't match the user's words.
 
 📄 [`agentic-researcher.ts:170` `createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L170)
 
@@ -264,6 +370,13 @@ const result = streamText({
   prompt: `Question: ${input.question}`,
 });
 ```
+
+> **What you're looking at:** this is the entire agent loop, six
+> lines from the Vercel AI SDK. `streamText` keeps calling the model
+> with the tool results until either the model says "I'm done" or
+> we hit our step cap of 8. `toolChoice: 'auto'` means the model
+> decides which tool to call — we're not orchestrating; we're
+> dispatching.
 
 📄 [`agentic-researcher.ts:289` `listPagesByType`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L289)
 
@@ -285,19 +398,30 @@ listPagesByType: tool({
 }),
 ```
 
+> **What you're looking at:** one of the four tools. The
+> `description` is what the model reads to decide whether to call
+> this tool — written for the AI, not for engineers. The
+> `inputSchema` is the Zod shape the model has to fill in. `execute`
+> is the actual function that runs when the model calls the tool.
+
 ---
 
 # The synthesizer
 
-Whatever pages the agent surfaces flow into the synthesizer — a
-separate `streamText` call with **eight typed artifact tools**:
-ComparisonTable, Timeline, KeyMetric, Quote, LineChart, BarChart,
-CodeBlock, Markdown. The model picks the right artifact per
-structured-data segment, so a comparison answer renders as an actual
-table component, not bulleted prose. While the model is drafting an
-artifact tool call, its `tool-input-delta` events stream into the UI
-as live "thinking" lines so the reasoning bubble keeps moving instead
-of going silent.
+Once the agent has gathered the relevant pages, the **synthesizer**
+composes the final answer. It's a separate model call with a
+different set of tools — this time, **eight typed visual artifact
+kinds**: ComparisonTable, Timeline, KeyMetric, Quote, LineChart,
+BarChart, CodeBlock, Markdown. The model picks the right artifact
+for each chunk of the answer, so a "compare X and Y" question
+renders as an actual comparison table component (not bulleted
+prose), and a "what's the key number?" question renders as a big
+metric card.
+
+We also stream the model's partial work back as live "thinking" text
+in the UI. As it's typing out the JSON for a comparison table, you
+see "Adding columns: model, training data, …" appear in the chat —
+just enough movement that the user knows it's working.
 
 📄 [`ai-sdk-synthesizer.ts:28` `buildArtifactTools`](../../packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts#L28)
 
@@ -322,17 +446,29 @@ const buildArtifactTools = () => ({
 });
 ```
 
+> **What you're looking at:** the eight artifact "tools." Each one's
+> `inputSchema` defines a specific React component's props. When the
+> synth picks `ComparisonTable`, the model is forced to emit
+> `columns` and `rows` in that exact shape — we then render the
+> typed component directly. No prose-to-table parsing.
+
 ---
 
 # Citation grounding
 
-Every claim in an answer must be backed by a verifiable citation. The
-synthesizer emits `[[cite:UUID]]` markers inline with prose; before
-any of them reach the user, the citation's `contentHash` is checked
-against the actual source bytes at the byte range it points to. A
-model can't invent a quote without also inventing a byte range that
-hashes the same — that's the fabrication tripwire. A failure aborts
-the turn rather than emitting a citation that doesn't hold up.
+Every factual claim the synthesizer makes has to be backed by a
+verifiable citation pointing into the original source. The way it
+works: the synthesizer writes prose with `[[cite:UUID]]` markers
+inline (e.g. *"AP teams pay $40K/yr for invoice OCR [[cite:abc-…]]"*).
+Each UUID maps to a Citation record that has a `sourceId`, a byte
+range into the source text, and a **hash of those exact bytes**.
+
+Before any answer reaches the user, we re-hash the source bytes at
+that byte range and compare to the stored hash. If they don't match,
+the turn aborts with a "citation tripwire" error. A model can't
+invent a quote without also inventing a byte range that hashes the
+same — and the source hashes are computed by our code at compile
+time, not by the model. **Fabrication is structurally impossible.**
 
 📄 [`synthesize-answer.ts:222` `verify`](../../packages/domains/chat/src/application/synthesize-answer.ts#L222)
 
@@ -347,10 +483,14 @@ const verify = async (c: Citation): Promise<void> => {
 };
 ```
 
-The writer side of the same contract — when the compile pipeline binds
-a Citation onto a drafted claim, it hashes the exact source-byte
-slice the citation points to. The hash gets stored alongside the
-citation in D1. At chat time, the verifier re-hashes and compares.
+> **What you're looking at:** the reader side of the contract. Every
+> citation goes through `verify` before the answer reaches the user.
+> A throw aborts the whole turn — we'd rather show no answer than a
+> fabricated one.
+
+The other half — the writer side. When the compile pipeline binds a
+citation to a drafted page, it computes the hash of the exact byte
+slice. That hash gets persisted into D1 alongside the citation.
 
 📄 [`compile-folder.ts:135` `sliceHash`](../../packages/domains/wiki/src/application/compile-folder.ts#L135)
 
@@ -362,6 +502,12 @@ const sliceHash = async (text, start, end) => {
   return `sha256:${toHex(buf)}` as ContentHash;
 };
 ```
+
+> **What you're looking at:** a SHA-256 hash of the exact bytes the
+> citation covers. The verifier at chat time runs the same function
+> on the same byte range and compares. Cryptographic guarantee that
+> the bytes haven't been tampered with — and since the AI never sees
+> the hash, it can't fake one that matches.
 
 ---
 
