@@ -1,6 +1,7 @@
 import { completeDriveAuth } from '@domain/ingestion';
 import type { SecretCipher } from '@domain/ingestion/infrastructure';
 import type { IngestionContext } from '@domain/ingestion/interface';
+import type { UserId } from '@package/contracts/shared';
 import type { Hono } from 'hono';
 
 /**
@@ -171,25 +172,41 @@ export const resolveRedirect = (
   return '/?drive=connected';
 };
 
+export interface AuthCallbackDeps<Env extends OAuthEnv & { WEB_APP_ORIGINS?: string }> {
+  /**
+   * Build an ingestion context bound to a specific UserId — or to `null`
+   * when called from the OAuth callback (the userId only exists AFTER
+   * `completeDriveAuth` resolves it, so the connector falls back to
+   * email-derived id minting for the first sign-in).
+   */
+  readonly buildIngestionContext: (env: Env, currentUserId: UserId | null) => IngestionContext;
+  /**
+   * Mint a `Set-Cookie` header value pinning the browser to `userId`.
+   * Return `null` to skip the header (e.g. when no signing key is
+   * configured in a test environment).
+   */
+  readonly mintSessionCookie?: (env: Env, userId: UserId) => Promise<string | null>;
+}
+
 /**
  * Register the Google OAuth callback. Must be mounted BEFORE the `/rpc/*`
  * oRPC dispatcher: the contract defines `ingestion.authCallback` as POST
  * (typed RPC clients send the code/state in the body), but Google
  * redirects the user-agent here with a GET carrying `?code=...&state=...`.
  * Without this Hono GET, the dispatcher matches the path, sees the wrong
- * method, and returns 405. We run the same use-case as the POST handler
- * and 302 back to whichever web origin started the flow (validated
- * against `WEB_APP_ORIGINS`) so the freshly stored Drive tokens are
- * immediately usable from the SPA.
+ * method, and returns 405.
  *
- * The `buildIngestionContext` dependency is injected so this module can
- * stay framework- and binding-agnostic. `Env` is left generic so the
- * caller's full Worker env type flows through.
+ * After `completeDriveAuth` resolves a `UserId`, the optional
+ * `mintSessionCookie` dependency turns that id into a signed cookie value
+ * which we set on the 302 response — that's how the browser carries the
+ * session on subsequent `/rpc/*` calls. Everything to do with HMAC and
+ * cookie attributes lives in `session.ts`; this module is intentionally
+ * unaware of those internals.
  */
 export const mountIngestionAuthCallback = <Env extends OAuthEnv & { WEB_APP_ORIGINS?: string }>(
   // biome-ignore lint/suspicious/noExplicitAny: app is generic over its Bindings
   app: Hono<any>,
-  buildIngestionContext: (env: Env) => IngestionContext,
+  deps: AuthCallbackDeps<Env>,
 ): void => {
   app.get('/rpc/ingestion/authCallback', async (c) => {
     const code = c.req.query('code');
@@ -199,9 +216,14 @@ export const mountIngestionAuthCallback = <Env extends OAuthEnv & { WEB_APP_ORIG
     }
     try {
       const env = c.env as Env;
-      const ingestion = buildIngestionContext(env);
+      // Pre-OAuth: no userId yet, so build ingestion with `null` and let
+      // the connector mint a stable id from the Google profile email.
+      const ingestion = deps.buildIngestionContext(env, null);
       const result = await completeDriveAuth(ingestion, { code, state });
-      return c.redirect(resolveRedirect(env, result.returnTo, c.req.url), 302);
+      const target = resolveRedirect(env, result.returnTo, c.req.url);
+      const setCookie = (await deps.mintSessionCookie?.(env, result.userId)) ?? null;
+      if (setCookie) c.header('Set-Cookie', setCookie);
+      return c.redirect(target, 302);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Drive OAuth callback failed.';
       console.error('[ingestion.authCallback.GET] failed', { err: message });

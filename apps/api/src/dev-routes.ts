@@ -1,8 +1,3 @@
-// TODO(stream-a): gate every `/__dev/*` and `/__seed/*` route on
-// `env.ENVIRONMENT` so prod can't accidentally expose them. The two
-// `/__seed/*` handlers below already self-check (`development` | `test`);
-// the rehash route does not. Stream A will add a uniform middleware here
-// in a follow-up.
 import type { Hono } from 'hono';
 
 interface DevEnv {
@@ -12,9 +7,25 @@ interface DevEnv {
 }
 
 /**
- * Mount the dev-only `/__dev/*` and `/__seed/*` routes. These are intended
- * for local development and CI-style fixture seeding only; see the TODO at
- * the top of this file for the planned env-based gating.
+ * Single env gate for every `/__dev/*` and `/__seed/*` route. Prevents the
+ * dev/seed surface from accidentally being reachable in production, where
+ * the routes would otherwise let an unauthenticated caller mutate D1/R2.
+ */
+const isDevEnvironment = (env: DevEnv): boolean =>
+  env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test';
+
+const devOnly = (env: DevEnv): Response | null =>
+  isDevEnvironment(env)
+    ? null
+    : new Response(JSON.stringify({ error: 'dev endpoint disabled in this environment' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      });
+
+/**
+ * Mount the dev-only `/__dev/*` and `/__seed/*` routes. Every handler is
+ * gated by `devOnly` so non-dev/non-test environments respond 403 before
+ * any handler logic runs.
  */
 // biome-ignore lint/suspicious/noExplicitAny: app is generic over its Bindings
 export const mountDevRoutes = (app: Hono<any>): void => {
@@ -32,6 +43,8 @@ export const mountDevRoutes = (app: Hono<any>): void => {
    */
   app.post('/__dev/rehash-citations', async (c) => {
     const env = (c.env ?? {}) as DevEnv;
+    const blocked = devOnly(env);
+    if (blocked) return blocked;
     if (!env.DB || !env.STORAGE) return c.json({ error: 'D1/R2 bindings missing' }, 500);
 
     const sha256Hex = async (s: string): Promise<string> => {
