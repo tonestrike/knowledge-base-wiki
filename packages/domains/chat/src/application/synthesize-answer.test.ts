@@ -129,9 +129,10 @@ describe('synthesizeAnswer', () => {
     expect(events.find((e) => e.kind === 'AnswerFailed')).toBeUndefined();
   });
 
-  it('tripwires on an ambiguous prefix that matches two known citations', async () => {
+  it('drops an ambiguous citation marker silently rather than failing the answer', async () => {
     // Two citations sharing an 8-char prefix is astronomically unlikely
-    // with v4 UUIDs, but the verifier must still bail rather than guess.
+    // with v4 UUIDs, but if it ever happens we want to skip the marker
+    // rather than kill the whole stream — soft-fail UX trade-off.
     const a = citation('11112222-aaaa-4222-8333-444444444444');
     const b = citation('11112222-bbbb-4222-8333-444444444444');
     const events = await collect(
@@ -139,6 +140,7 @@ describe('synthesizeAnswer', () => {
         {
           synthesizer: synthesizerOf([
             { kind: 'segment', index: 0, segment: { kind: 'citation', citationId: '11112222' } },
+            { kind: 'segment', index: 1, segment: { kind: 'prose', text: 'still here.' } },
           ]),
           sourceHashes: {
             async verify() {
@@ -153,14 +155,17 @@ describe('synthesizeAnswer', () => {
         },
       ),
     );
-    const failed = events.find((e) => e.kind === 'AnswerFailed');
-    expect(failed).toBeDefined();
-    if (failed && failed.kind === 'AnswerFailed') {
-      expect(failed.message).toMatch(/unknown citation/i);
+    expect(events.find((e) => e.kind === 'AnswerFailed')).toBeUndefined();
+    expect(events.find((e) => e.kind === 'AnswerFinished')).toBeDefined();
+    const segs = events.filter((e) => e.kind === 'AnswerSegment');
+    // Only the prose segment survives; the citation was dropped.
+    expect(segs).toHaveLength(1);
+    if (segs[0] && segs[0].kind === 'AnswerSegment') {
+      expect(segs[0].segment.kind).toBe('prose');
     }
   });
 
-  it('aborts with AnswerFailed when an artifact references an unknown citation', async () => {
+  it('drops an artifact whose every citation is unresolvable, but keeps the answer alive', async () => {
     const events = await collect(
       synthesizeAnswer(
         {
@@ -177,6 +182,7 @@ describe('synthesizeAnswer', () => {
                 },
               },
             },
+            { kind: 'segment', index: 1, segment: { kind: 'prose', text: 'fallback prose.' } },
           ]),
           sourceHashes: {
             async verify() {
@@ -187,11 +193,11 @@ describe('synthesizeAnswer', () => {
         { turnId: tid, question: 'Q?', findings: [] },
       ),
     );
-    const failed = events.find((e) => e.kind === 'AnswerFailed');
-    expect(failed).toBeDefined();
-    if (failed && failed.kind === 'AnswerFailed') {
-      expect(failed.message).toMatch(/unknown citation/i);
-    }
+    expect(events.find((e) => e.kind === 'AnswerFailed')).toBeUndefined();
+    expect(events.find((e) => e.kind === 'AnswerFinished')).toBeDefined();
+    // The artifact was dropped; only the prose survives.
+    const segs = events.filter((e) => e.kind === 'AnswerSegment');
+    expect(segs).toHaveLength(1);
   });
 
   it('aborts with AnswerFailed when the hash check fails', async () => {
@@ -222,7 +228,7 @@ describe('synthesizeAnswer', () => {
     }
   });
 
-  it('aborts with AnswerFailed when an artifact has invalid props', async () => {
+  it('drops a malformed artifact (e.g. registry-shape violation) and keeps streaming', async () => {
     const cit = citation('aaaaaaaa-1111-4222-8333-444444444444');
     const events = await collect(
       synthesizeAnswer(
@@ -241,6 +247,7 @@ describe('synthesizeAnswer', () => {
                 },
               },
             },
+            { kind: 'segment', index: 1, segment: { kind: 'prose', text: 'after the bad table.' } },
           ]),
           sourceHashes: {
             async verify() {
@@ -255,10 +262,9 @@ describe('synthesizeAnswer', () => {
         },
       ),
     );
-    const failed = events.find((e) => e.kind === 'AnswerFailed');
-    expect(failed).toBeDefined();
-    if (failed && failed.kind === 'AnswerFailed') {
-      expect(failed.message).toMatch(/ComparisonTable/);
-    }
+    expect(events.find((e) => e.kind === 'AnswerFailed')).toBeUndefined();
+    expect(events.find((e) => e.kind === 'AnswerFinished')).toBeDefined();
+    const segs = events.filter((e) => e.kind === 'AnswerSegment');
+    expect(segs).toHaveLength(1);
   });
 });

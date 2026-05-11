@@ -224,7 +224,7 @@ export async function* synthesizeAnswer(
       }
 
       const raw = evt.segment;
-      let answerSeg: AnswerSegment;
+      let answerSeg: AnswerSegment | null;
       if (raw.kind === 'prose') {
         if (!raw.text || raw.text.length === 0) {
           throw new CitationTripwireError(
@@ -235,47 +235,87 @@ export async function* synthesizeAnswer(
       } else if (raw.kind === 'citation') {
         const cit = resolveCitation(raw.citationId);
         if (!cit) {
-          throw new CitationTripwireError(
-            `Synthesizer cited unknown citation ${raw.citationId} [turnId=${input.turnId}]`,
-          );
+          // Soft-fail: a hallucinated or unresolvable citation id shouldn't
+          // tank the entire answer. The model occasionally emits an
+          // 8-char prefix that doesn't unique-match any finding or
+          // invents a UUID outright. Dropping the citation marker keeps
+          // the surrounding prose intact; the run continues. We log with
+          // structured context so the silent-failure hunter has
+          // something to alert on if the rate spikes.
+          console.warn('[chat.synthesizeAnswer] dropping unresolved citation marker', {
+            citationId: raw.citationId,
+            turnId: input.turnId,
+            knownCount: knownCitations.size,
+          });
+          answerSeg = null;
+        } else {
+          await verify(cit);
+          answerSeg = { kind: 'citation', citation: cit };
         }
-        await verify(cit);
-        answerSeg = { kind: 'citation', citation: cit };
       } else {
         const cites: Citation[] = [];
+        const droppedIds: string[] = [];
         for (const id of raw.artifact.citationIds) {
           const cit = resolveCitation(id);
           if (!cit) {
-            throw new CitationTripwireError(
-              `Synthesizer cited unknown citation ${id} [turnId=${input.turnId}]`,
-            );
+            droppedIds.push(id);
+            continue;
           }
           cites.push(cit);
         }
-        for (const cit of cites) await verify(cit);
-        // Re-validate against the closed Artifact registry. This catches any
-        // shape error the upstream structured-output schema might have let
-        // through (e.g. extra props, wrong nested types).
-        const parsed = Artifact.safeParse({
-          kind: raw.artifact.kind,
-          props: raw.artifact.props,
-          citations: cites,
-        });
-        if (!parsed.success) {
-          throw new CitationTripwireError(
-            `Synthesizer emitted an invalid ${raw.artifact.kind} artifact: ${parsed.error.message} [turnId=${input.turnId}]`,
-          );
+        if (droppedIds.length > 0) {
+          console.warn('[chat.synthesizeAnswer] dropping unresolved artifact citations', {
+            artifactKind: raw.artifact.kind,
+            droppedIds,
+            keptCount: cites.length,
+            turnId: input.turnId,
+          });
         }
-        answerSeg = { kind: 'artifact', artifact: parsed.data };
+        // Soft-fail on the whole artifact when EVERY citation is bad —
+        // an unsourced artifact would be a fabrication. Keep the
+        // artifact when at least one citation survives so the visual
+        // (table / timeline / chart) still grounds against something.
+        if (cites.length === 0 && raw.artifact.citationIds.length > 0) {
+          console.warn('[chat.synthesizeAnswer] dropping artifact: every citation unresolved', {
+            artifactKind: raw.artifact.kind,
+            droppedIds,
+            turnId: input.turnId,
+          });
+          answerSeg = null;
+        } else {
+          for (const cit of cites) await verify(cit);
+          // Re-validate against the closed Artifact registry. This catches
+          // shape errors the upstream structured-output schema may have let
+          // through (e.g. extra props, wrong nested types). Shape errors
+          // are still a soft-fail — dropping a single malformed artifact
+          // beats killing the whole answer.
+          const parsed = Artifact.safeParse({
+            kind: raw.artifact.kind,
+            props: raw.artifact.props,
+            citations: cites,
+          });
+          if (!parsed.success) {
+            console.warn('[chat.synthesizeAnswer] dropping malformed artifact', {
+              artifactKind: raw.artifact.kind,
+              issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+              turnId: input.turnId,
+            });
+            answerSeg = null;
+          } else {
+            answerSeg = { kind: 'artifact', artifact: parsed.data };
+          }
+        }
       }
 
-      yield {
-        kind: 'AnswerSegment',
-        turnId: input.turnId,
-        index: evt.index,
-        segment: answerSeg,
-      };
-      segmentsEmitted += 1;
+      if (answerSeg !== null) {
+        yield {
+          kind: 'AnswerSegment',
+          turnId: input.turnId,
+          index: evt.index,
+          segment: answerSeg,
+        };
+        segmentsEmitted += 1;
+      }
     }
 
     yield { kind: 'AnswerFinished', turnId: input.turnId };

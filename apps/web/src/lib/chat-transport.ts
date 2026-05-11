@@ -321,14 +321,17 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
     }
 
     case 'SynthesisStarted': {
-      // Brief synth phase; the answer body itself takes over from here.
-      // We surface a one-line reasoning bubble so the user sees the
-      // hand-off from research to composition.
+      // Keep the synth reasoning bubble OPEN until the first answer
+      // chunk arrives — AI Elements' Reasoning component shows a
+      // shimmer animation while a reasoning stream is open, so the
+      // user sees something alive during the (often 5-15s) gap
+      // between SynthesisStarted and the first AnswerProseDelta.
+      // The bubble is closed lazily in the AnswerProseDelta /
+      // AnswerSegment / AnswerFinished branches via `closeSynth`.
       const line = `Composing answer with ${friendlyModel(e.model)}…\n`;
       return [
         ...startReasoning(state, 'synth'),
         { type: 'reasoning-delta', id: reasonId('synth'), delta: line },
-        ...endReasoning(state, 'synth'),
       ];
     }
 
@@ -338,7 +341,11 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
         e.segmentIndex,
         (state.proseSeen.get(e.segmentIndex) ?? '') + e.textDelta,
       );
-      return [...start, { type: 'text-delta', id: segId(e.segmentIndex), delta: e.textDelta }];
+      return [
+        ...endReasoning(state, 'synth'),
+        ...start,
+        { type: 'text-delta', id: segId(e.segmentIndex), delta: e.textDelta },
+      ];
     }
 
     case 'AnswerSegment': {
