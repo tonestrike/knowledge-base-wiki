@@ -11,6 +11,7 @@ export type {
   ResearcherOutput,
   RawAnswerSegment,
   SourceHashVerifier,
+  SourceSearchHit,
   Synthesizer,
   SynthesizerEvent,
   SynthesizerInput,

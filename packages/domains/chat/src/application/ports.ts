@@ -6,7 +6,9 @@ import type {
 import type {
   ArtifactKind,
   Citation,
+  ContentHash,
   ConversationId,
+  SourceId,
   TurnId,
   UserId,
   WikiId,
@@ -33,6 +35,31 @@ export interface WikiPageSummary {
   citations: Citation[];
 }
 
+/**
+ * A hit from `searchSources` — the agent's fallback when page-title /
+ * page-body search misses content that's clearly present in the underlying
+ * `Source` text (PDFs, markdown, transcripts). Each hit carries:
+ *
+ *   - an `excerpt` showing why it matched (used in agent reasoning),
+ *   - the precise `byteRange` of the matched region in the source,
+ *   - `citingPages` — wiki pages already grounded on this source so the
+ *     agent can drill into them via `readWikiPage` and bring real
+ *     `Citation`s into the synth's working set.
+ *
+ * The agent does NOT mint new citations from raw source matches — only
+ * pages with existing claims/citations feed the synth, so the fabrication
+ * tripwire stays intact. This tool's job is discovery: get the agent
+ * pointed at the right pages when keyword overlap on page titles/bodies
+ * misses the user's phrasing.
+ */
+export interface SourceSearchHit {
+  sourceId: SourceId;
+  excerpt: string;
+  byteRange: { start: number; end: number };
+  contentHash: ContentHash;
+  citingPages: Array<{ pageId: WikiPageId; title: string; pageType?: string }>;
+}
+
 export interface WikiReader {
   searchPages(args: { wikiId: WikiId; query: string; limit: number }): Promise<WikiPageSummary[]>;
   /**
@@ -43,6 +70,20 @@ export interface WikiReader {
    */
   listSamplePages(args: { wikiId: WikiId; limit: number }): Promise<WikiPageSummary[]>;
   getPage(id: WikiPageId): Promise<WikiPageSummary | null>;
+  /**
+   * Token-overlap search across the underlying `Source` text for every
+   * source cited by any page in this wiki. The agent uses this when page
+   * search misses content the user's phrasing should plausibly hit — the
+   * extracted PDF/markdown body of a paper often contains key tokens the
+   * compiled page title and body don't repeat. Returns the top `limit`
+   * matches each with citing-page pointers so the agent can drill back
+   * into real wiki pages (and keep the citation chain grounded).
+   */
+  searchSources(args: {
+    wikiId: WikiId;
+    query: string;
+    limit: number;
+  }): Promise<SourceSearchHit[]>;
 }
 
 /** Distinguished error for citation tripwire violations (SF-1). The use-case

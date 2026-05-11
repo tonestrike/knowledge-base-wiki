@@ -130,5 +130,13 @@ export const createOrpcWikiReader = (opts: OrpcWikiReaderOptions): WikiReader =>
         throw err;
       }
     },
+    async searchSources() {
+      // The oRPC reader exists for environments where chat doesn't share a
+      // process with the wiki context — it can't reach R2 directly to read
+      // raw source text. A future cross-context procedure can plumb this
+      // through; until then the agent simply has nothing to fall back to,
+      // which is the same behaviour as before this tool existed.
+      return [];
+    },
   };
 };

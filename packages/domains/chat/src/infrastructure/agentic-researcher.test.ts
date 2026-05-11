@@ -36,6 +36,9 @@ const fakeWikiReader = (pages: WikiPageSummary[]): WikiReader => ({
   async getPage(id) {
     return pages.find((p) => p.id === id) ?? null;
   },
+  async searchSources() {
+    return [];
+  },
 });
 
 /**

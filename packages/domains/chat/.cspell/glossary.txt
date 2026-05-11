@@ -33,6 +33,7 @@ answerproduced
 wikipageretrieved
 answerthinking
 wikireader
+sourcesearchhit
 sourcehashverifier
 verifier
 openrouter

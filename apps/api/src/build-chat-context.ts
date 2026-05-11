@@ -2,6 +2,7 @@ import {
   type ChatContext,
   type ConversationRepository,
   type Researcher,
+  type SourceSearchHit,
   type Synthesizer,
   type TurnRepository,
   type WikiPageSummary,
@@ -131,6 +132,9 @@ const stubWikiReader: WikiReader = {
   },
   async getPage() {
     return null;
+  },
+  async searchSources() {
+    return [];
   },
 };
 
@@ -316,6 +320,99 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
       if (!row) return null;
       return hydrate(row);
     },
+    async searchSources({ wikiId, query, limit }) {
+      // Discovery fallback: searchPages matches on page title + body
+      // tokens, but a user phrasing like "deceptive AI behavior" can miss
+      // pages whose compiled body uses domain vocabulary like "alignment
+      // faking" while the underlying PDF text says both. We read the raw
+      // source text for every Source cited anywhere in this wiki, score
+      // by token overlap, and hand the agent back the top hits with
+      // their citing pages so it can drill into real WikiPages via
+      // readWikiPage. New citations are NEVER minted from raw matches
+      // — the synth grounds against page citations only, keeping the
+      // fabrication tripwire intact.
+      const qTokens = [...new Set(tokenize(query))].filter((t) => t.length >= 3);
+      if (qTokens.length === 0) return [];
+
+      const rows = await db
+        .prepare(
+          `SELECT DISTINCT cit.source_id AS source_id, cit.content_hash AS content_hash
+             FROM citations cit
+             JOIN claims cl ON cl.id = cit.claim_id
+             JOIN wiki_pages p ON p.id = cl.wiki_page_id
+            WHERE p.wiki_id = ?
+            LIMIT 60`,
+        )
+        .bind(wikiId)
+        .all<{ source_id: string; content_hash: string }>();
+      if (rows.results.length === 0) return [];
+
+      // Citing-pages index: one batched query then group by source.
+      const citingRows = await db
+        .prepare(
+          `SELECT DISTINCT cit.source_id AS source_id, p.id AS page_id, p.title AS title, p.page_type AS page_type
+             FROM citations cit
+             JOIN claims cl ON cl.id = cit.claim_id
+             JOIN wiki_pages p ON p.id = cl.wiki_page_id
+            WHERE p.wiki_id = ? AND p.subtype != 'Index'`,
+        )
+        .bind(wikiId)
+        .all<{ source_id: string; page_id: string; title: string; page_type: string | null }>();
+      const citingBySource = new Map<string, SourceSearchHit['citingPages']>();
+      for (const r of citingRows.results) {
+        const list = citingBySource.get(r.source_id) ?? [];
+        list.push({
+          pageId: r.page_id as WikiPageId,
+          title: r.title,
+          ...(r.page_type ? { pageType: r.page_type } : {}),
+        });
+        citingBySource.set(r.source_id, list);
+      }
+
+      const scored: Array<{ hit: SourceSearchHit; score: number }> = [];
+      for (const row of rows.results) {
+        const obj = await storage.get(`sources/${row.source_id}/text`);
+        if (!obj) continue;
+        const text = await obj.text();
+        const textLower = text.toLowerCase();
+        let score = 0;
+        for (const t of qTokens) {
+          let i = textLower.indexOf(t);
+          while (i !== -1) {
+            score += 1;
+            i = textLower.indexOf(t, i + t.length);
+          }
+        }
+        if (score === 0) continue;
+        // Find the best window: pick the first occurrence of the rarest
+        // query token, centre an excerpt around it. Good enough — we
+        // don't need a true span-density window for a demo.
+        let anchor = -1;
+        for (const t of qTokens) {
+          const at = textLower.indexOf(t);
+          if (at >= 0) {
+            anchor = at;
+            break;
+          }
+        }
+        const excerptCenter = anchor >= 0 ? anchor : 0;
+        const excerptStart = Math.max(0, excerptCenter - 120);
+        const excerptEnd = Math.min(text.length, excerptCenter + 280);
+        const excerpt = text.slice(excerptStart, excerptEnd).trim();
+        scored.push({
+          score,
+          hit: {
+            sourceId: row.source_id as SourceId,
+            excerpt,
+            byteRange: { start: excerptStart, end: excerptEnd },
+            contentHash: row.content_hash as ContentHash,
+            citingPages: citingBySource.get(row.source_id) ?? [],
+          },
+        });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, Math.max(1, limit)).map((s) => s.hit);
+    },
   };
 };
 
@@ -394,19 +491,17 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
       provider: { order: ['anthropic'], allow_fallbacks: false },
     }) as LanguageModel;
-    // Researcher runs on Haiku 4.5 — picking which pages to drill into is
-    // a routing decision, not prose composition. Haiku is ~3× faster than
-    // Sonnet on tool-call loops; the synth stays on Sonnet for prose
-    // quality.
-    const haiku = openrouter.chat('anthropic/claude-haiku-4.5', {
-      provider: { order: ['anthropic'], allow_fallbacks: false },
-    }) as LanguageModel;
+    // Researcher AND synthesizer both run on Sonnet 4.6. Accuracy is the
+    // hill we die on for this app — the wiki + indexed sources are the
+    // moat, and the agent loop has to actually use them. A previous
+    // Haiku-for-recall experiment showed the agent giving up after 2-3
+    // searches on questions the wiki demonstrably covers; reverted.
     researcher = createAgenticResearcher({
-      model: haiku,
+      model: sonnet,
       wikiReader,
-      modelName: 'anthropic/claude-haiku-4.5',
+      modelName: 'anthropic/claude-sonnet-4.6',
     });
-    researcherName = 'agent-loop · anthropic/claude-haiku-4.5';
+    researcherName = 'agent-loop · anthropic/claude-sonnet-4.6';
     synthesizer = createAiSdkSynthesizer({
       model: sonnet,
       modelName: 'anthropic/claude-sonnet-4.6',

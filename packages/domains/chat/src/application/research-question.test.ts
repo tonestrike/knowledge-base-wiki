@@ -37,6 +37,9 @@ const noopReader: WikiReader = {
   async getPage() {
     return null;
   },
+  async searchSources() {
+    return [];
+  },
 };
 
 const stubResearcherWithPages = (pages: WikiPageSummary[]): Researcher => ({
@@ -109,6 +112,9 @@ describe('researchQuestion', () => {
       },
       async getPage() {
         return null;
+      },
+      async searchSources() {
+        return [];
       },
     };
     const out = await researchQuestion(
