@@ -6,6 +6,8 @@ The product is a **folder-grounded wiki**: point it at a Google Drive folder, th
 
 ## Live demo
 
+![tenex — Anthropic research wiki](docs/images/wiki-overview.png)
+
 The app is already deployed to Cloudflare Workers — no setup required to try it:
 
 **<https://tenex-api.tonyvantur.workers.dev>**
@@ -238,6 +240,28 @@ What's covered:
 ## AI tooling
 
 This repo is set up to work with both **Claude Code** and **Codex**. Source of truth lives in `.rulesync/`; `bun install` runs `rulesync generate` via postinstall, fanning the rules out to `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, and `.agents/` (all gitignored). Skills live in `skills/<name>/SKILL.md` and are symlinked into both `.claude/skills/` and `.codex/skills/`.
+
+## Screens
+
+Screenshots captured against the live Worker at <https://tenex-api.tonyvantur.workers.dev> (1440×900).
+
+![Homepage — hero plus featured Anthropic research wiki card](docs/images/homepage.png)
+*Homepage. Hero copy plus the featured "Anthropic research bundle" wiki — 27 typed pages compiled from a Drive folder of Anthropic alignment papers.*
+
+![Wiki overview — typed page index with glossary chips](docs/images/wiki-overview.png)
+*Wiki overview. Left rail is the typed table of contents (Risks, Opportunities, Wedges, Concepts); the body lists every Concept page with its glossary blurb. Page-type chips are the closed enum the schema-inference pass settled on.*
+
+![Concept page — body with citation chips in the right rail](docs/images/wiki-page.png)
+*Concept page. Magazine layout: prose on the left, citation chips and last-verified timestamp on the right. Every claim links to a byte-range Span in its cited source.*
+
+![Lint dashboard — Opus 4.7 verifier UI for the wiki](docs/images/lint-dashboard.png)
+*Lint dashboard. "Run audit" replays every Claim against its cited Span via the Opus 4.7 verifier, surfaces failures inline with a suggested correction, and lets you apply the fix from the page.*
+
+![Chat dock — wiki-aware research loop with question typed in](docs/images/chat-dock.png)
+*Chat dock. Cmd+K from any wiki route opens the right-side dock; the chat agent uses page-type search, browse-by-section, and source-text fallback over the wiki — every answer cites the Span the verifier can re-hash.*
+
+![Compile theater — live narration of an in-progress compile](docs/images/compile-theater.png)
+*Compile theater. Live SSE narration of an in-progress Compile Run: schema reveal, source cards flying through extraction, emerging typed pages, and a per-agent thought stream.*
 
 ## Docs
 
