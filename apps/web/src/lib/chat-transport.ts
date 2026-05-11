@@ -271,17 +271,18 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
     }
 
     case 'ResearchStarted': {
-      // ResearchStarted.model carries the wired Researcher implementation
-      // — "agent-loop · …" when the agentic tool-loop is on, "wiki-search"
-      // when the direct fast-path is wired (no model). The bubble names
-      // which one is running so the user can tell from the trace whether
-      // the agent is iterating or doing a one-shot D1 lookup.
+      // Single, continuous reasoning bubble for ALL pre-answer work —
+      // research + synth get merged into one phase ("thinking"). Prior
+      // version opened a separate bubble for synthesis, which caused
+      // the Reasoning component to reset its duration timer; the user
+      // would see "Thought for 1 second" even after the agent spent
+      // 50s on the actual research. One bubble, one duration.
       const opener = e.model.startsWith('agent-loop')
         ? 'Agent searching the wiki — iterating queries and reading promising pages…\n'
         : 'Searching the compiled wiki for relevant pages…\n';
-      return startReasoning(state, 'research').concat({
+      return startReasoning(state, 'thinking').concat({
         type: 'reasoning-delta',
-        id: reasonId('research'),
+        id: reasonId('thinking'),
         delta: opener,
       });
     }
@@ -292,8 +293,8 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
         e.citationCount === 1 ? '' : 's'
       }\n`;
       return [
-        ...startReasoning(state, 'research'),
-        { type: 'reasoning-delta', id: reasonId('research'), delta: line },
+        ...startReasoning(state, 'thinking'),
+        { type: 'reasoning-delta', id: reasonId('thinking'), delta: line },
         {
           type: 'data-wiki-page-retrieved',
           data: {
@@ -313,25 +314,21 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
       const line = `Found ${e.candidatePageCount} relevant page${
         e.candidatePageCount === 1 ? '' : 's'
       }, grounding ${e.findingCount} finding${e.findingCount === 1 ? '' : 's'}.\n`;
+      // Don't end the reasoning bubble here — it continues into the
+      // synth phase. The bubble closes on the first AnswerProseDelta /
+      // AnswerSegment so the duration captures the WHOLE think (research
+      // + synth's first-token latency, often ~50s for a hard question).
       return [
-        ...startReasoning(state, 'research'),
-        { type: 'reasoning-delta', id: reasonId('research'), delta: line },
-        ...endReasoning(state, 'research'),
+        ...startReasoning(state, 'thinking'),
+        { type: 'reasoning-delta', id: reasonId('thinking'), delta: line },
       ];
     }
 
     case 'SynthesisStarted': {
-      // Keep the synth reasoning bubble OPEN until the first answer
-      // chunk arrives — AI Elements' Reasoning component shows a
-      // shimmer animation while a reasoning stream is open, so the
-      // user sees something alive during the (often 5-15s) gap
-      // between SynthesisStarted and the first AnswerProseDelta.
-      // The bubble is closed lazily in the AnswerProseDelta /
-      // AnswerSegment / AnswerFinished branches via `closeSynth`.
       const line = `Composing answer with ${friendlyModel(e.model)}…\n`;
       return [
-        ...startReasoning(state, 'synth'),
-        { type: 'reasoning-delta', id: reasonId('synth'), delta: line },
+        ...startReasoning(state, 'thinking'),
+        { type: 'reasoning-delta', id: reasonId('thinking'), delta: line },
       ];
     }
 
@@ -342,7 +339,7 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
         (state.proseSeen.get(e.segmentIndex) ?? '') + e.textDelta,
       );
       return [
-        ...endReasoning(state, 'synth'),
+        ...endReasoning(state, 'thinking'),
         ...start,
         { type: 'text-delta', id: segId(e.segmentIndex), delta: e.textDelta },
       ];
@@ -350,12 +347,18 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
 
     case 'AnswerSegment': {
       const seg = e.segment;
+      // Any answer segment (prose, citation, or artifact) means the
+      // model is now producing user-visible output — close the
+      // thinking bubble if it's still open. (AnswerProseDelta already
+      // closes it for streaming prose, but a citation or artifact may
+      // be the very first user-facing thing the model emits.)
+      const closeThinking = endReasoning(state, 'thinking');
       if (seg.kind === 'prose') {
         // If no deltas were emitted for this index (e.g. legacy synthesizer
         // path that doesn't stream), synthesise one delta carrying the
         // whole text so the rendered part still has content.
         const seen = state.proseSeen.get(e.index) ?? '';
-        const out: Chunk[] = [...ensureTextStart(state, e.index)];
+        const out: Chunk[] = [...closeThinking, ...ensureTextStart(state, e.index)];
         if (seen.length === 0) {
           out.push({ type: 'text-delta', id: segId(e.index), delta: seg.text });
           state.proseSeen.set(e.index, seg.text);
@@ -364,12 +367,18 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
         return out;
       }
       if (seg.kind === 'citation') {
-        return [{ type: 'data-citation', id: `cit-${seg.citation.id}`, data: seg.citation }];
+        return [
+          ...closeThinking,
+          { type: 'data-citation', id: `cit-${seg.citation.id}`, data: seg.citation },
+        ];
       }
       // artifact — carry the full Artifact (kind+props+citations) so the
       // renderer can show citation chips alongside the artifact body
       // without cross-part lookups.
-      return [{ type: 'data-artifact', id: `art-${e.index}`, data: seg.artifact }];
+      return [
+        ...closeThinking,
+        { type: 'data-artifact', id: `art-${e.index}`, data: seg.artifact },
+      ];
     }
 
     case 'AnswerFailed': {

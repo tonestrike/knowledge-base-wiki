@@ -343,60 +343,58 @@ function Composer({
   };
 
   return (
-    <div className="border-t border-border bg-background px-3 py-3">
-      <div className="rounded-2xl border border-input bg-card/40 px-3 py-2 shadow-xs transition-colors focus-within:border-accent/60 focus-within:bg-card/60">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              resize();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                if (canSend) handleSend();
-              }
-            }}
-            placeholder="Ask anything…"
-            rows={1}
-            className="min-h-[24px] flex-1 resize-none bg-transparent text-sm leading-6 placeholder:text-muted-foreground/60 focus:outline-none"
-          />
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={() => void stop()}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:text-foreground"
-              aria-label="Stop generation"
+    <div className="border-t border-border bg-background px-4 py-3">
+      <div className="flex items-end gap-2 rounded-xl border border-input bg-card/40 px-3 py-1.5 shadow-xs transition-colors focus-within:border-accent/60 focus-within:bg-card/60">
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            resize();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              if (canSend) handleSend();
+            }
+          }}
+          placeholder="Ask anything…"
+          rows={1}
+          className="my-1.5 max-h-40 flex-1 resize-none self-center bg-transparent text-sm leading-5 placeholder:text-muted-foreground/60 focus:outline-none"
+        />
+        {isStreaming ? (
+          <button
+            type="button"
+            onClick={() => void stop()}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:text-foreground"
+            aria-label="Stop generation"
+          >
+            <Spinner />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Send message"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+              aria-hidden="true"
             >
-              <Spinner />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!canSend}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
-              aria-label="Send message"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <title>Send</title>
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-            </button>
-          )}
-        </div>
+              <title>Send</title>
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
