@@ -10,6 +10,8 @@ The app is already deployed to Cloudflare Workers — no setup required to try i
 
 **<https://tenex-api.tonyvantur.workers.dev>**
 
+> **Try the seeded wiki directly:** <https://tenex-api.tonyvantur.workers.dev/wiki/cb0b020d-50ab-41cb-91d9-09a5dda547b2> — a 27-page wiki compiled from the Anthropic research bundle (Constitutional AI, many-shot jailbreaks, alignment faking).
+
 The Worker serves both the SPA (`/*`) and the oRPC api (`/rpc/*`) from the same origin — no CORS, no separate frontend deploy. Health check: <https://tenex-api.tonyvantur.workers.dev/rpc/core/health>.
 
 ## Code walkthrough — start here
@@ -56,6 +58,65 @@ Open <http://localhost:5173>.
 | `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models. | <https://openrouter.ai/keys> |
 
 Add `http://localhost:8787/rpc/ingestion/authCallback` to your Google OAuth client's authorized redirect URIs.
+
+## Architecture
+
+One Worker, one origin. The SPA talks to the api over oRPC at `/rpc/*`. The api routes into five bounded-context packages, which read and write through Cloudflare's storage primitives (D1 for typed rows, R2 for source bytes, KV for cached extracts) and two Durable Objects (one per long-running compile, one per chat turn). Drive supplies the source documents; OpenRouter fronts every model call to Anthropic.
+
+```mermaid
+graph LR
+  Browser[Browser]
+  SPA[Vite SPA<br/>apps/web]
+  Hono["/rpc/* — Hono on Workers<br/>apps/api"]
+  Router[oRPC handlers]
+
+  Browser --> SPA --> Hono --> Router
+
+  subgraph Domains["Domain packages"]
+    Core[Core]
+    Ingestion[Ingestion]
+    Chat[Chat]
+    Wiki[Wiki]
+    Verification[Verification]
+  end
+
+  Router --> Core
+  Router --> Ingestion
+  Router --> Chat
+  Router --> Wiki
+  Router --> Verification
+
+  subgraph Storage["Storage"]
+    D1[(D1)]
+    R2[(R2)]
+    KV[(KV)]
+    CompileRunDO[CompileRunDO]
+    ChatTurnDO[ChatTurnDO]
+  end
+
+  Ingestion --> D1
+  Ingestion --> R2
+  Ingestion --> KV
+  Wiki --> D1
+  Wiki --> R2
+  Wiki --> CompileRunDO
+  Chat --> D1
+  Chat --> R2
+  Chat --> ChatTurnDO
+  Verification --> D1
+  Verification --> R2
+  Core --> D1
+
+  subgraph External["External"]
+    Drive["Google Drive API"]
+    OpenRouter["OpenRouter → Anthropic"]
+  end
+
+  Ingestion --> Drive
+  Wiki --> OpenRouter
+  Chat --> OpenRouter
+  Verification --> OpenRouter
+```
 
 ## Layout
 
@@ -130,7 +191,7 @@ Cloudflare login is one-time and runs interactively: `bunx wrangler login` if yo
 
 ## Design tradeoffs (what we did and didn't build)
 
-We made two deliberate scope choices that are worth calling out so reviewers don't read the gaps as oversight.
+We made three deliberate scope choices that are worth calling out so reviewers don't read the gaps as oversight.
 
 ### We indexed by typed *perspectives*, not by embeddings
 
@@ -156,6 +217,22 @@ The architecture deliberately makes ingestion an extension point:
 **Given more time we would have added:** Word (`docx`), images via VLM captioning (Sonnet 4.6 vision → text), audio transcripts (Whisper), plain Markdown, structured CSV/JSON. Each is a self-contained Extractor; none requires changes outside `packages/domains/ingestion/`.
 
 The choice was: prove the wiki concept end-to-end on one well-understood format, rather than spread engineering thin across many formats with a thinner wiki on top.
+
+### We logged prompts inline; we did not wire a prompt-management plane
+
+Every prompt in this codebase lives as a string literal next to the use-case that issues it — `packages/domains/verification/src/infrastructure/anthropic-verifier.ts`, `packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts`, `packages/domains/chat/src/application/agentic-researcher.ts`. That's deliberate for a take-home: the prompt is part of the code review, not hidden behind a service.
+
+**Given more time we would wire Langfuse** for prompt versioning, A/B comparisons, and trace spans that stitch a single user action across the compile, chat, and lint loops. The natural seam is already in place: every model call goes through the `LanguageModel` port (the Vercel AI SDK's `LanguageModelV1`). Wrapping that port with a traced adapter that emits to Langfuse's OTLP ingest gives us prompt history, latency/cost per call, and tool-loop spans for free — no per-call instrumentation, no edits to use-cases.
+
+So the abstraction is already there; we chose not to spend the integration budget. The work is "add one adapter, swap the binding in the composition root, point `OTEL_EXPORTER_OTLP_ENDPOINT` at Langfuse" — well-shaped, but not what the reviewer is here to evaluate.
+
+## Evals
+
+A span-citation accuracy harness against the anthropic-papers case set lives in [`evals/`](evals/README.md); run with `bun run evals`.
+
+What's covered:
+
+- **Span-citation accuracy** — case set in `evals/anthropic-papers-cases.ts`: questions paired with expected source spans across the Constitutional AI / many-shot jailbreaks / alignment-faking bundle.
 
 ## AI tooling
 
