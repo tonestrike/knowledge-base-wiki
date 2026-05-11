@@ -62,6 +62,9 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
   const { events, error } = useCompileStream(compileRunId);
   const nav = useNavigate();
   const reduce = useReducedMotion();
+  // Drives the full-page hand-off animation after CompileFinished.
+  // 'idle' → 'flash' (white-out) → 'navigate'.
+  const [transition, setTransition] = useState<'idle' | 'flash' | 'navigate'>('idle');
 
   const phase = derivePhase(events);
   const schemaEvent = events.find((e) => e.kind === 'SchemaInferred');
@@ -126,119 +129,193 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
       : (events.find((e) => e.kind === 'PageDrafted')?.compileRunId ?? null);
   }, [compileFinished, events]);
 
+  // Auto-navigate to the wiki ~4s after CompileFinished. Stages:
+  //   t=0:    CompileFinished arrives → CompletionHero animates in
+  //   t=4s:   transition flips to 'flash' (white-out overlay sweeps in)
+  //   t=5s:   transition flips to 'navigate' → router.push(/wiki/<id>)
+  // The user can click "Open your wiki" earlier to skip the delay.
+  useEffect(() => {
+    if (transition !== 'idle' || !wikiId) return;
+    if (!compileFinished || compileFinished.kind !== 'CompileFinished') return;
+    const t1 = window.setTimeout(() => setTransition('flash'), 4000);
+    return () => window.clearTimeout(t1);
+  }, [compileFinished, wikiId, transition]);
+  useEffect(() => {
+    if (transition !== 'flash' || !wikiId) return;
+    const t = window.setTimeout(() => {
+      setTransition('navigate');
+      nav(`/wiki/${wikiId}`, { state: { compileRunId } });
+    }, 900);
+    return () => window.clearTimeout(t);
+  }, [transition, wikiId, nav, compileRunId]);
+
   return (
-    <section className="relative min-h-[640px] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-b from-background via-background to-accent/[0.02]">
-      {!reduce ? <AmbientField active={phase !== 'finished'} /> : null}
+    <>
+      {/* Full-page hand-off overlay. Renders as a fixed-position layer over
+        the whole viewport (NOT inside the rounded section) so the animation
+        feels like the page itself is dissolving into the wiki, not a card
+        flash. Two acts: an accent-color sweep from center outward, then a
+        white-out as the route swaps in. */}
+      <AnimatePresence>
+        {transition !== 'idle' ? (
+          <motion.div
+            key="compile-handoff"
+            className="fixed inset-0 z-[100] pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-accent"
+              initial={{ clipPath: 'circle(0% at 50% 50%)' }}
+              animate={{ clipPath: 'circle(150% at 50% 50%)' }}
+              transition={{ duration: 0.9, ease: [0.65, 0, 0.35, 1] }}
+            />
+            <motion.div
+              className="absolute inset-0 bg-background"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: transition === 'navigate' ? 1 : 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+            />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-      {/* Error banner */}
-      {error ? (
-        <div className="relative z-10 p-6">
-          <ErrorState message={`Compile stream failed: ${error}`} onRetry={onRetry} />
-        </div>
-      ) : null}
+      <section className="relative overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-b from-background via-background to-accent/[0.02]">
+        {!reduce ? <AmbientField active={phase !== 'finished'} /> : null}
 
-      {/* Hero phase pill */}
-      <div className="relative z-10 px-8 pt-8">
-        <PhaseRibbon
-          phase={phase}
-          pageCount={drafted.length}
-          sourceCount={sourceCards.length}
-          schemaTypes={
-            schemaEvent && schemaEvent.kind === 'SchemaInferred'
-              ? schemaEvent.schema.pageTypes.length
-              : 0
-          }
-          indexCount={indexBuilt.length}
-        />
-      </div>
+        {/* Error banner */}
+        {error ? (
+          <div className="relative z-10 p-5">
+            <ErrorState message={`Compile stream failed: ${error}`} onRetry={onRetry} />
+          </div>
+        ) : null}
 
-      {/* Central stage */}
-      <div className="relative z-10 grid grid-cols-1 gap-8 px-8 pt-8 pb-12 lg:grid-cols-[1fr_1.4fr_1fr]">
-        {/* Left: sources */}
-        <div className="space-y-3">
-          <LaneLabel icon={<BookOpenIcon className="size-3" />} label="Sources" />
-          <AnimatePresence>
-            {sourceCards.map((s, i) => (
-              <SourceCardCine key={s.id} name={s.name} status={s.status} idx={i} />
-            ))}
-          </AnimatePresence>
-          {sourceCards.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground/60">
-              Awaiting CompileStarted…
-            </p>
-          ) : null}
-        </div>
-
-        {/* Center: stage with phase-aware visual */}
-        <div className="relative flex min-h-[400px] flex-col items-center justify-center">
-          <AnimatePresence mode="wait">
-            {phase === 'starting' || phase === 'reading' || phase === 'schema' ? (
-              <CoreOrb
-                key="core"
-                phase={phase}
-                schema={
-                  schemaEvent?.kind === 'SchemaInferred' ? schemaEvent.schema.pageTypes : undefined
-                }
-              />
-            ) : phase === 'drafting' ? (
-              <DraftingConstellation key="draft" drafted={drafted} />
-            ) : phase === 'linking' || phase === 'indexing' ? (
-              <LinkingWeb
-                key="link"
-                drafted={drafted}
-                indexes={indexBuilt.map((e) => (e.kind === 'IndexBuilt' ? e.pageType : ''))}
-              />
-            ) : (
-              <CompletionHero
-                key="done"
-                pageCount={drafted.length + indexBuilt.length}
-                wikiId={wikiId ?? undefined}
-                onContinue={(id) => nav(`/wiki/${id}`)}
-              />
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Right: pages */}
-        <div className="space-y-3">
-          <LaneLabel
-            icon={<PenLineIcon className="size-3" />}
-            label={`Pages · ${drafted.length}`}
+        {/* Hero phase pill */}
+        <div className="relative z-10 px-6 pt-5">
+          <PhaseRibbon
+            phase={phase}
+            pageCount={drafted.length}
+            sourceCount={sourceCards.length}
+            schemaTypes={
+              schemaEvent && schemaEvent.kind === 'SchemaInferred'
+                ? schemaEvent.schema.pageTypes.length
+                : 0
+            }
+            indexCount={indexBuilt.length}
           />
+        </div>
+
+        {/* Central stage. Grid rows stretch to the tallest column by default;
+          `auto-rows-min` + `items-start` lets each lane be its own height so
+          the empty middle doesn't push the page footer way down. */}
+        <div className="relative z-10 grid auto-rows-min grid-cols-1 items-start gap-6 px-6 pt-5 pb-6 lg:grid-cols-[260px_1fr_320px]">
+          {/* Left: sources */}
           <div className="space-y-2">
+            <LaneLabel icon={<BookOpenIcon className="size-3" />} label="Sources" />
             <AnimatePresence>
-              {drafted.slice(-12).map((e, i) => (
-                <PageCardCine key={e.pageId} event={e} idx={i} />
+              {sourceCards.map((s, i) => (
+                <SourceCardCine key={s.id} name={s.name} status={s.status} idx={i} />
               ))}
             </AnimatePresence>
+            {sourceCards.length === 0 ? (
+              <p className="font-mono text-[11px] text-muted-foreground/60">
+                Awaiting CompileStarted…
+              </p>
+            ) : null}
+          </div>
+
+          {/* Center: stage with phase-aware visual. No fixed height — the
+            stage itself decides how much vertical room it needs, so the
+            page is compact while reading/schema (just the orb) and only
+            grows during drafting when there's actual content to show. */}
+          <div className="relative flex flex-col items-center justify-start">
+            <AnimatePresence mode="wait">
+              {phase === 'starting' || phase === 'reading' || phase === 'schema' ? (
+                <CoreOrb
+                  key="core"
+                  phase={phase}
+                  schema={
+                    schemaEvent?.kind === 'SchemaInferred'
+                      ? schemaEvent.schema.pageTypes
+                      : undefined
+                  }
+                />
+              ) : phase === 'drafting' ? (
+                <DraftingConstellation key="draft" drafted={drafted} />
+              ) : phase === 'linking' || phase === 'indexing' ? (
+                <LinkingWeb
+                  key="link"
+                  drafted={drafted}
+                  indexes={indexBuilt.map((e) => (e.kind === 'IndexBuilt' ? e.pageType : ''))}
+                />
+              ) : (
+                <CompletionHero
+                  key="done"
+                  pageCount={drafted.length + indexBuilt.length}
+                  wikiId={wikiId ?? undefined}
+                  onContinue={(id) => nav(`/wiki/${id}`)}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Right: pages — capped with overflow so the list never blows the
+            page height; latest at top, older scroll-fade out the bottom. */}
+          <div className="space-y-2">
+            <LaneLabel
+              icon={<PenLineIcon className="size-3" />}
+              label={`Pages · ${drafted.length}`}
+            />
+            <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
+              <AnimatePresence>
+                {drafted
+                  .slice()
+                  .reverse()
+                  .map((e, i) => (
+                    <PageCardCine key={e.pageId} event={e} idx={i} />
+                  ))}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Bottom thought strip */}
-      <div className="relative z-10 border-t border-border/40 bg-background/40 px-8 py-4 backdrop-blur-sm">
-        <LaneLabel icon={<BrainIcon className="size-3" />} label="Live narration" />
-        <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-          <AnimatePresence initial={false}>
-            {lastThoughts.map((t, i) =>
-              t.kind === 'AgentThought' ? (
-                <ThoughtChip
-                  key={`${t.compileRunId}-${thoughts.indexOf(t)}-${t.message.slice(0, 24)}`}
-                  agent={t.agent}
-                  message={t.message}
-                  fresh={i === lastThoughts.length - 1}
-                />
-              ) : null,
-            )}
-          </AnimatePresence>
-          {lastThoughts.length === 0 ? (
-            <p className="col-span-full font-mono text-[11px] text-muted-foreground/60">
-              The pipeline will narrate itself here as the agents work…
-            </p>
-          ) : null}
+        {/* Bottom thought strip */}
+        <div className="relative z-10 border-t border-border/40 bg-background/40 px-8 py-4 backdrop-blur-sm">
+          <LaneLabel icon={<BrainIcon className="size-3" />} label="Live narration" />
+          {/* Vertical stack — newest at the bottom, older lines fade as more
+            arrive. Drops the previous `layout` motion + grid layout that
+            caused chips to overlap on entrance/exit. The fixed-height
+            container with overflow-hidden + flex-col + bottom-anchor
+            means the latest line is always at the visual baseline, and
+            new lines push older ones up smoothly. */}
+          <div className="mt-2 flex h-[88px] flex-col-reverse gap-1 overflow-hidden">
+            <AnimatePresence initial={false}>
+              {[...lastThoughts]
+                .reverse()
+                .filter(
+                  (t): t is Extract<CompileEvent, { kind: 'AgentThought' }> =>
+                    t.kind === 'AgentThought',
+                )
+                .map((t, i) => (
+                  <ThoughtChip
+                    key={`${t.compileRunId}-${thoughts.indexOf(t)}-${t.message.slice(0, 24)}`}
+                    agent={t.agent}
+                    message={t.message}
+                    fresh={i === 0}
+                  />
+                ))}
+            </AnimatePresence>
+            {lastThoughts.length === 0 ? (
+              <p className="font-mono text-[11px] text-muted-foreground/60">
+                The pipeline will narrate itself here as the agents work…
+              </p>
+            ) : null}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -516,7 +593,7 @@ function DraftingConstellation({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="relative flex h-[400px] w-full items-center justify-center"
+      className="relative flex w-full items-center justify-center py-8"
     >
       <motion.div
         className="absolute h-40 w-40 rounded-full bg-accent/10 blur-3xl"
@@ -568,7 +645,7 @@ function LinkingWeb({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="relative flex h-[400px] w-full items-center justify-center"
+      className="relative flex min-h-[320px] w-full items-center justify-center py-8"
     >
       <motion.div
         className="absolute h-72 w-72 rounded-full border border-accent/30"
