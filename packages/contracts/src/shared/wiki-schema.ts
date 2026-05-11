@@ -34,6 +34,23 @@ export const WikiSchema = z
      * Optional because pre-Narrator wikis compiled without it.
      */
     thesis: z.string().min(1).max(800).optional(),
+    /**
+     * Optional glossary of key terms extracted from the corpus. The
+     * Narrator picks the terms a newcomer to this corpus would need to
+     * recognize — proper nouns, technical methods, named phenomena —
+     * and writes a single-sentence definition for each. Renders on the
+     * wiki overview page as a sidebar/list; chat search treats it as a
+     * lightweight term-disambiguation index.
+     */
+    glossary: z
+      .array(
+        z.object({
+          term: z.string().min(1).max(80),
+          definition: z.string().min(1).max(280),
+        }),
+      )
+      .max(40)
+      .optional(),
   })
   .superRefine((s, ctx) => {
     const known = new Set(s.pageTypes.map((p) => p.name));

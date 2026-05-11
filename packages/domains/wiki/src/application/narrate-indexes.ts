@@ -25,11 +25,22 @@ const NarrateOutput = z.object({
         ),
     }),
   ),
+  glossary: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(80),
+        definition: z.string().min(1).max(280),
+      }),
+    )
+    .describe(
+      'Key terms a newcomer to THIS corpus would need to recognize — proper nouns, named techniques, distinctive phenomena. Up to ~20 entries; one-sentence definitions; no filler like "see also" or generic dictionary entries.',
+    ),
 });
 
 export interface NarrateOutputT {
   thesis: string;
   pageTypeNarratives: Array<{ pageType: string; narrative: string }>;
+  glossary: Array<{ term: string; definition: string }>;
 }
 
 /**
@@ -73,13 +84,18 @@ export async function narrateIndexes(
     })
     .join('\n\n');
 
-  const SYSTEM = `You are the Wiki Narrator. Your job is to produce an opinionated description of THIS wiki — what's distinct about its corpus and how its sections fit together — so readers can navigate by intent, not by alphabet.
+  const SYSTEM = `You are the Wiki Narrator. Your job is to produce an opinionated description of THIS wiki — what's distinct about its corpus, how its sections fit together, and the key terms a newcomer needs — so readers can navigate by intent rather than alphabet.
 
 Style:
 - Concrete. Name the actual phenomena / models / methods in the corpus.
 - Take a view. "Phenomena are the failure modes that motivate the Techniques" beats "Phenomena are observed behaviors".
 - No filler. No "this index lists…", no "in this section you will find…".
 - Two short sentences max per narrative. Three for the thesis.
+
+Glossary rules:
+- Pick 8-20 terms a newcomer would actually need: proper nouns from the corpus (paper names, model names, method names), distinctive technical phrases ("induction head", "sleeper agent"), domain-specific verbs.
+- Skip generic terms anyone in the field already knows (no "machine learning", no "model", no "training").
+- One sentence per term. Define what the term means HERE, not in general.
 
 You are NOT writing about page types in general — you are writing about page types as instantiated by THIS corpus.`;
 
@@ -109,5 +125,18 @@ You are NOT writing about page types in general — you are writing about page t
     .map((pt) => ({ pageType: pt.name, narrative: byName.get(pt.name) }))
     .filter((n): n is { pageType: string; narrative: string } => typeof n.narrative === 'string');
 
-  return { thesis: result.thesis, pageTypeNarratives: ordered };
+  // Glossary: deduplicate by term (case-insensitive) and cap at 40 to
+  // match the contract bound. We trust the model on definition quality;
+  // post-filtering content would require a second pass.
+  const seenTerms = new Set<string>();
+  const glossary: Array<{ term: string; definition: string }> = [];
+  for (const g of result.glossary) {
+    const key = g.term.trim().toLowerCase();
+    if (!key || seenTerms.has(key)) continue;
+    seenTerms.add(key);
+    glossary.push({ term: g.term.trim(), definition: g.definition.trim() });
+    if (glossary.length >= 40) break;
+  }
+
+  return { thesis: result.thesis, pageTypeNarratives: ordered, glossary };
 }

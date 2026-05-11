@@ -491,6 +491,7 @@ export async function compileFolder(
     let narrative: {
       thesis: string;
       pageTypeNarratives: Array<{ pageType: string; narrative: string }>;
+      glossary: Array<{ term: string; definition: string }>;
     } | null = null;
     try {
       await thought('IndexBuilder', 'Drafting an opinionated narrative for each section…');
@@ -502,15 +503,20 @@ export async function compileFolder(
       );
     }
 
-    // Stamp the thesis onto the wiki record so it can render at the top
-    // of the overview page. Best-effort: skip the update if narration
-    // failed.
-    if (narrative?.thesis) {
+    // Stamp the thesis + glossary onto the wiki record so they can render
+    // at the top of the overview page. Best-effort: skip the update if
+    // narration failed.
+    if (narrative) {
+      const enrichedSchema = {
+        ...wiki.schema,
+        ...(narrative.thesis ? { thesis: narrative.thesis } : {}),
+        ...(narrative.glossary.length > 0 ? { glossary: narrative.glossary } : {}),
+      };
       await deps.wikis.update(
         Wiki.create({
           id: wiki.id,
           folderId: wiki.folderId,
-          schema: { ...wiki.schema, thesis: narrative.thesis },
+          schema: enrichedSchema,
           createdAt: wiki.createdAt,
         }),
       );

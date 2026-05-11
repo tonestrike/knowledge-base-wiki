@@ -159,6 +159,30 @@ export function WikiRoute() {
               />
             ) : null}
 
+            {wiki.data?.schema.glossary && wiki.data.schema.glossary.length > 0 ? (
+              <motion.section
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+                className="rounded-md border border-border/40 bg-card/30 p-6"
+              >
+                <h2 className="font-serif text-lg tracking-tight">Glossary</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Terms a newcomer to this corpus needs to recognize.
+                </p>
+                <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
+                  {wiki.data.schema.glossary.map((g) => (
+                    <div key={g.term} className="space-y-0.5">
+                      <dt className="font-mono text-xs uppercase tracking-wide text-accent">
+                        {g.term}
+                      </dt>
+                      <dd className="text-sm leading-snug text-muted-foreground">{g.definition}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </motion.section>
+            ) : null}
+
             {pages.isError ? (
               <ErrorState
                 message={`Failed to load pages: ${(pages.error as Error).message}`}
