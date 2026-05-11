@@ -164,3 +164,6 @@ Mermaid
 OTLP
 jailbreaks
 sessioned
+tripwired
+capnp
+workerds
