@@ -60,6 +60,21 @@ export interface SourceSearchHit {
   citingPages: Array<{ pageId: WikiPageId; title: string; pageType?: string }>;
 }
 
+/**
+ * Lightweight wiki metadata the chat agent needs to navigate by
+ * taxonomy: the list of PageType names (the wiki's sections), the
+ * folder name, and the perspective the wiki was compiled under (if
+ * any). Lets the agent reason about "the user asked about business
+ * ideas → that maps to the Opportunity PageType in this wiki" without
+ * keyword-guessing.
+ */
+export interface WikiMeta {
+  wikiId: WikiId;
+  pageTypes: ReadonlyArray<{ name: string; description: string }>;
+  perspective?: string;
+  folderName?: string;
+}
+
 export interface WikiReader {
   searchPages(args: { wikiId: WikiId; query: string; limit: number }): Promise<WikiPageSummary[]>;
   /**
@@ -84,6 +99,23 @@ export interface WikiReader {
     query: string;
     limit: number;
   }): Promise<SourceSearchHit[]>;
+  /**
+   * Enumerate Concept-subtype pages by PageType. Used by the agent when
+   * the user's question maps to a known section ("business ideas" → the
+   * Opportunity PageType in a business-opportunities wiki). Index pages
+   * are excluded — they're tables of contents, not content.
+   */
+  listPagesByType(args: {
+    wikiId: WikiId;
+    pageType: string;
+    limit: number;
+  }): Promise<WikiPageSummary[]>;
+  /**
+   * Fetch the wiki's taxonomy + perspective so the agent's system
+   * prompt can be tailored per-wiki. Returns null if the wiki id is
+   * unknown.
+   */
+  getWikiMeta(wikiId: WikiId): Promise<WikiMeta | null>;
 }
 
 /** Distinguished error for citation tripwire violations (SF-1). The use-case

@@ -6,6 +6,7 @@ import {
   type SourceSearchHit,
   type Synthesizer,
   type TurnRepository,
+  type WikiMeta,
   type WikiPageSummary,
   type WikiReader,
   createAgenticResearcher,
@@ -137,6 +138,12 @@ const stubWikiReader: WikiReader = {
   },
   async searchSources() {
     return [];
+  },
+  async listPagesByType() {
+    return [];
+  },
+  async getWikiMeta() {
+    return null;
   },
 };
 
@@ -321,6 +328,63 @@ export const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiR
         .first<PageRow>();
       if (!row) return null;
       return hydrate(row);
+    },
+    async listPagesByType({ wikiId, pageType, limit }) {
+      // Browse-by-section: enumerate Concept pages whose pageType column
+      // matches. Lets the agent answer "what's in the Opportunity
+      // section?" without keyword-guessing. Index pages excluded — they
+      // are tables of contents, not content. limit is inlined because
+      // some D1 builds reject bindings inside LIMIT clauses.
+      const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+      const rows = await db
+        .prepare(
+          `SELECT id, wiki_id, title, page_type, body_r2_key FROM wiki_pages
+           WHERE wiki_id = ? AND page_type = ? AND subtype != 'Index'
+           ORDER BY title ASC LIMIT ${safeLimit}`,
+        )
+        .bind(wikiId, pageType)
+        .all<PageRow>();
+      const out: WikiPageSummary[] = [];
+      for (const r of rows.results) out.push(await hydrate(r));
+      return out;
+    },
+    async getWikiMeta(wikiId) {
+      const row = await db
+        .prepare('SELECT folder_id, schema_json, perspective FROM wikis WHERE id = ?')
+        .bind(wikiId)
+        .first<{ folder_id: string; schema_json: string; perspective: string | null }>();
+      if (!row) return null;
+      let pageTypes: WikiMeta['pageTypes'] = [];
+      try {
+        const parsed = JSON.parse(row.schema_json) as {
+          pageTypes?: ReadonlyArray<{ name: string; description: string }>;
+        };
+        pageTypes = parsed.pageTypes ?? [];
+      } catch {
+        // Malformed schema_json shouldn't crash the agent's research loop —
+        // surface an empty pageTypes list instead and let the agent fall
+        // back to keyword search.
+        pageTypes = [];
+      }
+      // The folder table lives in the ingestion context; reading its
+      // `name` column directly is the simplest cross-binding path
+      // available here. Best-effort — null when the folder row is gone.
+      let folderName: string | undefined;
+      try {
+        const folderRow = await db
+          .prepare('SELECT name FROM folders WHERE id = ?')
+          .bind(row.folder_id)
+          .first<{ name: string }>();
+        if (folderRow?.name) folderName = folderRow.name;
+      } catch {
+        folderName = undefined;
+      }
+      return {
+        wikiId,
+        pageTypes,
+        ...(row.perspective ? { perspective: row.perspective } : {}),
+        ...(folderName ? { folderName } : {}),
+      };
     },
     async searchSources({ wikiId, query, limit }) {
       // Discovery fallback: searchPages matches on page title + body

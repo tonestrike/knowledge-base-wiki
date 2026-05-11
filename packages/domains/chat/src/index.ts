@@ -16,6 +16,7 @@ export type {
   SynthesizerEvent,
   SynthesizerInput,
   TurnRepository,
+  WikiMeta,
   WikiPageSummary,
   WikiReader,
 } from './application/ports.ts';

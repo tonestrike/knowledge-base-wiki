@@ -5,11 +5,13 @@ import type {
   Researcher,
   ResearcherInput,
   ResearcherOutput,
+  WikiMeta,
   WikiPageSummary,
   WikiReader,
 } from '../application/ports.ts';
 
 const SOURCE_SEARCH_LIMIT = 6;
+const TYPE_LIST_LIMIT = 12;
 
 /**
  * "Really try hard." A ToolLoopAgent-style researcher built on
@@ -42,22 +44,76 @@ const SOURCE_SEARCH_LIMIT = 6;
  * set, but emitting one finding per unique page keeps the synth prompt
  * smaller.
  */
-const SYSTEM = `You are Researcher. Your job is to find AS MANY relevant wiki pages as possible so that another agent can compose a thorough, well-cited answer. The wiki was compiled from underlying source documents (PDFs, markdown). You have three tools — use them all.
+const SYSTEM_BASE = `You are Researcher. Your job is to find AS MANY relevant wiki pages as possible so that another agent can compose a thorough, well-cited answer. You have four tools — use them all when appropriate.
 
-Workflow (you MUST follow):
-1. Call \`searchWiki\` with the user's exact phrasing first. Read every title and snippet that comes back.
-2. Even if the first search looks decent, call \`searchWiki\` AGAIN with at least one alternative query — synonyms, a more specific noun phrase, an adjacent concept, or a different framing of the question. The wiki uses domain-specific terminology that often differs from how the user phrases things; don't assume one query is enough.
-3. For complex / multi-part questions (anything with "and", "vs", "between", "across", "trace", "compare"), run \`searchWiki\` ONCE PER topic — don't try to cover both halves with one query.
-4. **If page-level search returns thin / off-topic results, call \`searchSources\`** with the user's keywords. The compiled wiki pages may use different vocabulary than the underlying source PDFs/markdown; source-text search finds content the page index missed. Each hit names the wiki pages that cite that source — call \`readWikiPage\` on those.
-5. Call \`readWikiPage\` on the 2–4 most promising hits to confirm they actually answer the question. If the body looks thin, search again or pivot to \`searchSources\`.
-6. Only stop after you've made AT LEAST TWO \`searchWiki\` calls AND surfaced at least 2 pages — and ideally 3–6 well-grounded pages across all your queries.
+Tools:
+- \`searchWiki\` — token-overlap search across page titles + bodies.
+- \`readWikiPage\` — fetch a page's full body + citations by id.
+- \`searchSources\` — token-overlap search over the raw source documents
+  (PDFs / markdown the wiki was compiled from). Returns the wiki pages
+  that cite each matching source.
+- \`listPagesByType\` — enumerate every Concept page of a given PageType
+  (i.e. browse a section). Use this when the user's question maps to
+  one of the wiki's sections (see "Wiki taxonomy" below).
+
+Workflow:
+1. **First read the "Wiki taxonomy" block below**. If the user's question
+   plausibly maps to one of the listed PageTypes (e.g. they ask about
+   "business ideas" and an "Opportunity" PageType exists, or about
+   "what could go wrong" and a "Risk" PageType exists), call
+   \`listPagesByType\` for that PageType FIRST. Browsing a section by
+   name beats keyword-guessing.
+2. Call \`searchWiki\` with the user's exact phrasing. Read every title
+   and snippet that comes back.
+3. Call \`searchWiki\` AGAIN with at least one alternative query — a
+   synonym, a more specific noun phrase, or a different framing. Don't
+   assume one query is enough; wiki terminology often differs from how
+   users phrase things.
+4. For complex / multi-part questions (anything with "and", "vs",
+   "between", "across", "trace", "compare"), run \`searchWiki\` ONCE
+   PER topic — don't cover both halves with one query.
+5. If page-level search is thin, call \`searchSources\` with the user's
+   keywords. The compiled wiki pages may use different vocabulary than
+   the underlying PDFs; source-text search finds content the page index
+   missed. Drill into the citing pages it returns via \`readWikiPage\`.
+6. Call \`readWikiPage\` on the 2–4 most promising hits to confirm they
+   answer the question.
+7. Stop after you've surfaced at least 2-3 well-grounded pages.
 
 Hard rules:
-- Always start by calling \`searchWiki\`. Never answer from prior knowledge.
-- Never stop after a single \`searchWiki\` call unless that one call returned 4+ very strong hits AND the question is single-topic.
-- Do not call \`readWikiPage\` on a pageId that did not appear in a recent \`searchWiki\` OR \`searchSources\` result.
-- When wiki-page search returns 0-1 weak hits, you MUST try \`searchSources\` before giving up. The wiki demonstrably covers the topic if any source contains the keywords.
-- Your final assistant message can be a one-line summary of what you found, but the user never sees it — keep it terse. The downstream synthesizer composes the actual answer from the pages you surfaced.`;
+- Never answer from prior knowledge. Always ground in wiki content.
+- If the user's question maps to a PageType in the taxonomy, you MUST
+  call \`listPagesByType\` before declaring there's nothing on the
+  topic. "No findings on opportunities" while an Opportunity PageType
+  exists in the taxonomy is a failure mode this rule prevents.
+- Do not call \`readWikiPage\` on a pageId that didn't appear in a
+  recent search/list call.
+- When wiki-page search returns 0-1 weak hits, you MUST try
+  \`searchSources\` AND \`listPagesByType\` (against any plausibly
+  matching PageType) before giving up.
+- Your final assistant message is invisible to the user — the
+  downstream synthesizer composes the actual answer from the pages you
+  surfaced. Keep it terse.`;
+
+const buildSystem = (meta: WikiMeta | null, override?: string): string => {
+  if (override) return override;
+  if (!meta || meta.pageTypes.length === 0) return SYSTEM_BASE;
+  const lines: string[] = ['', 'Wiki taxonomy (THIS wiki):'];
+  if (meta.folderName) lines.push(`- Folder: ${meta.folderName}`);
+  if (meta.perspective) {
+    const oneLine = meta.perspective.split('\n')[0]?.slice(0, 240) ?? '';
+    lines.push(`- Perspective the wiki was compiled under: ${oneLine}`);
+  }
+  lines.push('- PageTypes (sections you can browse with listPagesByType):');
+  for (const pt of meta.pageTypes) {
+    lines.push(`    • ${pt.name} — ${pt.description.slice(0, 140)}`);
+  }
+  lines.push('');
+  lines.push(
+    'When the user asks about a topic that maps to one of these PageType names (semantically — "business ideas" → Opportunity, "what could go wrong" → Risk, "how-to" → Skill, etc.), call listPagesByType FIRST.',
+  );
+  return `${SYSTEM_BASE}\n${lines.join('\n')}`;
+};
 
 export interface AgenticResearcherOptions {
   model: LanguageModel;
@@ -106,6 +162,21 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
     // phrasing across tools.
     const queriedTerms = new Set<string>();
     const sourcesQueriedTerms = new Set<string>();
+    const typedListed = new Set<string>();
+
+    // Fetch the wiki's taxonomy + perspective so the agent's system
+    // prompt can name the actual section vocabulary. Best-effort —
+    // if the read fails (or the reader doesn't implement it) we fall
+    // back to the schema-less system prompt.
+    let meta: WikiMeta | null = null;
+    try {
+      meta = await opts.wikiReader.getWikiMeta(input.wikiId);
+    } catch (metaErr) {
+      console.warn(
+        '[chat.agentic-researcher] getWikiMeta failed; running without taxonomy',
+        metaErr instanceof Error ? metaErr.message : metaErr,
+      );
+    }
 
     const tools = {
       searchWiki: tool({
@@ -172,6 +243,55 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
           };
         },
       }),
+      listPagesByType: tool({
+        description:
+          "Enumerate every Concept page in the wiki under a given PageType (i.e. browse a section by name). Use this when the user's question maps to one of the PageType names in the wiki's taxonomy — e.g. they ask about 'business ideas' and an 'Opportunity' PageType exists. Returns page ids + titles + short snippets; drill into specific pages with readWikiPage. The pageType must EXACTLY match one of the names in the taxonomy block; case-sensitive.",
+        inputSchema: z.object({
+          pageType: z
+            .string()
+            .describe('Exact PageType name from the Wiki taxonomy block (case-sensitive).'),
+        }),
+        execute: async ({ pageType }) => {
+          const normalized = pageType.trim();
+          if (typedListed.has(normalized)) {
+            return {
+              error: `You already listed pages for "${normalized}". Move on to readWikiPage on the ones you haven't read, or try a different PageType.`,
+            };
+          }
+          typedListed.add(normalized);
+          // Guard: warn if the agent asked for a pageType the wiki
+          // doesn't have. The wikiReader will return [] anyway, but
+          // a noisy error helps the model pick a different one quickly.
+          if (meta && !meta.pageTypes.some((pt) => pt.name === normalized)) {
+            return {
+              error: `Unknown PageType "${normalized}". The wiki's PageTypes are: ${meta.pageTypes.map((pt) => pt.name).join(', ')}.`,
+            };
+          }
+          const beforeCount = visited.size;
+          const hits = await opts.wikiReader.listPagesByType({
+            wikiId: input.wikiId,
+            pageType: normalized,
+            limit: TYPE_LIST_LIMIT,
+          });
+          for (const p of hits) noteVisit(p);
+          const newPages = visited.size - beforeCount;
+          return {
+            pageType: normalized,
+            count: hits.length,
+            pages: hits.map((p) => ({
+              pageId: p.id,
+              title: p.title,
+              snippet: p.body.slice(0, 200),
+              citationCount: p.citations.length,
+            })),
+            newPages,
+            note:
+              hits.length === 0
+                ? `No Concept pages in section "${normalized}". The taxonomy lists this PageType but no pages were compiled into it.`
+                : 'Use readWikiPage on the most relevant entries to bring full bodies + citations into the answer.',
+          };
+        },
+      }),
       searchSources: tool({
         description:
           'Search the raw source text (PDF extracts, markdown) for every Source cited in this wiki. Use this when searchWiki returns thin/off-topic hits — the compiled pages may use different vocabulary than the underlying documents. Each result names the wiki pages that cite that source; call readWikiPage on those to bring real citations into the answer.',
@@ -225,8 +345,8 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         tools,
         toolChoice: 'auto',
         stopWhen: stepCountIs(opts.maxSteps ?? 8),
-        system: opts.systemPrompt ?? SYSTEM,
-        prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. Start with searchWiki.`,
+        system: buildSystem(meta, opts.systemPrompt),
+        prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. If the question maps to one of the PageTypes in the Wiki taxonomy block, call listPagesByType FIRST. Otherwise start with searchWiki.`,
         temperature: 0.2,
         maxOutputTokens: 1500,
         maxRetries: 1,

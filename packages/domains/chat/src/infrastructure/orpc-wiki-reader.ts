@@ -138,5 +138,16 @@ export const createOrpcWikiReader = (opts: OrpcWikiReaderOptions): WikiReader =>
       // which is the same behaviour as before this tool existed.
       return [];
     },
+    async listPagesByType() {
+      // Same constraint as searchSources — no cross-context procedure for
+      // the list-by-type browse yet. Falling back to empty is safe; the
+      // agent will pivot to searchWiki / searchSources.
+      return [];
+    },
+    async getWikiMeta() {
+      // No cross-context procedure for wiki taxonomy here yet. The agent
+      // runs with the schema-less system prompt when this returns null.
+      return null;
+    },
   };
 };

@@ -39,6 +39,12 @@ const fakeWikiReader = (pages: WikiPageSummary[]): WikiReader => ({
   async searchSources() {
     return [];
   },
+  async listPagesByType({ pageType }) {
+    return pages.filter((p) => p.pageType === pageType);
+  },
+  async getWikiMeta() {
+    return null;
+  },
 });
 
 /**
