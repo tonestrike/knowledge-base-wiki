@@ -23,11 +23,11 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "tenex"
-database_id = "TODO_run_wrangler_d1_create"
+database_id = "85cbeea4-aa87-48e1-a753-d6469ef3eb88"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "TODO_run_wrangler_kv_create"
+id = "78e3c691a0dd42e8a304a80b26168f55"
 
 [[r2_buckets]]
 binding = "STORAGE"
@@ -50,11 +50,11 @@ ENVIRONMENT = "development"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "tenex"
-database_id = "TODO_run_wrangler_d1_create"
+database_id = "85cbeea4-aa87-48e1-a753-d6469ef3eb88"
 
 [[env.dev.kv_namespaces]]
 binding = "CACHE"
-id = "TODO_run_wrangler_kv_create"
+id = "78e3c691a0dd42e8a304a80b26168f55"
 
 [[env.dev.r2_buckets]]
 binding = "STORAGE"
@@ -89,11 +89,11 @@ run_worker_first = ["/rpc/*"]
 [[env.prod.d1_databases]]
 binding = "DB"
 database_name = "tenex"
-database_id = "TODO_run_wrangler_d1_create"
+database_id = "85cbeea4-aa87-48e1-a753-d6469ef3eb88"
 
 [[env.prod.kv_namespaces]]
 binding = "CACHE"
-id = "TODO_run_wrangler_kv_create"
+id = "78e3c691a0dd42e8a304a80b26168f55"
 
 [[env.prod.r2_buckets]]
 binding = "STORAGE"

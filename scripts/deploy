@@ -172,6 +172,15 @@ INFISICAL_TOKEN=$(bunx infisical login \
   --plain --silent)
 export INFISICAL_TOKEN
 
+# Use a tempfile rather than a pipe — `wrangler secret bulk` reading
+# stdin from a pipe of `infisical export --format=dotenv` only processed
+# the first key in testing (likely a buffering / EOF interaction in the
+# pipe). Writing to a tempfile + `wrangler secret bulk <file>` is
+# reliable. The file lives in $TMPDIR with mode 600 and is shredded on
+# exit so secrets never linger.
+SECRETS_TMP=$(mktemp -t tenex-secrets-XXXXXX)
+chmod 600 "$SECRETS_TMP"
+trap 'rm -f "$SECRETS_TMP"' EXIT
 bunx infisical export \
   --token="$INFISICAL_TOKEN" \
   --projectId="$PROJECT_ID" \
@@ -179,7 +188,9 @@ bunx infisical export \
   --path=/apps/api \
   --include-imports \
   --format=dotenv \
-  | bunx wrangler secret bulk --env=prod
+  > "$SECRETS_TMP"
+# wrangler secret bulk accepts dotenv or JSON via a positional file arg.
+bunx wrangler secret bulk --env=prod "$SECRETS_TMP"
 ok "Worker secrets synced"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -187,8 +198,10 @@ ok "Worker secrets synced"
 # ──────────────────────────────────────────────────────────────────────────────
 
 step "Build web SPA"
-cd "$REPO_ROOT"
-bun --filter @app/web run build
+# `bun --filter` was misbehaving from inside the script (likely a stale
+# `.turbo` cache or workspace-resolution quirk). Invoke the workspace
+# package's build directly by cd-ing in — clearer + zero ambiguity.
+(cd "$REPO_ROOT/apps/web" && bun run build)
 ok "vite build complete (apps/web/dist)"
 
 step "Deploy Worker"
