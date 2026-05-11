@@ -255,109 +255,169 @@ export async function compileFolder(
     await deps.runs.update(run);
 
     const conceptDrafts: ConceptPage[] = [];
-    // Cap drafting at the first 4 PageTypes; one Drafter call per PageType
-    // (collapsing across titles) instead of one per title bucket — keeps
-    // drafting bounded to ~4 calls × ~30s each = ~2 min instead of unbounded.
-    const draftablePageTypes = schema.pageTypes.slice(0, 4);
-    for (const pt of draftablePageTypes) {
-      const findingsOfType = allFindings.filter((f) => f.pageType === pt.name);
-      if (findingsOfType.length === 0) continue;
-      // One Drafter call per PageType, all findings merged.
-      const grouped = new Map<string, EnrichedFinding[]>([[pt.name.toLowerCase(), findingsOfType]]);
-      for (const [, findings] of grouped) {
-        const draftFindings: ResearchFinding[] = findings.map((f) => ({
-          sourceId: f.sourceId,
-          sourceFilename: f.sourceFilename,
-          sourceText: f.sourceText,
-          sourceContentHash: f.sourceContentHash,
-          evidence: f.evidence,
-          spanStart: f.spanStart,
-          spanEnd: f.spanEnd,
-          title: f.title,
-        }));
-        console.info(
-          `[compile-folder] Drafter dispatch pageType=${pt.name} findings=${draftFindings.length}`,
-        );
-        await thought(
-          'Drafter',
-          `Drafting ${pt.name} page from ${draftFindings.length} finding${draftFindings.length === 1 ? '' : 's'}…`,
-        );
-        const draftStart = Date.now();
-        const { draft } = await draftPage(
-          { llm: deps.llm },
-          { pageType: pt.name, findings: draftFindings },
-        );
-        console.info(
-          `[compile-folder] Drafter done pageType=${pt.name} in ${Date.now() - draftStart}ms slug=${draft.slug}`,
-        );
 
-        // Map sourceId → full extracted text so each citation can hash its
-        // own slice (chat's verifier compares the slice hash, not the
-        // whole-source hash). Findings in this PageType bucket carry the
-        // text alongside the contentHash from the Researcher pass above.
-        const sourceTextById = new Map<SourceId, string>(
-          findings.map((f) => [f.sourceId, f.sourceText]),
+    // Bucket findings by (pageType, normalized title). A bucket becomes
+    // ONE Concept page. Previous design collapsed across titles within
+    // each pageType — turning 50 findings about 10 different papers into
+    // a single "Paper" page. The user noticed the resulting wikis felt
+    // thin (4 pages from 10 PDFs); this is why.
+    //
+    // Bound the total drafter call count at MAX_DRAFTS so a pathological
+    // corpus (200+ findings) can't blow past the wall clock. Within each
+    // pageType we keep the top buckets by finding count, then take a
+    // round-robin pass across pageTypes so no single type starves the
+    // others.
+    const MAX_DRAFTS = 24;
+    const MAX_PER_PAGETYPE = 8;
+    const normTitle = (s: string): string =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    // Step 1: build a map<pageType, map<normalizedTitle, findings>>
+    const byType = new Map<string, Map<string, EnrichedFinding[]>>();
+    for (const f of allFindings) {
+      const key = normTitle(f.title);
+      if (!key) continue;
+      let titleBuckets = byType.get(f.pageType);
+      if (!titleBuckets) {
+        titleBuckets = new Map();
+        byType.set(f.pageType, titleBuckets);
+      }
+      const existing = titleBuckets.get(key) ?? [];
+      existing.push(f);
+      titleBuckets.set(key, existing);
+    }
+
+    // Step 2: within each pageType, keep top MAX_PER_PAGETYPE buckets by
+    // size. Then round-robin across pageTypes to assemble the global
+    // queue, capped at MAX_DRAFTS. Iteration order matches the schema's
+    // pageTypes list so "Paper" / "Model" / etc. all get representation
+    // even on very large corpora.
+    const queuesPerType = schema.pageTypes
+      .map((pt) => {
+        const titleBuckets = byType.get(pt.name);
+        if (!titleBuckets) return { pageType: pt.name, buckets: [] as EnrichedFinding[][] };
+        const ranked = [...titleBuckets.values()]
+          .sort((a, b) => b.length - a.length)
+          .slice(0, MAX_PER_PAGETYPE);
+        return { pageType: pt.name, buckets: ranked };
+      })
+      .filter((q) => q.buckets.length > 0);
+
+    const dispatchQueue: Array<{ pageType: string; findings: EnrichedFinding[] }> = [];
+    let idx = 0;
+    while (dispatchQueue.length < MAX_DRAFTS && queuesPerType.some((q) => q.buckets.length > 0)) {
+      const q = queuesPerType[idx % queuesPerType.length];
+      if (q && q.buckets.length > 0) {
+        const next = q.buckets.shift();
+        if (next) dispatchQueue.push({ pageType: q.pageType, findings: next });
+      }
+      idx += 1;
+    }
+
+    console.info(
+      `[compile-folder] drafting ${dispatchQueue.length} pages (${allFindings.length} findings across ${byType.size} pageTypes; cap=${MAX_DRAFTS})`,
+    );
+    await thought(
+      'Drafter',
+      `Drafting ${dispatchQueue.length} page${dispatchQueue.length === 1 ? '' : 's'} from ${allFindings.length} finding${allFindings.length === 1 ? '' : 's'} across ${byType.size} type${byType.size === 1 ? '' : 's'}…`,
+    );
+
+    // Step 3: parallel Drafter calls. OpenRouter's tier handles concurrent
+    // streamObject calls fine for the Drafter prompt (much lighter than
+    // Researcher); per-call `maxRetries: 1` keeps any individual flakiness
+    // bounded. allSettled so one bad draft can't tank the whole compile.
+    const draftWork = dispatchQueue.map(async (bucket) => {
+      const { pageType, findings } = bucket;
+      const draftFindings: ResearchFinding[] = findings.map((f) => ({
+        sourceId: f.sourceId,
+        sourceFilename: f.sourceFilename,
+        sourceText: f.sourceText,
+        sourceContentHash: f.sourceContentHash,
+        evidence: f.evidence,
+        spanStart: f.spanStart,
+        spanEnd: f.spanEnd,
+        title: f.title,
+      }));
+      const draftStart = Date.now();
+      const { draft } = await draftPage({ llm: deps.llm }, { pageType, findings: draftFindings });
+      console.info(
+        `[compile-folder] Drafter done pageType=${pageType} in ${Date.now() - draftStart}ms slug=${draft.slug} title="${draft.title}"`,
+      );
+
+      const sourceTextById = new Map<SourceId, string>(
+        findings.map((f) => [f.sourceId, f.sourceText]),
+      );
+
+      const pid = parseWikiPageId(deps.newId());
+      const claims: Claim[] = await Promise.all(
+        draft.claims.map(async (c, claimIdx) => {
+          const claimUuid = parseClaimId(deps.newId());
+          const citations: Citation[] = await Promise.all(
+            c.citations.map(async (cit) => {
+              const start = cit.spanStart;
+              const end = Math.max(cit.spanEnd, cit.spanStart + 1);
+              const text = sourceTextById.get(cit.sourceId);
+              if (text == null) {
+                throw new Error(
+                  `citation references sourceId ${cit.sourceId} not present in findings for pageType=${pageType}`,
+                );
+              }
+              return {
+                id: parseCitationId(deps.newId()),
+                label: cit.label,
+                span: {
+                  sourceId: cit.sourceId,
+                  byteRange: { start, end },
+                  contentHash: await sliceHash(text, start, end),
+                },
+              };
+            }),
+          );
+          return {
+            id: claimUuid,
+            wikiPageId: pid,
+            paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
+            claimText: c.claimText,
+            citations,
+          };
+        }),
+      );
+
+      const conceptPage = WikiPage.concept({
+        id: pid,
+        wikiId: wid,
+        pageType,
+        slug: draft.slug,
+        title: draft.title,
+        body: draft.body,
+        claims,
+        updatedAt: deps.now().toISOString(),
+      });
+
+      await deps.emit({
+        kind: 'PageDrafted',
+        compileRunId: input.compileRunId,
+        pageId: pid,
+        subtype: 'Concept',
+        pageType,
+        title: draft.title,
+      });
+      return conceptPage;
+    });
+
+    const drafted = await Promise.allSettled(draftWork);
+    for (const r of drafted) {
+      if (r.status === 'fulfilled') {
+        conceptDrafts.push(r.value);
+      } else {
+        console.warn(
+          '[compile-folder] Drafter call failed; skipping page',
+          r.reason instanceof Error ? r.reason.message : r.reason,
         );
-
-        const pid = parseWikiPageId(deps.newId());
-        const claims: Claim[] = await Promise.all(
-          draft.claims.map(async (c, claimIdx) => {
-            const claimUuid = parseClaimId(deps.newId());
-            const citations: Citation[] = await Promise.all(
-              c.citations.map(async (cit) => {
-                const start = cit.spanStart;
-                const end = Math.max(cit.spanEnd, cit.spanStart + 1);
-                const text = sourceTextById.get(cit.sourceId);
-                if (text == null) {
-                  // Drafter snaps citations back to known findings, so this
-                  // is structurally unreachable — but fail loud instead of
-                  // silently storing a fake hash that the verifier will
-                  // reject downstream.
-                  throw new Error(
-                    `citation references sourceId ${cit.sourceId} not present in findings for pageType=${pt.name}`,
-                  );
-                }
-                return {
-                  id: parseCitationId(deps.newId()),
-                  label: cit.label,
-                  span: {
-                    sourceId: cit.sourceId,
-                    byteRange: { start, end },
-                    contentHash: await sliceHash(text, start, end),
-                  },
-                };
-              }),
-            );
-            return {
-              id: claimUuid,
-              wikiPageId: pid,
-              paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
-              claimText: c.claimText,
-              citations,
-            };
-          }),
-        );
-
-        const conceptPage = WikiPage.concept({
-          id: pid,
-          wikiId: wid,
-          pageType: pt.name,
-          slug: draft.slug,
-          title: draft.title,
-          body: draft.body,
-          claims,
-          updatedAt: deps.now().toISOString(),
-        });
-        conceptDrafts.push(conceptPage);
-
-        await deps.emit({
-          kind: 'PageDrafted',
-          compileRunId: input.compileRunId,
-          pageId: pid,
-          subtype: 'Concept',
-          pageType: pt.name,
-          title: draft.title,
-        });
       }
     }
 
