@@ -12,6 +12,23 @@ The app is already deployed to Cloudflare Workers — no setup required to try i
 
 The Worker serves both the SPA (`/*`) and the oRPC api (`/rpc/*`) from the same origin — no CORS, no separate frontend deploy. Health check: <https://tenex-api.tonyvantur.workers.dev/rpc/core/health>.
 
+## Code walkthrough — start here
+
+The architecture docs walk through how a request flows end-to-end, with line-anchored deep links into the actual source. **Read these in order if you want to understand the system:**
+
+1. **[`docs/architecture/talk.md`](docs/architecture/talk.md)** — a scroll-through of the whole system. Each section opens with a short plain-English context paragraph, then the diagram and the code, with a "what you're looking at" note under each block. Best entry point.
+2. **[`docs/architecture/code-tour.md`](docs/architecture/code-tour.md)** — file-by-file walkthrough following a user request through the system: SPA → oRPC contract → domain interface → application use-case → infrastructure adapter → D1/R2/Drive. Same arc as the talk, with the real code.
+3. **[`docs/architecture/perspective-flow.md`](docs/architecture/perspective-flow.md)** — narrower deep dive on how the user's typed "perspective" reaches every model call during a wiki compile (search-results-style intent → schema inference → page drafting → index building → verifier). Shows the one cross-cutting thread the storyboard depends on.
+
+Supporting reference:
+
+- [`docs/architecture/README.md`](docs/architecture/README.md) — bird's-eye architecture overview + reading order.
+- [`docs/projects/folder-wiki/spec.md`](docs/projects/folder-wiki/spec.md) — the design spec we built against (data model, lifecycle, verifier protocol, lint loop).
+- [`docs/projects/folder-wiki/storyboard.md`](docs/projects/folder-wiki/storyboard.md) — the three Moments the product is staged around. Every architectural decision serves one of them.
+- [`docs/ubiquitous-language.md`](docs/ubiquitous-language.md) — the cross-context glossary. If a term in code seems load-bearing, it's defined here.
+- [`docs/ddd/bounded-contexts.md`](docs/ddd/bounded-contexts.md) and [`docs/ddd/layering.md`](docs/ddd/layering.md) — the package-as-context discipline and the domain/application/infrastructure/interface layering rules.
+- [`docs/operations/local-dev.md`](docs/operations/local-dev.md), [`docs/operations/secrets.md`](docs/operations/secrets.md), [`docs/operations/deploy.md`](docs/operations/deploy.md) — ops runbooks for when you want to run/deploy/rotate.
+
 ## Quick start
 
 You need **bun ≥ 1.3.0** and **Node.js ≥ 22** (wrangler's local dev needs real Node — under bun's node-shim, wrangler's ProxyWorker IPC hangs).
