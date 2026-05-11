@@ -23,11 +23,15 @@
     "rulesync": "bunx --bun rulesync generate",
     "rulesync:watch": "bunx --bun rulesync watch",
     "rulesync:install": "bunx --bun rulesync install",
-    "rulesync:install:frozen": "bunx --bun rulesync install --frozen"
+    "rulesync:install:frozen": "bunx --bun rulesync install --frozen",
+    "evals": "bun run evals/run-evals.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@infisical/cli": "^0.43.84",
+    "@orpc/client": "^1.14.2",
+    "@orpc/contract": "^1.14.2",
+    "@package/contracts": "workspace:*",
     "cspell": "^8.17.1",
     "pdfjs-dist": "^5.7.284",
     "rulesync": "^8.15.1",
