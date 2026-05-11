@@ -164,3 +164,8 @@ Mermaid
 OTLP
 jailbreaks
 sessioned
+docx
+openxmlformats
+officedocument
+wordprocessingml
+mammoth

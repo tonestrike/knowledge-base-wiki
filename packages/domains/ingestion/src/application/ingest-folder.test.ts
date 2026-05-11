@@ -62,6 +62,22 @@ const baseExtractors = (): ExtractorRegistry => ({
       pageImages: [],
     }),
   },
+  docx: {
+    extract: async () => ({
+      text: 'x',
+      outline: Outline.empty(),
+      pageCount: 1,
+      pageImages: [],
+    }),
+  },
+  markdown: {
+    extract: async () => ({
+      text: 'm',
+      outline: Outline.empty(),
+      pageCount: 1,
+      pageImages: [],
+    }),
+  },
 });
 
 const makeFakes = (overrides: Partial<IngestionDeps> = {}): Fakes => {

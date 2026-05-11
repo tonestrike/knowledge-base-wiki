@@ -20,6 +20,8 @@ export interface ExtractorRegistry {
   readonly doc: Extractor;
   readonly sheet: Extractor;
   readonly slide: Extractor;
+  readonly docx: Extractor;
+  readonly markdown: Extractor;
 }
 
 export interface ExtractSourceInput {
@@ -33,9 +35,12 @@ export async function extractSource(
 ): Promise<ExtractedSource> {
   switch (input.mime) {
     case 'application/pdf':
+      return extractors.pdf.extract({ bytes: input.bytes });
     case 'text/plain':
     case 'text/markdown':
-      return extractors.pdf.extract({ bytes: input.bytes });
+      return extractors.markdown.extract({ bytes: input.bytes });
+    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+      return extractors.docx.extract({ bytes: input.bytes });
     case 'application/vnd.google-apps.document':
       return extractors.doc.extract({ bytes: input.bytes });
     case 'application/vnd.google-apps.spreadsheet':

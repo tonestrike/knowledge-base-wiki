@@ -19,6 +19,9 @@ This is the canonical glossary for the **ingestion** bounded context. Every term
 | Page | For paginated formats (PDF, Slides), a 1-indexed integer locating a `Span` in the rendered document. | Distinct from `WikiPage` in the wiki context. |
 | Connector | The integration that fetches `Source`s from a backing system. Currently: `GoogleDriveConnector`. | |
 | Fetch | The operation a `Connector` performs to produce a `Source`. | |
+| DOCX | Microsoft Word's OOXML document format (`.docx`). Extracted via the `mammoth` library to plain text; single-page outline because OOXML has no native page break. | MIME: `application/vnd.openxmlformats-officedocument.wordprocessingml.document`. |
+| Markdown | Plain Markdown (`.md`). Bytes decoded as UTF-8; the wiki Drafter treats the raw markdown as prose, no header parsing here. | MIME: `text/markdown` (Drive's legacy `text/x-markdown` is normalized at the connector seam). |
+| mammoth | The library that unzips a DOCX, walks OOXML, and returns plain text via `extractRawText`. | Lazy-imported inside the extractor to keep workerd boot fast. |
 
 ## Banned synonyms
 

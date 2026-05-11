@@ -5,6 +5,7 @@ export type SourceMime =
   | 'application/vnd.google-apps.document'
   | 'application/vnd.google-apps.spreadsheet'
   | 'application/vnd.google-apps.presentation'
+  | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   | 'text/plain'
   | 'text/markdown';
 
