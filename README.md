@@ -197,17 +197,15 @@ Cloudflare login is one-time and runs interactively: `bunx wrangler login` if yo
 
 We made three deliberate scope choices that are worth calling out so reviewers don't read the gaps as oversight.
 
-### We indexed by typed *perspectives*, not by embeddings
+### We index typed *perspectives*; embeddings are a source-level fallback
 
 The interesting bet in this take-home is the *wiki*: an LLM-compiled, span-cited, lint-verified knowledge structure over a folder. The retrieval mechanic that powers chat is a secondary concern — once the wiki exists, search-quality improvements stack on top of it cleanly.
 
-So the chat agent's research loop today is a tool-using loop over the wiki itself: page-type search, browse-by-section, and source-text fallback, all running against D1 + R2 with byte-range citations the synth verifier can re-hash. No vector store. No embedding model. Token-overlap scoring and the typed page schema do the work.
+The chat agent's research loop today is a tool-using loop over the wiki itself: `searchWiki`, `listPagesByType`, `readWikiPage`, `searchSources`. All four run against D1 + R2 with byte-range citations the synth verifier can re-hash; page-level search and browsing use token-overlap against the typed page schema, which is what makes them deterministic and free.
 
-**Given more time, we would have added an embeddings + vector-store layer** (Cloudflare Vectorize or pgvector-on-D1) underneath the existing `WikiReader` port. Two things land for free:
-- **Better recall on chat search.** "Deceptive AI behavior" matches a page titled "Alignment faking" even when the keywords don't overlap.
-- **Better source-discovery fallback.** The `searchSources` path in `packages/domains/chat/src/infrastructure/d1-wiki-reader.ts` is the natural seam — swap token-overlap for a `top-k` similarity query against pre-computed chunk embeddings.
+`searchSources` is the one path where token-overlap gives up too much: a phrase like "deceptive AI behavior" should hit a chunk that talks about *alignment faking* even when no keyword overlaps. So we ship a semantic fallback there. When the api's `VECTORIZE` binding and `OPENAI_EMBEDDING_API_KEY` are both configured, `searchSources` becomes: embed the query with `text-embedding-3-small`, run `vectorize.query(topK)` against pre-computed 1000-char source chunks (200-char overlap, cosine, deterministic chunk ids → idempotent reindex), join back to D1 to find the wiki pages that cite each matching source, return as `SourceSearchHit`s. If the embedder throws, the index returns zero hits, or the binding/key isn't configured, we transparently fall through to the existing token-overlap implementation. Zero behavior change on environments without the keys; better recall on environments that have them.
 
-The architecture is set up for this: `WikiReader` is an interface, the composition root in `apps/api/src/build-chat-context.ts` picks the implementation, and the citation/lint contract (`SourceHashVerifier`) is agnostic to how candidate pages are surfaced. Adding the vector path is additive — it doesn't change the wiki schema, the synthesizer, or the verifier.
+What we still haven't done is embed *wiki pages* themselves. The composition root in `apps/api/src/build-chat-context.ts` picks the `WikiReader` implementation; the citation/lint contract (`SourceHashVerifier`) is agnostic to how candidate pages are surfaced. Adding a full vector path for `searchWiki` is the same shape as the source-level fallback we already shipped — it doesn't change the wiki schema, the synthesizer, or the verifier.
 
 ### We indexed PDFs (mostly), not every document type
 
