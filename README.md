@@ -16,6 +16,8 @@ The app is already deployed to Cloudflare Workers — no setup required to try i
 
 The Worker serves both the SPA (`/*`) and the oRPC api (`/rpc/*`) from the same origin — no CORS, no separate frontend deploy. Health check: <https://tenex-api.tonyvantur.workers.dev/rpc/core/health>.
 
+The homepage is public-by-design: any visitor reads the seeded Anthropic-research wiki without signing in. Google OAuth ingestion is the developer's compile path and stays behind a session — the OAuth client is unverified, so public sign-in isn't supported. To compile your own folder, run the api locally and follow [`docs/operations/local-dev.md`](docs/operations/local-dev.md).
+
 ## Code walkthrough — start here
 
 The architecture docs walk through how a request flows end-to-end, with line-anchored deep links into the actual source. **Read these in order if you want to understand the system:**

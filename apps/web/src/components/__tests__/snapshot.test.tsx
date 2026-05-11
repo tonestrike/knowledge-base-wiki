@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mockTurn } from '@package/contracts/chat';
 import { mockUnsupportedFinding } from '@package/contracts/verification';
 import { mockWiki, mockWikiPage } from '@package/contracts/wiki';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { LiveModeProvider } from '../../lib/live-mode.tsx';
@@ -12,7 +11,6 @@ import { CitationFlightProvider } from '../citation/use-citation-flight.tsx';
 import { CompileTheater } from '../compile-theater/compile-theater.tsx';
 import { FeaturedWikiHero } from '../featured-wiki-hero.tsx';
 import { LintRibbon } from '../lint/lint-ribbon.tsx';
-import { SignInCta } from '../sign-in-cta.tsx';
 import { WikiPageView } from '../wiki-page/wiki-page.tsx';
 
 const wrap = (ui: React.ReactNode) => (
@@ -93,21 +91,6 @@ describe('six spectacular elements render without throwing', () => {
     });
     const { getByText } = render(wrap(<FeaturedWikiHero wiki={wiki} />));
     expect(getByText(/anchored to the verbatim source bytes/)).toBeTruthy();
-  });
-
-  it('SignInCta renders the exact sign-in copy and a Google button', () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { getByText, getByRole } = render(
-      <MemoryRouter>
-        <QueryClientProvider client={qc}>
-          <SignInCta />
-        </QueryClientProvider>
-      </MemoryRouter>,
-    );
-    expect(
-      getByText('Sign in with Google to compile your own folder into a typed, span-verified wiki.'),
-    ).toBeTruthy();
-    expect(getByRole('button', { name: /Sign in with Google/i })).toBeTruthy();
   });
 
   it('LintRibbon (unsupported finding) renders Apply correction button', () => {

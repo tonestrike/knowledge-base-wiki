@@ -1,54 +1,66 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Logged-out regression. Lives entirely in a fresh, cookie-less browser
- * context so it mimics a first-time visitor who has never signed in to
- * Drive.
+ * Public-by-design homepage assertions.
  *
- * Today the api leaks every user's wiki list to anonymous callers and
- * the DriveFolderPicker happily renders folders that aren't this user's.
- * Stream A is locking that down — session-scoped auth — so this spec
- * lives here as the regression sentinel.
+ * Backdrop: the Google OAuth client backing `/rpc/ingestion/authStart` is
+ * in Google's "unverified app" status — only the developer can complete
+ * sign-in, so prompting public visitors to sign in is wrong UX. The
+ * homepage instead lands every anonymous visitor on the featured seeded
+ * Anthropic-research wiki, with no auth surface at all. The dev-only
+ * compile path stays behind a session.
  *
- * Requires Stream A — session-scoped auth — to be merged.
+ * These tests are deliberately phrased as "an anonymous visitor must
+ * see X and must NOT see Y" so the unverified-OAuth constraint stays
+ * enforced even if a future refactor accidentally re-introduces a
+ * sign-in CTA.
  */
 
-test.describe('incognito (anonymous) home', () => {
+const FEATURED_WIKI_ID = 'cb0b020d-50ab-41cb-91d9-09a5dda547b2';
+
+test.describe('Anonymous visitor — public-by-design homepage', () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
-  test('anonymous visitor sees the sign-in CTA, not the Drive picker', async ({ page }) => {
+  test('renders the featured-wiki hero with an "Open wiki →" CTA', async ({ page }) => {
     await page.goto('/');
 
-    // After Stream A merges, the home page swaps the Drive picker for a
-    // sign-in CTA whenever there's no session cookie. Either copy variant
-    // ("Sign in" / "Sign in with Google" / "Connect Google Drive") is fine
-    // as long as it's a sign-in entry point.
-    const signInCta = page
-      .getByRole('button', { name: /sign in|connect.*google|continue with google/i })
-      .or(page.getByRole('link', { name: /sign in|connect.*google|continue with google/i }));
-    await expect(signInCta, 'sign-in CTA should be visible to anonymous visitors').toBeVisible();
+    const hero = page.getByRole('region', { name: /featured wiki/i });
+    await expect(hero).toBeVisible();
 
-    // Critically: the DriveFolderPicker — which lists folders from the
-    // user's Drive — must NOT render for an anonymous caller. Its hallmark
-    // copy is "Pick a folder from your Google Drive".
-    const drivePickerCopy = page.getByText(/pick a folder from your google drive/i);
-    await expect(
-      drivePickerCopy,
-      'DriveFolderPicker should not render for anonymous user',
-    ).toHaveCount(0);
+    // Serif title inside the hero (folder name when reachable, fixed
+    // fallback otherwise — both are rendered in a serif heading).
+    await expect(hero.getByRole('heading', { level: 2 })).toBeVisible();
+
+    const openWiki = hero.getByRole('link', { name: /open wiki/i });
+    await expect(openWiki).toBeVisible();
+    await expect(openWiki).toHaveAttribute('href', `/wiki/${FEATURED_WIKI_ID}`);
   });
 
-  test('anonymous visitor sees only the featured wiki in the list', async ({ page }) => {
+  test('does NOT show a "Sign in" button anywhere on the homepage', async ({ page }) => {
     await page.goto('/');
 
-    // The home page's "Compiled wikis" grid is rendered as a <ul>. With
-    // session-scoped auth, an anonymous visitor should see exactly the
-    // featured demo wiki ("Anthropic research bundle") and nothing else
-    // — no leaked wikis from other users.
-    const wikiCards = page.locator('ul a[href^="/wiki/"]');
-    await expect(wikiCards, 'exactly one wiki should be visible to anonymous visitors').toHaveCount(
-      1,
-    );
-    await expect(wikiCards.first()).toContainText('Anthropic research bundle');
+    // Belt-and-braces: cover every label the previous picker / hypothetical
+    // hero CTAs used. None of these should exist for an anonymous visitor.
+    await expect(page.getByRole('button', { name: /sign in/i })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /sign in/i })).toHaveCount(0);
+    await expect(page.getByText(/sign in with google/i)).toHaveCount(0);
+    await expect(page.getByText(/sign in to drive/i)).toHaveCount(0);
+  });
+
+  test('does NOT show the DriveFolderPicker or "Connect a Drive folder" card', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(page.getByRole('heading', { name: /connect a drive folder/i })).toHaveCount(0);
+    await expect(page.getByPlaceholder(/search your drive folders/i)).toHaveCount(0);
+    await expect(page.getByPlaceholder(/drive\.google\.com\/drive\/folders/i)).toHaveCount(0);
+  });
+
+  test('clicking the hero CTA navigates to the featured wiki', async ({ page }) => {
+    await page.goto('/');
+
+    const hero = page.getByRole('region', { name: /featured wiki/i });
+    await hero.getByRole('link', { name: /open wiki/i }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/wiki/${FEATURED_WIKI_ID}(?:[/?#]|$)`));
   });
 });
