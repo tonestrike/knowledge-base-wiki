@@ -5,6 +5,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { orpc } from '../lib/orpc.ts';
+import {
+  DEFAULT_PERSPECTIVE_ID,
+  PERSPECTIVE_PRESETS,
+  type PerspectivePreset,
+} from '../lib/perspective-presets.ts';
 
 /**
  * Ingest-in-progress page.
@@ -31,8 +36,14 @@ export function IngestRoute() {
   // during render and dereferences the ref synchronously.
   const hasIngestResolved = useRef(false);
   const hasStartedIngest = useRef(false);
-  const [phase, setPhase] = useState<'ingesting' | 'compiling' | 'error'>('ingesting');
+  const [phase, setPhase] = useState<'ingesting' | 'choosing-perspective' | 'compiling' | 'error'>(
+    'ingesting',
+  );
   const [error, setError] = useState<Error | null>(null);
+  const [perspectiveId, setPerspectiveId] = useState<string>(DEFAULT_PERSPECTIVE_ID);
+  const [perspectiveText, setPerspectiveText] = useState<string>(
+    PERSPECTIVE_PRESETS.find((p) => p.id === DEFAULT_PERSPECTIVE_ID)?.prompt ?? '',
+  );
 
   const folder = useQuery({
     ...orpc.ingestion.getFolder.queryOptions({ input: { id: folderId } }),
@@ -73,15 +84,36 @@ export function IngestRoute() {
             'No documents in this folder could be read. Every file failed extraction (most often because the api lacks a PDF worker for that filetype). Try a folder with Google Docs / Slides / Sheets, or a different set of PDFs.',
           );
         }
-        setPhase('compiling');
-        const { compileRunId } = await compile.mutateAsync({ folderId });
-        nav(`/compile/${compileRunId}`, { replace: true });
+        // Pause for the perspective picker. The user reviews / edits the
+        // preset, then explicitly kicks off compile from the form.
+        setPhase('choosing-perspective');
       } catch (e) {
         setError(e instanceof Error ? e : new Error(String(e)));
         setPhase('error');
       }
     })();
   }, []);
+
+  const handleStartCompile = async () => {
+    if (!folderId) return;
+    try {
+      setPhase('compiling');
+      const trimmed = perspectiveText.trim();
+      const { compileRunId } = await compile.mutateAsync({
+        folderId,
+        ...(trimmed.length > 0 ? { perspective: trimmed } : {}),
+      });
+      nav(`/compile/${compileRunId}`, { replace: true });
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error(String(e)));
+      setPhase('error');
+    }
+  };
+
+  const selectPreset = (preset: PerspectivePreset) => {
+    setPerspectiveId(preset.id);
+    setPerspectiveText(preset.prompt);
+  };
 
   const ingestedCount = sources.data?.items.length ?? 0;
   const folderName = folder.data?.name ?? 'your folder';
@@ -100,6 +132,31 @@ export function IngestRoute() {
     );
   }
 
+  // `phase === 'error'` is handled by the early return above; the remaining
+  // three phases each get a headline below. Listed as a Record so TS
+  // catches missing entries if we ever add another phase.
+  const headlineByPhase: Record<
+    Exclude<typeof phase, 'error'>,
+    { eyebrow: string; title: string; body: string }
+  > = {
+    ingesting: {
+      eyebrow: 'Ingesting',
+      title: `Reading ${folderName}…`,
+      body: 'Downloading each file from Drive and extracting text + per-page byte offsets. Each card below is one file landing on the server.',
+    },
+    'choosing-perspective': {
+      eyebrow: 'Choose a perspective',
+      title: 'What lens should this wiki take?',
+      body: `Ingest complete — ${ingestedCount} document${ingestedCount === 1 ? '' : 's'} in. Pick a preset and tune the prompt (or write your own). This text is threaded into every compile prompt so the resulting wiki organizes itself around the lens you choose.`,
+    },
+    compiling: {
+      eyebrow: 'Starting compile',
+      title: 'Opening the compile theater…',
+      body: `Ingest complete — ${ingestedCount} document${ingestedCount === 1 ? '' : 's'} in. Handing off to the compiler now.`,
+    },
+  };
+  const headline = headlineByPhase[phase as Exclude<typeof phase, 'error'>];
+
   return (
     <AppShell>
       <main className="mx-auto max-w-4xl space-y-10 px-6 py-12">
@@ -110,17 +167,21 @@ export function IngestRoute() {
           className="space-y-2"
         >
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">
-            {phase === 'compiling' ? 'Starting compile' : 'Ingesting'}
+            {headline.eyebrow}
           </p>
-          <h1 className="font-serif text-4xl tracking-tight">
-            {phase === 'compiling' ? 'Opening the compile theater…' : `Reading ${folderName}…`}
-          </h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            {phase === 'compiling'
-              ? `Ingest complete — ${ingestedCount} document${ingestedCount === 1 ? '' : 's'} in. Handing off to the compiler now.`
-              : 'Downloading each file from Drive and extracting text + per-page byte offsets. Each card below is one file landing on the server.'}
-          </p>
+          <h1 className="font-serif text-4xl tracking-tight">{headline.title}</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">{headline.body}</p>
         </motion.header>
+
+        {phase === 'choosing-perspective' ? (
+          <PerspectivePicker
+            selectedId={perspectiveId}
+            text={perspectiveText}
+            onSelect={selectPreset}
+            onTextChange={setPerspectiveText}
+            onConfirm={handleStartCompile}
+          />
+        ) : null}
 
         <section className="space-y-4">
           <div className="flex items-baseline justify-between">
@@ -167,6 +228,108 @@ export function IngestRoute() {
         </section>
       </main>
     </AppShell>
+  );
+}
+
+/**
+ * Perspective picker: preset chips + an editable textarea preloaded with
+ * the chosen preset's full system-prompt addition. The user can tweak
+ * the prompt before kicking off compile so they see EXACTLY what the
+ * model will be told.
+ *
+ * The selected/edited text is what the parent sends as
+ * `StartCompileInput.perspective`. Empty text (or the "Generic" preset)
+ * runs the compile with no perspective — the pre-perspective behavior.
+ */
+function PerspectivePicker({
+  selectedId,
+  text,
+  onSelect,
+  onTextChange,
+  onConfirm,
+}: {
+  selectedId: string;
+  text: string;
+  onSelect: (preset: PerspectivePreset) => void;
+  onTextChange: (next: string) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="space-y-5 rounded-lg border border-border bg-card/40 p-6"
+    >
+      <div className="space-y-2">
+        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          Presets
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {PERSPECTIVE_PRESETS.map((p) => {
+            const active = p.id === selectedId;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onSelect(p)}
+                className={`flex max-w-xs flex-col gap-0.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                  active
+                    ? 'border-accent bg-accent/10 text-foreground'
+                    : 'border-border bg-card/50 text-muted-foreground hover:border-accent/40 hover:bg-card hover:text-foreground'
+                }`}
+                aria-pressed={active}
+              >
+                <span className="font-medium">{p.label}</span>
+                <span className="text-[11px] text-muted-foreground">{p.subtitle}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label
+          htmlFor="perspective-prompt"
+          className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          Prompt — edit freely before compiling
+        </label>
+        <textarea
+          id="perspective-prompt"
+          value={text}
+          onChange={(e) => onTextChange(e.target.value)}
+          rows={12}
+          placeholder="Leave blank to run a generic compile."
+          className="block w-full rounded-md border border-border bg-background px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-accent/60"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          This text is threaded into every compile prompt (schema inference, source extraction, page
+          drafting, section narration) as a "Perspective:" preamble. Stored on the wiki so you can
+          see the lens it was built under.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            onTextChange('');
+            onConfirm();
+          }}
+          className="rounded px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+        >
+          Skip — generic compile
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90"
+        >
+          Compile with this perspective →
+        </button>
+      </div>
+    </motion.section>
   );
 }
 

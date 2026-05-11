@@ -5,6 +5,7 @@ import {
   WikiSchema,
 } from '@package/contracts/shared';
 import { z } from 'zod';
+import { withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // SchemaInferrer model — quality matters; one inference per CompileRun.
@@ -64,7 +65,7 @@ Rules:
 
 export async function inferSchema(
   deps: { llm: LlmClient },
-  input: { sources: ExtractedSourceText[] },
+  input: { sources: ExtractedSourceText[]; perspective?: string },
 ): Promise<{ schema: TWikiSchema; reason: string }> {
   const sample = input.sources
     .slice(0, 10)
@@ -75,7 +76,7 @@ export async function inferSchema(
 
   const { result } = await deps.llm.generateObject({
     model: SCHEMA_MODEL,
-    system: SYSTEM,
+    system: withPerspective(SYSTEM, input.perspective),
     prompt: sample,
     schema: InferOutput,
     schemaName: 'WikiSchemaWithReason',

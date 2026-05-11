@@ -67,7 +67,7 @@ const sliceHash = async (text: string, start: number, end: number): Promise<Cont
 
 export async function compileFolder(
   deps: CompileRuntimeDeps,
-  input: { compileRunId: CompileRunId; folderId: FolderId },
+  input: { compileRunId: CompileRunId; folderId: FolderId; perspective?: string },
 ): Promise<{ wikiId: WikiId }> {
   const startedAt = deps.now().toISOString();
   let run: TCompileRun = CompileRun.start({
@@ -125,9 +125,17 @@ export async function compileFolder(
     }
     await thought(
       'SchemaInferrer',
-      `Inferring schema from the first ${headTexts.length} source${headTexts.length === 1 ? '' : 's'}…`,
+      input.perspective
+        ? `Inferring schema from the first ${headTexts.length} source${headTexts.length === 1 ? '' : 's'} under your perspective…`
+        : `Inferring schema from the first ${headTexts.length} source${headTexts.length === 1 ? '' : 's'}…`,
     );
-    const { schema, reason } = await inferSchema({ llm: deps.llm }, { sources: headTexts });
+    const { schema, reason } = await inferSchema(
+      { llm: deps.llm },
+      {
+        sources: headTexts,
+        ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+      },
+    );
     await deps.emit({
       kind: 'SchemaInferred',
       compileRunId: input.compileRunId,
@@ -158,6 +166,7 @@ export async function compileFolder(
       folderId: input.folderId,
       schema,
       createdAt: deps.now().toISOString(),
+      ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
     });
     await deps.wikis.insert(wiki);
 
@@ -174,7 +183,14 @@ export async function compileFolder(
       tailTexts.push(r);
     }
     const allTexts = [...headTexts, ...tailTexts];
-    const { tasks } = await planCompile({ llm: deps.llm }, { schema, sources: allTexts });
+    const { tasks } = await planCompile(
+      { llm: deps.llm },
+      {
+        schema,
+        sources: allTexts,
+        ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+      },
+    );
 
     // 4. Research (concurrent) ---------------------------------------------
     run = CompileRun.advance(run, 'researching', deps.now().toISOString());
@@ -212,7 +228,11 @@ export async function compileFolder(
         await thought('Researcher', `Reading ${src.filename} for ${t.pageTypes.join(', ')}…`);
         const { findings } = await researchSource(
           { llm: deps.llm },
-          { source: src, pageTypes: t.pageTypes },
+          {
+            source: src,
+            pageTypes: t.pageTypes,
+            ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+          },
         );
         settled.push({
           status: 'fulfilled',
@@ -384,7 +404,14 @@ export async function compileFolder(
         title: f.title,
       }));
       const draftStart = Date.now();
-      const { draft } = await draftPage({ llm: deps.llm }, { pageType, findings: draftFindings });
+      const { draft } = await draftPage(
+        { llm: deps.llm },
+        {
+          pageType,
+          findings: draftFindings,
+          ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+        },
+      );
       console.info(
         `[compile-folder] Drafter done pageType=${pageType} in ${Date.now() - draftStart}ms slug=${draft.slug} title="${draft.title}"`,
       );
@@ -535,7 +562,14 @@ export async function compileFolder(
     } | null = null;
     try {
       await thought('IndexBuilder', 'Drafting an opinionated narrative for each section…');
-      narrative = await narrateIndexes({ llm: deps.llm }, { schema, entriesByPageType });
+      narrative = await narrateIndexes(
+        { llm: deps.llm },
+        {
+          schema,
+          entriesByPageType,
+          ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+        },
+      );
     } catch (err) {
       console.warn(
         '[compile-folder] narrate-indexes failed; falling back to deterministic intros',
@@ -561,6 +595,7 @@ export async function compileFolder(
         folderId: wiki.folderId,
         schema: enrichedSchema,
         createdAt: wiki.createdAt,
+        ...(wiki.perspective !== undefined ? { perspective: wiki.perspective } : {}),
       });
       await deps.wikis.update(wiki);
     }

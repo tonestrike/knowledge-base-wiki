@@ -28,7 +28,24 @@ export const CompileRun = z.object({
 });
 export type CompileRun = z.infer<typeof CompileRun>;
 
-export const StartCompileInput = z.object({ folderId: FolderId });
+export const StartCompileInput = z.object({
+  folderId: FolderId,
+  /**
+   * Optional perspective text that steers the compile. Threaded into the
+   * SchemaInferrer, PlanCompile, ResearchSource, DraftPage, and
+   * NarrateIndexes prompts as a "Perspective:" preamble. When omitted,
+   * the generic prompts run unchanged.
+   *
+   * Examples:
+   *   "Find business opportunities — surface unmet needs, market gaps,
+   *    competitive threats, willingness-to-pay signals."
+   *   "Novel-writing inspiration — extract character beats, plot tensions,
+   *    setting details, lines of dialogue worth lifting."
+   *   "Engineering decisions — what was decided, who decided it, what
+   *    tradeoff was made, what would change the decision."
+   */
+  perspective: z.string().min(1).max(4000).optional(),
+});
 export const StartCompileOutput = z.object({
   compileRunId: CompileRunId,
 });

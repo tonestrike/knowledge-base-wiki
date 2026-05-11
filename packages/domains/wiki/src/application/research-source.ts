@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // Researcher — high volume, runs N times per CompileRun (one per source).
@@ -51,12 +52,12 @@ export interface ResearchOutputT {
 
 export async function researchSource(
   deps: { llm: LlmClient },
-  input: { source: ExtractedSourceText; pageTypes: string[] },
+  input: { source: ExtractedSourceText; pageTypes: string[]; perspective?: string },
 ): Promise<ResearchOutputT> {
   const known = new Set(input.pageTypes);
   const { result } = await deps.llm.generateObject({
     model: RESEARCHER_MODEL,
-    system: SYSTEM,
+    system: withPerspective(SYSTEM, input.perspective),
     // Trim source text to first 60K chars (~20 pages) so Sonnet can pull
     // findings from a substantial chunk while leaving headroom for 20 JSON
     // findings. Earlier 10K cap was too small for 500-page legal docs;

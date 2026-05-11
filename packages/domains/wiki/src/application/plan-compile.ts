@@ -4,6 +4,7 @@ import {
   sourceId as parseSourceId,
 } from '@package/contracts/shared';
 import { z } from 'zod';
+import { withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // Planner — mechanical decomposition. Cheap model, fast.
@@ -35,13 +36,13 @@ Rules:
 
 export async function planCompile(
   deps: { llm: LlmClient },
-  input: { schema: WikiSchema; sources: ExtractedSourceText[] },
+  input: { schema: WikiSchema; sources: ExtractedSourceText[]; perspective?: string },
 ): Promise<{ tasks: Array<{ sourceId: SourceId; pageTypes: string[] }> }> {
   const known = new Set(input.schema.pageTypes.map((p) => p.name));
 
   const { result } = await deps.llm.generateObject({
     model: PLANNER_MODEL,
-    system: SYSTEM,
+    system: withPerspective(SYSTEM, input.perspective),
     prompt: `WikiSchema PageTypes: ${input.schema.pageTypes.map((p) => p.name).join(', ')}\n\n${input.sources
       .map(
         (s) =>

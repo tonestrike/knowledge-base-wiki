@@ -15,7 +15,6 @@ import {
 import { MessageAction, MessageActions } from '../ai-elements/message.tsx';
 import type { PromptInputMessage } from '../ai-elements/prompt-input.tsx';
 import { Spinner } from '../ai-elements/ui/spinner.tsx';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet.tsx';
 import { useChatDock } from './chat-dock-context.tsx';
 import { ChatMessageView, hasRenderableContent } from './chat-message-view.tsx';
 
@@ -86,45 +85,81 @@ const useDockWidth = (): {
   return { width, startDrag, isDragging };
 };
 
+/**
+ * Push-style chat dock. Lives as a flex sibling of the main router
+ * outlet (see `App.tsx`), so opening the dock shrinks the content
+ * column instead of overlaying it. Width animates via a CSS transition
+ * on the wrapper; drag handle still resizes live.
+ *
+ * Why not Sheet anymore: Sheet renders a portal'd overlay that covers
+ * the page. With a wide dock, the wiki page underneath gets visually
+ * lost. The push pattern keeps both visible — chat on the right, page
+ * on the left — which is what the user wants for a "ask while reading"
+ * workflow.
+ */
 export function ChatDock() {
   const { open, wikiId, close } = useChatDock();
   const { width, startDrag, isDragging } = useDockWidth();
+  // Width animates on open/close; drag-resize bypasses the transition by
+  // disabling it while the pointer is down so the panel tracks the
+  // cursor 1:1 instead of trailing behind.
+  const renderedWidth = open ? width : 0;
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && close()}>
-      <SheetContent
-        side="right"
-        // Override Sheet's stock width cap with a continuous pixel
-        // value driven by the drag handle. `!max-w-none` cancels the
-        // `sm:max-w-sm` from sheet.tsx without forking the primitive.
-        className="flex w-full flex-col gap-0 !max-w-none p-0"
-        style={{ width: `${width}px` }}
-      >
-        {/* Drag handle on the left edge. 6px hit target widens on hover so
-            the user can grab it without precision; cursor is `ew-resize`.
-            While dragging, an inset overlay disables text selection
-            globally so the cursor doesn't lose the handle on fast moves. */}
-        {/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer interaction; this is the drag handle and not real semantics. */}
-        <button
-          type="button"
-          onPointerDown={startDrag}
-          aria-label="Resize chat dock — drag horizontally"
-          className="group absolute inset-y-0 left-0 z-40 flex w-1.5 cursor-ew-resize items-center justify-center hover:bg-accent/20"
-        >
-          <div className="h-12 w-0.5 rounded-full bg-border/0 transition-colors group-hover:bg-accent/60" />
-        </button>
-        {isDragging ? (
-          <div className="fixed inset-0 z-[60] cursor-ew-resize" style={{ userSelect: 'none' }} />
-        ) : null}
+    <aside
+      aria-hidden={!open}
+      // Position relative so the absolute drag handle anchors inside.
+      // `shrink-0` so flex doesn't squeeze the dock when the content
+      // column has long text. `relative` for the drag handle. The width
+      // is set via inline style; transition lives in className so it
+      // animates open/close (and we suppress it during drag via the
+      // inline `transition` override).
+      className="relative flex shrink-0 flex-col overflow-hidden border-l border-border bg-card transition-[width] duration-200 ease-out"
+      style={{
+        width: `${renderedWidth}px`,
+        ...(isDragging ? { transition: 'none' } : {}),
+      }}
+    >
+      {open ? (
+        <>
+          {/* Drag handle on the left edge. 6px hit target widens on hover so
+              the user can grab it without precision; cursor is `ew-resize`.
+              While dragging, an inset overlay disables text selection
+              globally so the cursor doesn't lose the handle on fast moves. */}
+          {/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer interaction; this is the drag handle. */}
+          <button
+            type="button"
+            onPointerDown={startDrag}
+            aria-label="Resize chat dock — drag horizontally"
+            className="group absolute inset-y-0 left-0 z-40 flex w-1.5 cursor-ew-resize items-center justify-center hover:bg-accent/20"
+          >
+            <div className="h-12 w-0.5 rounded-full bg-border/0 transition-colors group-hover:bg-accent/60" />
+          </button>
+          {isDragging ? (
+            <div className="fixed inset-0 z-[60] cursor-ew-resize" style={{ userSelect: 'none' }} />
+          ) : null}
 
-        <SheetHeader className="border-b border-border px-6 py-4 pr-14">
-          <SheetTitle className="font-serif text-2xl tracking-tight">Ask the wiki</SheetTitle>
-          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-            ⌘K to toggle · every claim cites its source · drag the left edge to resize
-          </p>
-        </SheetHeader>
-        {wikiId ? <ChatPanelLoader wikiId={wikiId} /> : <ChatDockEmptyState />}
-      </SheetContent>
-    </Sheet>
+          <header className="flex items-start justify-between border-b border-border px-6 py-4">
+            <div className="flex flex-col gap-1">
+              <h2 className="font-serif text-2xl tracking-tight">Ask the wiki</h2>
+              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                ⌘K to toggle · every claim cites its source · drag the left edge to resize
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close chat dock"
+              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            >
+              <span aria-hidden className="block size-4 text-base leading-none">
+                ✕
+              </span>
+            </button>
+          </header>
+          {wikiId ? <ChatPanelLoader wikiId={wikiId} /> : <ChatDockEmptyState />}
+        </>
+      ) : null}
+    </aside>
   );
 }
 

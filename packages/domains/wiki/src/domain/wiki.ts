@@ -18,6 +18,13 @@ export interface Wiki extends WikiBrand {
   readonly updatedAt: string;
   readonly lastCompiledAt?: string;
   readonly pageCount: number;
+  /**
+   * Optional perspective the wiki was compiled under. Threaded into the
+   * SchemaInferrer / ResearchSource / DraftPage / NarrateIndexes prompts
+   * at compile time so the wiki's PageTypes, page bodies, and narration
+   * reflect the lens (e.g. "find business opportunities").
+   */
+  readonly perspective?: string;
 }
 
 export class UnknownPageTypeError extends Error {
@@ -42,6 +49,7 @@ export const Wiki = {
     updatedAt?: string;
     lastCompiledAt?: string;
     pageCount?: number;
+    perspective?: string;
   }): Wiki {
     if (props.schema.pageTypes.length === 0) {
       throw new Error('Wiki requires at least one PageType in its schema');
@@ -54,6 +62,7 @@ export const Wiki = {
       updatedAt: props.updatedAt ?? props.createdAt,
       lastCompiledAt: props.lastCompiledAt,
       pageCount: props.pageCount ?? 0,
+      ...(props.perspective !== undefined ? { perspective: props.perspective } : {}),
     }) as Wiki;
   },
   // Structurally validates that a Concept/Index page's pageType is one of

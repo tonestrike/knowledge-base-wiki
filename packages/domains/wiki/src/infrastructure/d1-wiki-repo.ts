@@ -20,6 +20,10 @@ interface Row {
   updated_at: string;
   last_compiled_at: string | null;
   page_count: number;
+  // Optional: the perspective column was added in migration 002. Older
+  // DBs that have been wiped + recreated may surface this; rows from
+  // pre-migration wikis return null.
+  perspective: string | null;
 }
 
 const rowToWiki = (r: Row): Wiki =>
@@ -31,6 +35,7 @@ const rowToWiki = (r: Row): Wiki =>
     updatedAt: r.updated_at,
     lastCompiledAt: r.last_compiled_at ?? undefined,
     pageCount: r.page_count,
+    ...(r.perspective ? { perspective: r.perspective } : {}),
   });
 
 export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
@@ -38,7 +43,7 @@ export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
     try {
       await db
         .prepare(
-          'INSERT INTO wikis (id, folder_id, schema_json, created_at, updated_at, last_compiled_at, page_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO wikis (id, folder_id, schema_json, created_at, updated_at, last_compiled_at, page_count, perspective) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .bind(
           w.id,
@@ -48,6 +53,7 @@ export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
           w.updatedAt,
           w.lastCompiledAt ?? null,
           w.pageCount,
+          w.perspective ?? null,
         )
         .run();
     } catch (err) {
@@ -60,9 +66,16 @@ export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
     try {
       await db
         .prepare(
-          'UPDATE wikis SET schema_json = ?, updated_at = ?, last_compiled_at = ?, page_count = ? WHERE id = ?',
+          'UPDATE wikis SET schema_json = ?, updated_at = ?, last_compiled_at = ?, page_count = ?, perspective = ? WHERE id = ?',
         )
-        .bind(JSON.stringify(w.schema), w.updatedAt, w.lastCompiledAt ?? null, w.pageCount, w.id)
+        .bind(
+          JSON.stringify(w.schema),
+          w.updatedAt,
+          w.lastCompiledAt ?? null,
+          w.pageCount,
+          w.perspective ?? null,
+          w.id,
+        )
         .run();
     } catch (err) {
       throw new Error(
@@ -118,6 +131,7 @@ export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
       updatedAt: w.updatedAt,
       lastCompiledAt: w.lastCompiledAt,
       pageCount: w.pageCount,
+      ...(w.perspective !== undefined ? { perspective: w.perspective } : {}),
     };
   },
   async cascadeDelete(wikiId: WikiId): Promise<{ deletedPageIds: WikiPageId[] }> {

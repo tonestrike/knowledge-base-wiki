@@ -140,7 +140,11 @@ ensure_r2
 step "Apply D1 migrations to remote prod db"
 # Domain migrations live in packages/domains/*/src/infrastructure/migrations/
 # Run in a deterministic order: ingestion → wiki → chat → verification.
-# Each migration uses `CREATE TABLE IF NOT EXISTS` so re-running is safe.
+# Pure CREATE migrations use `CREATE TABLE IF NOT EXISTS` so re-running
+# is safe. ALTER TABLE migrations aren't idempotent in D1 SQLite — re-
+# running them fails with "duplicate column name". We tolerate THAT
+# specific failure so the deploy stays simple; any other migration
+# error still aborts the deploy.
 DOMAIN_ORDER=(ingestion wiki chat verification)
 for domain in "${DOMAIN_ORDER[@]}"; do
   dir="$REPO_ROOT/packages/domains/$domain/src/infrastructure/migrations"
@@ -149,7 +153,18 @@ for domain in "${DOMAIN_ORDER[@]}"; do
   for sql in "$dir"/*.sql; do
     file_name=$(basename "$sql")
     printf '       applying %s/%s…\n' "$domain" "$file_name"
-    bunx wrangler d1 execute tenex --remote --env=prod --file="$sql" --yes >/dev/null
+    migrate_log=$(mktemp)
+    if ! bunx wrangler d1 execute tenex --remote --env=prod --file="$sql" --yes \
+        >"$migrate_log" 2>&1; then
+      if grep -qE "duplicate column name|already exists" "$migrate_log"; then
+        printf '       (already applied — tolerated)\n'
+      else
+        cat "$migrate_log" >&2
+        rm -f "$migrate_log"
+        fail "migration $domain/$file_name failed"
+      fi
+    fi
+    rm -f "$migrate_log"
   done
   shopt -u nullglob
 done

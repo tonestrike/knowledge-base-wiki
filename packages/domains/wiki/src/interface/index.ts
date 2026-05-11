@@ -58,7 +58,11 @@ export const wikiRouter = {
   listPages: os.listPages.handler(({ context, input }) => listPages(context, input)),
   startCompile: os.startCompile.handler(async ({ context, input }) => {
     const id = parseCompileRunId(context.newId());
-    await context.dispatcher.start({ compileRunId: id, folderId: input.folderId });
+    await context.dispatcher.start({
+      compileRunId: id,
+      folderId: input.folderId,
+      ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+    });
     return { compileRunId: id };
   }),
   getCompileRun: os.getCompileRun.handler(async ({ context, input }) => {

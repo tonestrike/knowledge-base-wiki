@@ -11,6 +11,13 @@ export const Wiki = z.object({
   updatedAt: z.string().datetime(),
   lastCompiledAt: z.string().datetime().optional(),
   pageCount: z.number().int().nonnegative(),
+  /**
+   * Perspective text the compile ran under. When set, the compile prompts
+   * (SchemaInferrer, PlanCompile, ResearchSource, DraftPage, NarrateIndexes)
+   * were biased toward this lens. Surfaced in the UI so readers see what
+   * the wiki was tuned for.
+   */
+  perspective: z.string().optional(),
 });
 export type Wiki = z.infer<typeof Wiki>;
 

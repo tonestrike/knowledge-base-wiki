@@ -99,7 +99,14 @@ export interface CompileRunRepository {
 }
 
 export interface CompileRunDispatcher {
-  start(args: { compileRunId: CompileRunId; folderId: FolderId }): Promise<void>;
+  start(args: {
+    compileRunId: CompileRunId;
+    folderId: FolderId;
+    /** Optional perspective the user supplied; threaded into every prompt
+     *  inside the compile (SchemaInferrer, PlanCompile, ResearchSource,
+     *  DraftPage, NarrateIndexes). Persisted on the Wiki record. */
+    perspective?: string;
+  }): Promise<void>;
   subscribe(compileRunId: CompileRunId): AsyncIterable<CompileEvent>;
 }
 

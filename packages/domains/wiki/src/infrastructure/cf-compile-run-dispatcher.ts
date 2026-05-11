@@ -17,13 +17,18 @@ const FRAME_TIMEOUT_MS = 60_000;
 // the same event twice.
 
 export const createCfCompileRunDispatcher = (ns: DurableObjectNamespace): CompileRunDispatcher => ({
-  async start({ compileRunId, folderId }) {
+  async start({ compileRunId, folderId, perspective }) {
     const stub = ns.get(ns.idFromName(compileRunId));
     const res = await stub.fetch(
       new Request('https://compile-run/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ kind: 'start', compileRunId, folderId }),
+        body: JSON.stringify({
+          kind: 'start',
+          compileRunId,
+          folderId,
+          ...(perspective !== undefined ? { perspective } : {}),
+        }),
       }),
     );
     if (!res.ok && res.status !== 202) {

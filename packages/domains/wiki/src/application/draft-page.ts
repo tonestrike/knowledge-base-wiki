@@ -4,6 +4,7 @@ import {
   sourceId as parseSourceId,
 } from '@package/contracts/shared';
 import { z } from 'zod';
+import { withPerspective } from './perspective-preamble.ts';
 import type { LlmClient } from './ports.ts';
 
 // Drafter — prose quality is the surface a reader judges.
@@ -91,7 +92,7 @@ export interface DraftedPage {
 
 export async function draftPage(
   deps: { llm: LlmClient },
-  input: { pageType: string; findings: ResearchFinding[] },
+  input: { pageType: string; findings: ResearchFinding[]; perspective?: string },
 ): Promise<{
   draft: DraftedPage;
   usage: { inputTokens: number; outputTokens: number };
@@ -105,7 +106,7 @@ export async function draftPage(
 
   const { result, inputTokens, outputTokens } = await deps.llm.generateObject({
     model: DRAFTER_MODEL,
-    system: SYSTEM,
+    system: withPerspective(SYSTEM, input.perspective),
     prompt: `PageType: ${input.pageType}\n\nFindings:\n${findingsBlock}`,
     schema: DraftOutput,
     schemaName: 'DraftedPage',

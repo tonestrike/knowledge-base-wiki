@@ -8,6 +8,7 @@ interface RunCommand {
   kind: 'start';
   compileRunId: string;
   folderId: string;
+  perspective?: string;
 }
 
 const TAPE_KEY = 'tape';
@@ -159,6 +160,7 @@ export const createCompileRunDOClass = <Env extends Record<string, unknown>>({
         await compileFolder(deps, {
           compileRunId: cmd.compileRunId as CompileRunId,
           folderId: cmd.folderId as FolderId,
+          ...(cmd.perspective !== undefined ? { perspective: cmd.perspective } : {}),
         });
         await this.state.storage.put(STATUS_KEY, 'finished' as DoStatus);
       } catch (err) {
