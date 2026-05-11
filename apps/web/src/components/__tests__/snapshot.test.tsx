@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mockTurn } from '@package/contracts/chat';
 import { mockUnsupportedFinding } from '@package/contracts/verification';
-import { mockWikiPage } from '@package/contracts/wiki';
+import { mockWiki, mockWikiPage } from '@package/contracts/wiki';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { LiveModeProvider } from '../../lib/live-mode.tsx';
@@ -9,7 +10,9 @@ import { AnswerSegmentView } from '../answer/answer-segment.tsx';
 import { tokenizeProse } from '../answer/span-shimmer.tsx';
 import { CitationFlightProvider } from '../citation/use-citation-flight.tsx';
 import { CompileTheater } from '../compile-theater/compile-theater.tsx';
+import { FeaturedWikiHero } from '../featured-wiki-hero.tsx';
 import { LintRibbon } from '../lint/lint-ribbon.tsx';
+import { SignInCta } from '../sign-in-cta.tsx';
 import { WikiPageView } from '../wiki-page/wiki-page.tsx';
 
 const wrap = (ui: React.ReactNode) => (
@@ -48,6 +51,63 @@ describe('six spectacular elements render without throwing', () => {
         render(wrap(<AnswerSegmentView segment={s} />));
       }
     }).not.toThrow();
+  });
+
+  it('FeaturedWikiHero renders title, thesis blurb, page-type chips, and an Open wiki CTA', () => {
+    const wiki = mockWiki({
+      schema: {
+        pageTypes: [
+          { name: 'Decision', description: 'A decision.' },
+          { name: 'Metric', description: 'A metric.' },
+          { name: 'Person', description: 'A person.' },
+          { name: 'Risk', description: 'A risk.' },
+          { name: 'Source', description: 'A source.' },
+          { name: 'Event', description: 'An event.' },
+        ],
+        relations: [],
+        thesis:
+          'Board decisions in 2026 hinged on EMEA expansion. The risk profile shifted in Q3 after the close.',
+      },
+    });
+    const { getByText, queryByText, getAllByText, getByRole } = render(
+      wrap(<FeaturedWikiHero wiki={wiki} />),
+    );
+    // First sentence only — second sentence must NOT render.
+    expect(
+      getAllByText(/Board decisions in 2026 hinged on EMEA expansion\./).length,
+    ).toBeGreaterThan(0);
+    expect(queryByText(/risk profile shifted in Q3/)).toBeNull();
+    // First five chips render; sixth lives behind a "+N more" overflow.
+    expect(getByText('Decision')).toBeTruthy();
+    expect(getByText('Source')).toBeTruthy();
+    expect(queryByText('Event')).toBeNull();
+    expect(getByText(/\+1 more/)).toBeTruthy();
+    // CTA link points to the wiki.
+    const link = getByRole('link', { name: /Open wiki/i });
+    expect(link.getAttribute('href')).toBe(`/wiki/${wiki.id}`);
+  });
+
+  it('FeaturedWikiHero falls back to a generic blurb when no thesis is present', () => {
+    const wiki = mockWiki({
+      schema: { pageTypes: [{ name: 'P', description: 'p' }], relations: [] },
+    });
+    const { getByText } = render(wrap(<FeaturedWikiHero wiki={wiki} />));
+    expect(getByText(/anchored to the verbatim source bytes/)).toBeTruthy();
+  });
+
+  it('SignInCta renders the exact sign-in copy and a Google button', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { getByText, getByRole } = render(
+      <MemoryRouter>
+        <QueryClientProvider client={qc}>
+          <SignInCta />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      getByText('Sign in with Google to compile your own folder into a typed, span-verified wiki.'),
+    ).toBeTruthy();
+    expect(getByRole('button', { name: /Sign in with Google/i })).toBeTruthy();
   });
 
   it('LintRibbon (unsupported finding) renders Apply correction button', () => {

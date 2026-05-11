@@ -5,16 +5,29 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
 import { DriveFolderPicker } from '../components/drive/drive-folder-picker.tsx';
+import { FeaturedWikiHero } from '../components/featured-wiki-hero.tsx';
+import { SignInCta } from '../components/sign-in-cta.tsx';
 import { Button } from '../components/ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.tsx';
-import { driveFolderIdFrom } from '../lib/drive-errors.ts';
+import { driveFolderIdFrom, isDriveAuthError } from '../lib/drive-errors.ts';
 import { orpc } from '../lib/orpc.ts';
 import { usePickAndCompile } from '../lib/use-pick-and-compile.ts';
+
+/**
+ * The wiki we showcase at the top of the landing page. Hardcoded so an
+ * incognito visitor sees a real, navigable example even before they sign
+ * in — the value is the same in dev and prod since featured wikis live
+ * in the shared D1.
+ */
+const FEATURED_WIKI_ID = 'cb0b020d-50ab-41cb-91d9-09a5dda547b2';
 
 export function RootRoute() {
   const wikis = useQuery({
     ...orpc.wiki.listWikis.queryOptions({ input: { limit: 50 } }),
   });
+
+  const featured = wikis.data?.items.find((w) => w.id === FEATURED_WIKI_ID);
+  const otherWikis = (wikis.data?.items ?? []).filter((w) => w.id !== FEATURED_WIKI_ID);
 
   return (
     <AppShell>
@@ -37,39 +50,67 @@ export function RootRoute() {
           </p>
         </motion.header>
 
-        <section className="space-y-4">
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-            Compiled wikis
-          </h2>
-          {wikis.isPending ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : wikis.isError ? (
-            <p className="text-sm text-destructive">
-              Failed to load wikis: {(wikis.error as Error).message}
-            </p>
-          ) : wikis.data && wikis.data.items.length > 0 ? (
-            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {wikis.data.items.map((w, i) => (
-                <motion.li
-                  key={w.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: i * 0.05 }}
-                >
-                  <WikiCard wiki={w} />
-                </motion.li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No wikis yet — connect a Drive folder below to compile your first one.
-            </p>
-          )}
-        </section>
+        {featured ? <FeaturedWikiHero wiki={featured} /> : null}
 
-        <ConnectDriveCard />
+        <CompiledWikisGrid
+          wikis={otherWikis}
+          isPending={wikis.isPending}
+          error={wikis.isError ? (wikis.error as Error) : null}
+          // When the featured hero is rendered the visitor already has
+          // something to open, so we suppress the "no wikis yet" hint
+          // and let the empty grid sit silently behind it.
+          suppressEmptyHint={!!featured}
+        />
+
+        <ConnectDriveSection />
       </main>
     </AppShell>
+  );
+}
+
+interface CompiledWikisGridProps {
+  wikis: Wiki[];
+  isPending: boolean;
+  error: Error | null;
+  suppressEmptyHint: boolean;
+}
+
+function CompiledWikisGrid({ wikis, isPending, error, suppressEmptyHint }: CompiledWikisGridProps) {
+  return (
+    <section className="space-y-4">
+      <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+        Compiled wikis
+      </h2>
+      {renderGridBody({ wikis, isPending, error, suppressEmptyHint })}
+    </section>
+  );
+}
+
+function renderGridBody({ wikis, isPending, error, suppressEmptyHint }: CompiledWikisGridProps) {
+  if (isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (error)
+    return <p className="text-sm text-destructive">Failed to load wikis: {error.message}</p>;
+  if (wikis.length > 0) {
+    return (
+      <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {wikis.map((w, i) => (
+          <motion.li
+            key={w.id}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: i * 0.05 }}
+          >
+            <WikiCard wiki={w} />
+          </motion.li>
+        ))}
+      </ul>
+    );
+  }
+  if (suppressEmptyHint) return null;
+  return (
+    <p className="text-sm text-muted-foreground">
+      No wikis yet — connect a Drive folder below to compile your first one.
+    </p>
   );
 }
 
@@ -120,14 +161,20 @@ function WikiCard({ wiki }: { wiki: Wiki }) {
   );
 }
 
-function ConnectDriveCard() {
+/**
+ * Decides what entry point to show below the wiki grid:
+ *  - If the user has no session (listFolders 401s with a Drive-auth-shaped
+ *    error), render {@link SignInCta} so the first action is "sign in"
+ *    rather than a broken folder picker.
+ *  - Otherwise, render the full {@link DriveFolderPicker} card.
+ *
+ * We also clear the `?drive=connected` post-OAuth flag from the URL on
+ * mount and invalidate `listFolders` so a stale 401 cached pre-OAuth
+ * doesn't keep the CTA up after the user just signed in.
+ */
+function ConnectDriveSection() {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
-  // Detect the post-OAuth landing flag and clear it from the URL on mount
-  // so a refresh doesn't keep replaying the "just signed in" effects. We
-  // also force the picker's `listFolders` query to refetch — its previous
-  // result was likely an auth error fetched seconds ago, and the cached
-  // 401 would otherwise mask the now-good token.
   const justConnected = params.get('drive') === 'connected';
   useEffect(() => {
     if (!justConnected) return;
@@ -137,6 +184,23 @@ function ConnectDriveCard() {
     qc.invalidateQueries({ queryKey: orpc.ingestion.listFolders.queryKey({ input: {} }) });
   }, [justConnected, params, setParams, qc]);
 
+  // A lightweight probe of `listFolders` is the cheapest signal we have
+  // for "is there a Drive session?" — the same query the picker uses
+  // internally, so the answer is shared across both branches of the UI.
+  const folders = useQuery({
+    ...orpc.ingestion.listFolders.queryOptions({ input: { limit: 1 } }),
+    retry: (count, err) => count < 1 && !isDriveAuthError(err),
+  });
+  const needsAuth = folders.isError && isDriveAuthError(folders.error);
+
+  if (needsAuth) {
+    return <SignInCta />;
+  }
+
+  return <ConnectDriveCard />;
+}
+
+function ConnectDriveCard() {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -202,3 +266,7 @@ function PasteFolderForm() {
     </form>
   );
 }
+
+// Re-export so callers (e.g. tests) can keep a stable reference even if we
+// move the constant later.
+export { FEATURED_WIKI_ID };
