@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# apps/api/scripts/dev — invoke wrangler under REAL Node.js.
+#
+# `bun run dev` (at the repo root) calls `turbo run dev`, which calls this
+# script. Without this wrapper, Bun's `bun run` injects a Node-CLI shim at
+# `/private/tmp/bun-node-…/node` into PATH for child processes. Wrangler
+# resolves `node` through that shim, so its ProxyWorker IPC actually runs
+# under Bun — and Bun's WebSocket handshake replies with a body that
+# wrangler doesn't understand ("Unexpected server response: 101"). The
+# worker boots, prints "Ready on http://localhost:8787", and then HTTP
+# requests hang forever because the ProxyWorker pipe is dead.
+#
+# Fix: strip the bun-node shim from PATH and source nvm so a real node
+# binary takes over before exec'ing wrangler.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+
+# 1) Strip `/private/tmp/bun-node-*` entries from PATH.
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/private/tmp/bun-node-' | paste -sd ':' -)"
+export PATH
+
+# 2) If real node still isn't on PATH (or the resolved node is somehow the
+#    shim), source nvm and pick up the .nvmrc-pinned version.
+node_path="$(command -v node 2>/dev/null || true)"
+case "$node_path" in
+  */bun-node-*/node|"") node_path="" ;;
+esac
+if [[ -z "$node_path" && -s "$HOME/.nvm/nvm.sh" ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh"
+  if [[ -f "$REPO_ROOT/.nvmrc" ]] && command -v nvm >/dev/null 2>&1; then
+    nvm use >/dev/null 2>&1 || true
+  fi
+  set -u
+  node_path="$(command -v node 2>/dev/null || true)"
+fi
+
+if [[ -z "$node_path" || "$node_path" == */bun-node-*/node ]]; then
+  printf '\n[api/dev] Real Node.js not found on PATH after stripping bun shim.\n'
+  printf '          Wrangler ProxyWorker IPC requires real node — install\n'
+  printf '          Node 22+ (e.g. `nvm install 22 && nvm use 22`) and rerun.\n' >&2
+  exit 1
+fi
+
+# 3) Exec wrangler via the resolved real-node interpreter. We invoke
+#    `wrangler-dist/cli.js` directly so node loads it as a script, never
+#    re-resolving `node` from the (now-clean) PATH for sub-processes.
+WRANGLER_CLI="$APP_ROOT/node_modules/wrangler/wrangler-dist/cli.js"
+if [[ ! -f "$WRANGLER_CLI" ]]; then
+  printf '\n[api/dev] Could not find wrangler at %s\n' "$WRANGLER_CLI" >&2
+  printf '          Run `bun install` from the repo root and retry.\n' >&2
+  exit 1
+fi
+
+printf '[api/dev] using node: %s (%s)\n' "$node_path" "$("$node_path" --version)"
+exec "$node_path" --no-warnings --experimental-vm-modules "$WRANGLER_CLI" dev --env dev

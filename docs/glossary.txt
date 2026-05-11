@@ -29,6 +29,16 @@ frontends
 agentskills
 anthropics
 creds
+RLHF
+rlhf
+Summarise
+Jailbreaking
+jailbreaking
+interpretability
+characterise
+chromodynamics
+behaviour
+recognise
 downvote
 upvote
 parallelizable

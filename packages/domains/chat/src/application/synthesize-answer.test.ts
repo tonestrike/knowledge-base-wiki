@@ -96,6 +96,70 @@ describe('synthesizeAnswer', () => {
     expect(events.filter((e) => e.kind === 'AnswerProseDelta')).toHaveLength(2);
   });
 
+  it('resolves an abbreviated UUID prefix back to the matching known citation', async () => {
+    // LLMs commonly emit `[[cite:528bee29]]` instead of the full UUID; the
+    // synthesizer ports surface those as 8-char `citationId` strings. The
+    // use-case should prefix-match against the known set and proceed.
+    const full = 'aaaaaaaa-1111-4222-8333-444444444444';
+    const cit = citation(full);
+    const events = await collect(
+      synthesizeAnswer(
+        {
+          synthesizer: synthesizerOf([
+            { kind: 'segment', index: 0, segment: { kind: 'citation', citationId: 'aaaaaaaa' } },
+          ]),
+          sourceHashes: {
+            async verify() {
+              return { ok: true };
+            },
+          },
+        },
+        {
+          turnId: tid,
+          question: 'Q?',
+          findings: [{ quoteText: 'NRR 110%', citationIds: [cit.id], citations: [cit] }],
+        },
+      ),
+    );
+    const seg = events.find((e) => e.kind === 'AnswerSegment');
+    expect(seg).toBeDefined();
+    if (seg && seg.kind === 'AnswerSegment' && seg.segment.kind === 'citation') {
+      expect(seg.segment.citation.id).toBe(cit.id);
+    }
+    expect(events.find((e) => e.kind === 'AnswerFailed')).toBeUndefined();
+  });
+
+  it('tripwires on an ambiguous prefix that matches two known citations', async () => {
+    // Two citations sharing an 8-char prefix is astronomically unlikely
+    // with v4 UUIDs, but the verifier must still bail rather than guess.
+    const a = citation('11112222-aaaa-4222-8333-444444444444');
+    const b = citation('11112222-bbbb-4222-8333-444444444444');
+    const events = await collect(
+      synthesizeAnswer(
+        {
+          synthesizer: synthesizerOf([
+            { kind: 'segment', index: 0, segment: { kind: 'citation', citationId: '11112222' } },
+          ]),
+          sourceHashes: {
+            async verify() {
+              return { ok: true };
+            },
+          },
+        },
+        {
+          turnId: tid,
+          question: 'Q?',
+          findings: [{ quoteText: 'x', citationIds: [a.id, b.id], citations: [a, b] }],
+        },
+      ),
+    );
+    const failed = events.find((e) => e.kind === 'AnswerFailed');
+    expect(failed).toBeDefined();
+    if (failed && failed.kind === 'AnswerFailed') {
+      expect(failed.message).toMatch(/unknown citation/i);
+    }
+  });
+
   it('aborts with AnswerFailed when an artifact references an unknown citation', async () => {
     const events = await collect(
       synthesizeAnswer(

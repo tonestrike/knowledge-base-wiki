@@ -150,6 +150,38 @@ export async function* synthesizeAnswer(
     for (const c of f.citations) knownCitations.set(c.id, c);
   }
 
+  /**
+   * Resolve a citation marker emitted by the model. Tries exact match
+   * first; if that misses, falls back to a unique-prefix match against
+   * the known set.
+   *
+   * Why prefix-match: LLMs routinely abbreviate UUIDs in generated text
+   * (e.g. emitting `[[cite:528bee29]]` instead of the full
+   * `[[cite:528bee29-d4c4-…]]`). The first 8 hex chars of a v4 UUID
+   * carry ~32 bits of entropy, so collisions across a single Turn's
+   * known set are astronomically unlikely — but we still tripwire on
+   * ambiguous matches so we never silently pick the wrong citation.
+   * Minimum prefix length of 8 chars keeps the false-positive rate
+   * effectively zero.
+   *
+   * Returns null when the marker doesn't match any known id (or
+   * matches multiple, ambiguously). The caller raises the tripwire.
+   */
+  const resolveCitation = (rawId: string): Citation | null => {
+    const exact = knownCitations.get(rawId);
+    if (exact) return exact;
+    if (rawId.length < 8) return null;
+    const lower = rawId.toLowerCase();
+    let only: Citation | null = null;
+    for (const c of knownCitations.values()) {
+      if (c.id.toLowerCase().startsWith(lower)) {
+        if (only) return null; // ambiguous — bail
+        only = c;
+      }
+    }
+    return only;
+  };
+
   const verifiedCache = new Map<string, true>();
   const verify = async (c: Citation): Promise<void> => {
     if (verifiedCache.has(c.id)) return;
@@ -201,7 +233,7 @@ export async function* synthesizeAnswer(
         }
         answerSeg = { kind: 'prose', text: raw.text };
       } else if (raw.kind === 'citation') {
-        const cit = knownCitations.get(raw.citationId);
+        const cit = resolveCitation(raw.citationId);
         if (!cit) {
           throw new CitationTripwireError(
             `Synthesizer cited unknown citation ${raw.citationId} [turnId=${input.turnId}]`,
@@ -212,7 +244,7 @@ export async function* synthesizeAnswer(
       } else {
         const cites: Citation[] = [];
         for (const id of raw.artifact.citationIds) {
-          const cit = knownCitations.get(id);
+          const cit = resolveCitation(id);
           if (!cit) {
             throw new CitationTripwireError(
               `Synthesizer cited unknown citation ${id} [turnId=${input.turnId}]`,
