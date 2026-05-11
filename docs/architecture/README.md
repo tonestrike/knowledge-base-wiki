@@ -2,6 +2,13 @@
 
 A bird's-eye view of tenex. For the language we use (the words this architecture is talking ABOUT), see [`../ubiquitous-language.md`](../ubiquitous-language.md).
 
+## Companion docs
+
+For presentations / walkthroughs:
+
+- [`code-tour.md`](./code-tour.md) — full end-to-end walkthrough of the system, ordered the way a request flows, with file-level pointers and the interesting bugs we hit along the way. Designed to accompany the `/present` deck.
+- [`perspective-flow.md`](./perspective-flow.md) — diagrams how the user's perspective text reaches every prompt during compile, plus how the chat picks the lens back up at question time.
+
 ## Table of contents
 
 - [Layout](#layout)
