@@ -58,10 +58,12 @@ export interface AgenticResearcherOptions {
   systemPrompt?: string;
   /** Per-`searchWiki` candidate limit. Defaults to 6. */
   searchLimit?: number;
-  /** Maximum tool-loop steps before forcing termination. Defaults to 12 —
-   *  a comfortable budget for 2–4 search queries + 2–4 page drill-downs +
-   *  the wrap-up step. The user explicitly asked the agent to "really
-   *  try hard"; a tight budget short-circuits multi-query refinement. */
+  /** Maximum tool-loop steps before forcing termination. Defaults to 8 —
+   *  end-to-end probes showed the model thrashing on dead-end synonym
+   *  searches once the obvious pages have been surfaced. 8 covers a
+   *  multi-query opener + a couple of drill-downs + the wrap-up; the
+   *  per-query dedup signal already short-circuits the most common
+   *  waste pattern (the model retrying the same phrasing). */
   maxSteps?: number;
   /** Per-call wall-clock timeout. Defaults to 90s. */
   timeoutMs?: number;
@@ -89,20 +91,40 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       input.onPageVisited?.(page);
     };
 
+    // Track queries the agent has already run so we can tell the model
+    // "you already tried this" instead of letting it burn a step on a
+    // repeat. The probe-chat trace showed a question with thin wiki
+    // coverage chewed 40s on duplicate searches.
+    const queriedTerms = new Set<string>();
+
     const tools = {
       searchWiki: tool({
         description:
-          'Search the compiled wiki for pages whose title or body matches the query. Returns the top hits with id, title, type, and a short snippet so you can decide which to drill into.',
+          'Search the compiled wiki for pages whose title or body matches the query. Returns the top hits with id, title, type, and a short snippet so you can decide which to drill into. Index/ToC pages are filtered out — these are the underlying Concept pages.',
         inputSchema: z.object({
           query: z.string().describe('Free-text search query — the user phrasing or a refinement.'),
         }),
         execute: async ({ query }) => {
+          const normalized = query.trim().toLowerCase();
+          if (queriedTerms.has(normalized)) {
+            // Hard-fail-noisily on duplicates so the model gets a clear
+            // signal not to repeat. Wastes one step but unblocks the
+            // model from looping on the same query indefinitely.
+            return {
+              error:
+                'You already ran this exact query. Try a different phrasing, a synonym, or stop searching and finalize.',
+              previousHits: 0,
+            };
+          }
+          queriedTerms.add(normalized);
+          const beforeCount = visited.size;
           const hits = await opts.wikiReader.searchPages({
             wikiId: input.wikiId,
             query,
             limit: searchLimit,
           });
           for (const p of hits) noteVisit(p);
+          const newPages = visited.size - beforeCount;
           return {
             hits: hits.map((p) => ({
               pageId: p.id,
@@ -111,6 +133,13 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
               snippet: p.body.slice(0, 280),
               citationCount: p.citations.length,
             })),
+            newPages,
+            note:
+              hits.length === 0
+                ? 'No hits. The wiki may not cover this exact topic — try a broader or related term, or finalize with what you have.'
+                : newPages === 0
+                  ? "All hits were already in your working set. Don't repeat searches that surface the same pages."
+                  : undefined,
           };
         },
       }),
@@ -144,7 +173,7 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         model: opts.model,
         tools,
         toolChoice: 'auto',
-        stopWhen: stepCountIs(opts.maxSteps ?? 12),
+        stopWhen: stepCountIs(opts.maxSteps ?? 8),
         system: opts.systemPrompt ?? SYSTEM,
         prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. Start with searchWiki.`,
         temperature: 0.2,

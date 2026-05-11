@@ -258,9 +258,16 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
 
   return {
     async searchPages({ wikiId, query, limit }) {
+      // Exclude Index pages from chat search. Index pages are typed
+      // tables of contents — they list entries that link to the real
+      // Concept pages, carry zero citations, and burn agent-loop budget
+      // when the model keeps drilling into them looking for substance.
+      // Browser-probe trace showed ~15s of dead air per question while
+      // the agent re-read "Papers" / "Techniques" indexes. The wiki tree
+      // sidebar still surfaces them; chat just won't.
       const rows = await db
         .prepare(
-          'SELECT id, wiki_id, title, page_type, body_r2_key FROM wiki_pages WHERE wiki_id = ? LIMIT 200',
+          "SELECT id, wiki_id, title, page_type, body_r2_key FROM wiki_pages WHERE wiki_id = ? AND subtype != 'Index' LIMIT 200",
         )
         .bind(wikiId)
         .all<PageRow>();
