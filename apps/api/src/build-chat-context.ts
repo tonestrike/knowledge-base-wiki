@@ -6,10 +6,11 @@ import {
   type TurnRepository,
   type WikiPageSummary,
   type WikiReader,
-  createAiSdkResearcher,
+  createAgenticResearcher,
   createAiSdkSynthesizer,
   createD1ConversationRepository,
   createD1TurnRepository,
+  createDirectWikiResearcher,
   createInMemoryDispatcher,
   createMemorySourceHashVerifier,
 } from '@domain/chat';
@@ -104,12 +105,6 @@ const inMemoryTurns = (): TurnRepository => {
       };
     },
   };
-};
-
-const stubResearcher: Researcher = {
-  async research() {
-    return { pages: [], findings: [] };
-  },
 };
 
 const emptyAsyncIterable = <T>(): AsyncIterable<T> => ({
@@ -368,9 +363,11 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
   });
   const eventBus: EventBus = opts.eventBus ?? new InMemoryEventBus();
 
-  let researcher: Researcher = stubResearcher;
   let synthesizer: Synthesizer = stubSynthesizer;
   let wikiReader: WikiReader = stubWikiReader;
+  let researcher: Researcher;
+  let researcherName = 'wiki-search';
+  let synthesizerName = 'stub-synthesizer';
 
   if (opts.bindings?.openRouterApiKey) {
     const { db, storage, openRouterApiKey } = opts.bindings;
@@ -390,11 +387,24 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
       provider: { order: ['anthropic'], allow_fallbacks: false },
     }) as LanguageModel;
-    researcher = createAiSdkResearcher({ model: sonnet, wikiReader });
+    // Agentic researcher: a tool-loop on the same Sonnet model that
+    // iterates search → drill → re-search before handing pages to the
+    // synthesizer. Replaces the previous one-shot `streamObject`-based
+    // researcher; the user explicitly asked for an agent that "really
+    // tries hard" to find information.
+    researcher = createAgenticResearcher({
+      model: sonnet,
+      wikiReader,
+      modelName: 'anthropic/claude-sonnet-4.6',
+    });
+    researcherName = 'agent-loop · anthropic/claude-sonnet-4.6';
     synthesizer = createAiSdkSynthesizer({
       model: sonnet,
       modelName: 'anthropic/claude-sonnet-4.6',
     });
+    synthesizerName = 'anthropic/claude-sonnet-4.6';
+  } else {
+    researcher = createDirectWikiResearcher({ wikiReader });
   }
 
   const dispatcher = createInMemoryDispatcher({
@@ -406,6 +416,8 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     eventBus,
     wikiReader,
     now: () => new Date(),
+    researcherName,
+    synthesizerName,
   });
 
   return {

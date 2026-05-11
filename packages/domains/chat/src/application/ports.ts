@@ -158,6 +158,17 @@ export interface ResearcherInput {
    * spinner.
    */
   onPartial?: (partial: { findings: number }) => void;
+  /**
+   * Optional callback fired the moment a wiki page is pulled into the
+   * working set. The agentic researcher iterates — searching, drilling
+   * into hits, searching again with refined queries — and a live "Reading
+   * X" tick per page is what makes the loop visible. The dispatcher wires
+   * this to emit one `WikiPageRetrieved` event per page as the agent
+   * surfaces it, instead of one batch at the end of research. The same
+   * page may appear from multiple tool calls; the callback dedupes is the
+   * caller's job (the dispatcher tracks emitted ids).
+   */
+  onPageVisited?: (page: WikiPageSummary) => void;
 }
 
 export interface ResearcherOutput {

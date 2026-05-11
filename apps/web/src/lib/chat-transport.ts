@@ -270,12 +270,21 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
       ];
     }
 
-    case 'ResearchStarted':
+    case 'ResearchStarted': {
+      // ResearchStarted.model carries the wired Researcher implementation
+      // — "agent-loop · …" when the agentic tool-loop is on, "wiki-search"
+      // when the direct fast-path is wired (no model). The bubble names
+      // which one is running so the user can tell from the trace whether
+      // the agent is iterating or doing a one-shot D1 lookup.
+      const opener = e.model.startsWith('agent-loop')
+        ? 'Agent searching the wiki — iterating queries and reading promising pages…\n'
+        : 'Searching the compiled wiki for relevant pages…\n';
       return startReasoning(state, 'research').concat({
         type: 'reasoning-delta',
         id: reasonId('research'),
-        delta: 'Searching the compiled wiki for relevant pages…\n',
+        delta: opener,
       });
+    }
 
     case 'WikiPageRetrieved': {
       const typeLabel = e.pageType ? ` · ${e.pageType}` : '';

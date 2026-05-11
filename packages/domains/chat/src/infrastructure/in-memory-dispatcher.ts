@@ -22,6 +22,15 @@ export interface InMemoryDispatcherDeps {
   eventBus: EventBus;
   wikiReader: import('../application/ports.ts').WikiReader;
   now: () => Date;
+  /**
+   * Optional human-readable label for the wired Researcher implementation,
+   * surfaced in `ResearchStarted.model`. Lets the chat dock distinguish
+   * "agent-loop" (the agentic researcher) from "wiki-search" (the direct
+   * fallback) without inferring from event timing.
+   */
+  researcherName?: string;
+  /** Optional override surfaced in `SynthesisStarted.model`. */
+  synthesizerName?: string;
 }
 
 interface Subscription {
@@ -108,13 +117,17 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
       emit(key, {
         kind: 'ResearchStarted',
         turnId: args.turnId,
-        model: 'd1-wiki-index',
+        model: deps.researcherName ?? 'wiki-search',
       });
 
       console.info('[chat.dispatcher] research start', {
         turnId: args.turnId,
         wikiId: args.wikiId,
       });
+      // Track which pages we've already announced so an agentic researcher
+      // that surfaces the same page twice (initial search + later
+      // drill-down) doesn't double-emit WikiPageRetrieved.
+      const emittedPages = new Set<string>();
       const { findings, pages, suggestionPages } = await researchQuestion(deps, {
         wikiId: args.wikiId,
         question: args.question,
@@ -125,6 +138,18 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
             findingsExtracted: count,
           });
         },
+        onPageVisited: (p) => {
+          if (emittedPages.has(p.id)) return;
+          emittedPages.add(p.id);
+          emit(key, {
+            kind: 'WikiPageRetrieved',
+            turnId: args.turnId,
+            wikiPageId: p.id,
+            title: p.title,
+            pageType: p.pageType,
+            citationCount: p.citations.length,
+          });
+        },
       });
 
       console.info('[chat.dispatcher] research done', {
@@ -133,10 +158,12 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
         findingCount: findings.length,
         suggestionCount: suggestionPages?.length ?? 0,
       });
-      // Fan out one event per retrieved page so the UI can render the agent's
-      // reading list with titles + types — without this, the user just sees
-      // "X candidate pages" with no idea what's been pulled.
+      // Fallback emit for any page the Researcher returned without firing
+      // `onPageVisited` (e.g. legacy adapters). The Set above keeps this
+      // idempotent with the live-emit path used by the agentic researcher.
       for (const p of pages) {
+        if (emittedPages.has(p.id)) continue;
+        emittedPages.add(p.id);
         emit(key, {
           kind: 'WikiPageRetrieved',
           turnId: args.turnId,
@@ -178,7 +205,7 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
       emit(key, {
         kind: 'SynthesisStarted',
         turnId: args.turnId,
-        model: 'anthropic/claude-sonnet-4.6',
+        model: deps.synthesizerName ?? 'anthropic/claude-sonnet-4.6',
       });
 
       let working: Turn = turn;

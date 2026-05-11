@@ -47,3 +47,5 @@ conversationnotfounderror
 turnnotfounderror
 errorid
 agentically
+logprobs
+inlines

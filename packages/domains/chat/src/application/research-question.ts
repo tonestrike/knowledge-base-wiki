@@ -1,57 +1,48 @@
-import type { Citation, WikiId } from '@package/contracts/shared';
-import type { ResearcherOutput, WikiReader } from './ports.ts';
+import type { WikiId } from '@package/contracts/shared';
+import type { Researcher, ResearcherOutput, WikiPageSummary, WikiReader } from './ports.ts';
 
 /**
- * "Search the pre-compiled wiki" — drops the legacy Researcher LLM call.
+ * Run the chat-domain Researcher port and supplement its output with the
+ * empty-findings fallback every implementation needs.
  *
- * The wiki was already extracted, structured, and grounded at compile
- * time: every WikiPage is prose tied to a curated `citations[]`. There is
- * no need for a second LLM round to re-extract findings — that work was
- * the whole point of the compile pipeline. We just rank wiki pages by
- * the question text (token overlap), then hand them to the Synthesizer
- * as ready-to-cite findings.
+ * The Researcher decides *how* to find pages — for the demo wiki an
+ * agentic ToolLoopAgent iterates search→drill→re-search, but a fast
+ * direct-search adapter is wired when no LLM is available (tests, no
+ * OPEN_ROUTER_API_KEY). Whichever implementation runs, this function
+ * guarantees the empty-question case still hands the synthesizer a
+ * concrete sample of what the wiki covers, so the model can compose a
+ * "I couldn't match that, here's what's in here" reply instead of
+ * dead-ending.
  *
- * This collapses chat from "two sequential LLM round trips" (15-40s to
- * first visible token) into "one streaming LLM round trip" (<1s to first
- * token, +5-10s for the full answer).
+ * Keeping the fallback here (rather than inside each Researcher impl)
+ * means the agent stays focused on the search problem and the dispatcher
+ * never sees an output without either findings OR suggestionPages.
  */
 export async function researchQuestion(
-  deps: { wikiReader: WikiReader },
+  deps: { researcher: Researcher; wikiReader: WikiReader },
   input: {
     wikiId: WikiId;
     question: string;
-    /** Optional progress callback, fired once the wiki search returns. */
+    /** Forwarded to the Researcher impl. Fires per finding/page surfaced. */
     onPartial?: (partial: { findings: number }) => void;
+    /** Forwarded to the Researcher impl. Fires per page pulled into context. */
+    onPageVisited?: (page: WikiPageSummary) => void;
   },
 ): Promise<ResearcherOutput> {
-  const pages = await deps.wikiReader.searchPages({
+  const out = await deps.researcher.research({
     wikiId: input.wikiId,
-    query: input.question,
-    limit: 4,
+    question: input.question,
+    ...(input.onPartial ? { onPartial: input.onPartial } : {}),
+    ...(input.onPageVisited ? { onPageVisited: input.onPageVisited } : {}),
   });
-  // Each candidate wiki page is treated as one finding with the page's
-  // entire citation pool available to the Synthesizer. The Synthesizer's
-  // hash-verification step still validates each citation before any
-  // event reaches the SSE tape, so we don't trust this list blindly.
-  const findings: ResearcherOutput['findings'] = pages.map((p) => ({
-    wikiPageId: p.id,
-    quoteText: p.body,
-    citationIds: p.citations.map((c: Citation) => c.id),
-    citations: p.citations,
-  }));
-  input.onPartial?.({ findings: findings.length });
 
-  // No matches → fetch a sample of the wiki so the synthesizer can guide
-  // the user to a follow-up question instead of dead-ending. We deliberately
-  // return this on `suggestionPages` and leave `findings` empty, because
-  // the synthesizer's empty-findings branch composes a different message
-  // when these are present.
-  if (pages.length === 0) {
+  // If the Researcher already hand-picked suggestion pages, respect them.
+  if (out.findings.length === 0 && (out.suggestionPages?.length ?? 0) === 0) {
     const suggestionPages = await deps.wikiReader.listSamplePages({
       wikiId: input.wikiId,
       limit: 6,
     });
-    return { pages, findings, suggestionPages };
+    return { ...out, suggestionPages };
   }
-  return { pages, findings };
+  return out;
 }

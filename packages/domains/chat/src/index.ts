@@ -22,7 +22,8 @@ export { CitationTripwireError } from './application/ports.ts';
 export { ConversationNotFoundError, TurnNotFoundError } from './application/errors.ts';
 export { createMemorySourceHashVerifier } from './application/verify-citation.ts';
 export { createInMemoryDispatcher } from './infrastructure/in-memory-dispatcher.ts';
-export { createAiSdkResearcher } from './infrastructure/ai-sdk-researcher.ts';
+export { createAgenticResearcher } from './infrastructure/agentic-researcher.ts';
+export { createDirectWikiResearcher } from './infrastructure/direct-wiki-researcher.ts';
 export { createAiSdkSynthesizer } from './infrastructure/ai-sdk-synthesizer.ts';
 export { createOrpcWikiReader } from './infrastructure/orpc-wiki-reader.ts';
 export {
