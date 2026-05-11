@@ -98,6 +98,11 @@ export function WikiRoute() {
             >
               <div className="space-y-3">
                 <h1 className="font-serif text-5xl leading-tight tracking-tight">{headline}</h1>
+                {wiki.data?.schema.thesis ? (
+                  <p className="max-w-3xl text-base leading-relaxed text-muted-foreground">
+                    {wiki.data.schema.thesis}
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {wiki.data?.schema.pageTypes.map((pt) => (
                     <motion.span

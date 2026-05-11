@@ -25,6 +25,15 @@ export const WikiSchema = z
   .object({
     pageTypes: z.array(PageType).min(1).max(20),
     relations: z.array(Relation).max(40),
+    /**
+     * Optional opinionated thesis written by the Narrator pass at compile
+     * time: 2-3 sentences naming what this corpus is about, what
+     * perspective the wiki takes, and how its sections fit together.
+     * Surfaced at the top of the wiki overview page so readers can
+     * navigate by intent rather than alphabet (Karpathy LLM-Wiki style).
+     * Optional because pre-Narrator wikis compiled without it.
+     */
+    thesis: z.string().min(1).max(800).optional(),
   })
   .superRefine((s, ctx) => {
     const known = new Set(s.pageTypes.map((p) => p.name));

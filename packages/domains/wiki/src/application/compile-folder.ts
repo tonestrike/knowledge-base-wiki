@@ -18,6 +18,7 @@ import { Wiki } from '../domain/wiki.ts';
 import { buildIndexes } from './build-indexes.ts';
 import { type ResearchFinding, draftPage } from './draft-page.ts';
 import { inferSchema } from './infer-schema.ts';
+import { narrateIndexes } from './narrate-indexes.ts';
 import { planCompile } from './plan-compile.ts';
 import type { CompileRuntimeDeps, ExtractedSourceText } from './ports.ts';
 import { researchSource } from './research-source.ts';
@@ -472,8 +473,54 @@ export async function compileFolder(
     run = CompileRun.advance(run, 'indexing', deps.now().toISOString());
     await deps.runs.update(run);
 
+    // Opinionated narrator pass — replaces the deterministic
+    // "This index lists every X" template with a 1-2 sentence
+    // narrative about what each PageType contributes in *this* corpus.
+    // Best-effort: if the narrator LLM call fails (rate limit, schema
+    // rejection, network), we fall back to the schema description.
+    const entriesByPageType: Record<string, Array<{ title: string; teaser?: string }>> = {};
+    for (const p of conceptsWithLinks) {
+      let list = entriesByPageType[p.pageType];
+      if (!list) {
+        list = [];
+        entriesByPageType[p.pageType] = list;
+      }
+      const teaser = p.claims[0]?.claimText?.trim().slice(0, 160);
+      list.push({ title: p.title, ...(teaser ? { teaser } : {}) });
+    }
+    let narrative: {
+      thesis: string;
+      pageTypeNarratives: Array<{ pageType: string; narrative: string }>;
+    } | null = null;
+    try {
+      await thought('IndexBuilder', 'Drafting an opinionated narrative for each section…');
+      narrative = await narrateIndexes({ llm: deps.llm }, { schema, entriesByPageType });
+    } catch (err) {
+      console.warn(
+        '[compile-folder] narrate-indexes failed; falling back to deterministic intros',
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    // Stamp the thesis onto the wiki record so it can render at the top
+    // of the overview page. Best-effort: skip the update if narration
+    // failed.
+    if (narrative?.thesis) {
+      await deps.wikis.update(
+        Wiki.create({
+          id: wiki.id,
+          folderId: wiki.folderId,
+          schema: { ...wiki.schema, thesis: narrative.thesis },
+          createdAt: wiki.createdAt,
+        }),
+      );
+    }
+
     const pageTypeDescriptions: Record<string, string> = {};
-    for (const pt of schema.pageTypes) pageTypeDescriptions[pt.name] = pt.description;
+    for (const pt of schema.pageTypes) {
+      const narratedIntro = narrative?.pageTypeNarratives.find((n) => n.pageType === pt.name);
+      pageTypeDescriptions[pt.name] = narratedIntro?.narrative ?? pt.description;
+    }
     const { indexPages } = buildIndexes({
       wikiId: wid,
       pages: conceptsWithLinks,
