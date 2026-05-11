@@ -169,3 +169,7 @@ openxmlformats
 officedocument
 wordprocessingml
 mammoth
+unpdf
+tripwired
+capnp
+workerds

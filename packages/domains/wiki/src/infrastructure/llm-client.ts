@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { type Tracer, noOpTracer, previewText } from '@package/shared-kernel';
+import { type Tracer, noOpTracer, startLlmCallSpan } from '@package/shared-kernel';
 import { generateObject } from 'ai';
 import type { z } from 'zod';
 import type { LlmClient } from '../application/ports.ts';
@@ -121,21 +121,17 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
       maxTokens?: number;
       temperature?: number;
     }) {
-      // One outer span covering the whole retry loop — token/latency
-      // attribution accumulates onto this span on the successful attempt;
-      // a transient error path leaves the span ended with the last
-      // exception recorded.
-      const span = tracer.startSpan('llm.call', {
-        'gen_ai.system': 'openrouter',
-        'gen_ai.request.model': model,
-        'gen_ai.operation.name': 'generateObject',
-        provider: 'openrouter',
+      // One outer span over the whole retry loop. Usage/latency attach on
+      // the successful attempt; transient errors leave the span ended with
+      // the last exception recorded.
+      const call = startLlmCallSpan(tracer, {
+        system: 'openrouter',
         model,
-        'prompt.preview': previewText(prompt) ?? '',
-        'system.preview': previewText(system) ?? '',
-        ...(schemaName ? { 'schema.name': schemaName } : {}),
+        operation: 'generateObject',
+        prompt,
+        systemPrompt: system,
+        extra: schemaName ? { 'schema.name': schemaName } : {},
       });
-      const callStart = Date.now();
       let attempt = 0;
       try {
         while (true) {
@@ -174,14 +170,12 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
             clearTimeout(timer);
             const inputTokens = res.usage?.inputTokens ?? 0;
             const outputTokens = res.usage?.outputTokens ?? 0;
-            span.setAttributes({
-              'gen_ai.usage.input_tokens': inputTokens,
-              'gen_ai.usage.output_tokens': outputTokens,
-              'gen_ai.attempts': attempt,
-              'completion.preview': previewText(JSON.stringify(res.object)) ?? '',
-              latency_ms: Date.now() - callStart,
+            call.recordSuccess({
+              inputTokens,
+              outputTokens,
+              attempts: attempt,
+              completion: JSON.stringify(res.object),
             });
-            span.setStatus('ok');
             return {
               result: res.object as z.infer<TSchema>,
               inputTokens,
@@ -195,17 +189,17 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
               const timeoutErr = new Error(
                 `LLM call timed out after ${timeoutMs}ms (model=${model})`,
               );
-              span.recordException(timeoutErr);
+              call.span.recordException(timeoutErr);
               throw timeoutErr;
             }
             // Don't retry validation errors — the prompt isn't going to
             // suddenly produce a different shape on the next attempt.
             if (isValidationError(err)) {
-              span.recordException(err);
+              call.span.recordException(err);
               throw err;
             }
             if (!isTransientError(err) || attempt >= maxAttempts) {
-              span.recordException(err);
+              call.span.recordException(err);
               throw err;
             }
             const hint = retryAfterMs(err as SdkErrorShape);
@@ -214,7 +208,7 @@ export const createLlmClient = (config: LlmClientConfig): LlmClient => {
           }
         }
       } finally {
-        span.end();
+        call.span.end();
       }
     },
   };
