@@ -49,6 +49,46 @@ export interface R2Bucket {
 // Historical alias used by the ingestion package. See note on D1DatabaseLike.
 export type R2BucketLike = R2Bucket;
 
+// --- Vectorize ------------------------------------------------------------
+
+/**
+ * Structural shape of a Cloudflare Vectorize index binding. Mirrors the
+ * subset of `@cloudflare/workers-types`' `VectorizeIndex` the chat
+ * package's `VectorWikiReader` consumes. Lives in shared-kernel so the
+ * declaration is framework-free; apps/api supplies a structurally
+ * compatible value at the composition seam.
+ */
+export interface VectorizeMatch {
+  id: string;
+  score: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface VectorizeQueryResult {
+  matches: VectorizeMatch[];
+  count?: number;
+}
+
+export interface VectorizeVector {
+  id: string;
+  values: number[] | readonly number[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface VectorizeIndex {
+  query(
+    vector: number[] | readonly number[],
+    options?: {
+      topK?: number;
+      returnMetadata?: boolean | 'none' | 'indexed' | 'all';
+      filter?: Record<string, unknown>;
+      namespace?: string;
+    },
+  ): Promise<VectorizeQueryResult>;
+  upsert(vectors: VectorizeVector[]): Promise<{ count?: number } | unknown>;
+  deleteByIds?(ids: string[]): Promise<unknown>;
+}
+
 // --- KV -------------------------------------------------------------------
 
 export interface KVNamespace {

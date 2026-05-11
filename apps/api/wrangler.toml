@@ -33,6 +33,16 @@ id = "78e3c691a0dd42e8a304a80b26168f55"
 binding = "STORAGE"
 bucket_name = "tenex"
 
+# Vectorize index backing the chat `searchSources` semantic-search
+# fallback (Stream O). Provision once on the account with:
+#   bunx wrangler vectorize create tenex-sources --dimensions=1536 --metric=cosine
+# Dimensionality matches OpenAI `text-embedding-3-small`; metric is
+# cosine. Missing on an account → chat keeps the existing D1
+# token-overlap behavior. See packages/domains/chat/glossary.md.
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "tenex-sources"
+
 # CompileRunDO orchestrates the multi-minute Compile so it can outlive the
 # 30s Workers request limit. Per spec §3.1.
 [[durable_objects.bindings]]
@@ -72,6 +82,10 @@ id = "78e3c691a0dd42e8a304a80b26168f55"
 [[env.dev.r2_buckets]]
 binding = "STORAGE"
 bucket_name = "tenex"
+
+[[env.dev.vectorize]]
+binding = "VECTORIZE"
+index_name = "tenex-sources"
 
 [[env.dev.durable_objects.bindings]]
 name = "COMPILE_RUN"
@@ -132,3 +146,7 @@ id = "78e3c691a0dd42e8a304a80b26168f55"
 [[env.prod.r2_buckets]]
 binding = "STORAGE"
 bucket_name = "tenex"
+
+[[env.prod.vectorize]]
+binding = "VECTORIZE"
+index_name = "tenex-sources"

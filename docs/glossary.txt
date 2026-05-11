@@ -137,6 +137,14 @@ maxItems
 minItems
 worktree
 worktrees
+vectorize
+upsert
+upserts
+embedder
+embedders
+embeddings
+reindex
+topk
 openrouter
 unwired
 oxlint

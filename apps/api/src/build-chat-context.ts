@@ -15,10 +15,13 @@ import {
   createDirectWikiResearcher,
   createInMemoryDispatcher,
   createMemorySourceHashVerifier,
+  createOpenAiEmbedder,
+  createVectorWikiReader,
 } from '@domain/chat';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import type { Conversation as ConvWire, Turn as TurnWire } from '@package/contracts/chat';
 import { userId } from '@package/contracts/shared';
+import type { VectorizeIndex } from '@package/shared-kernel';
 import { type EventBus, InMemoryEventBus, type Tracer, systemClock } from '@package/shared-kernel';
 import type { LanguageModel } from 'ai';
 
@@ -29,6 +32,21 @@ import type { LanguageModel } from 'ai';
  * the chat context never has to round-trip through oRPC for cross-context
  * lookups. Without the api key (e.g. unit tests), the stub adapters keep
  * the context constructable.
+ *
+ * `searchSources` has a fall-through chain (Stream O):
+ *
+ *   1. When BOTH the `VECTORIZE` binding and `OPENAI_EMBEDDING_API_KEY`
+ *      are present, we wrap the D1 reader with a `VectorWikiReader` that
+ *      embeds the query, hits the Vectorize index, and maps matches back
+ *      to `Source` rows. Every other `WikiReader` method is a passthrough.
+ *   2. If the embedder throws (missing key, rate limit, network) or the
+ *      Vectorize query returns zero hits, the wrapper delegates to the
+ *      inner reader's existing token-overlap implementation.
+ *   3. When either binding is missing, the D1 reader is used directly —
+ *      identical behavior to before Stream O shipped.
+ *
+ * Wiki pages themselves are NOT embedded — the fallback is source-level
+ * semantic search only, per scope.
  */
 
 type Conv = Parameters<ConversationRepository['insert']>[0];
@@ -154,6 +172,21 @@ export interface BuildChatContextOptions {
     db: D1Database;
     storage: R2Bucket;
     openRouterApiKey?: string;
+    /**
+     * Optional Cloudflare Vectorize index for the semantic-search
+     * `searchSources` fallback. When present alongside
+     * `openAiEmbeddingApiKey`, the chat context wraps the D1 reader with
+     * a `VectorWikiReader` that embeds the query and ranks chunks via
+     * cosine similarity. Missing either binding → unchanged behavior
+     * (D1 token overlap).
+     */
+    vectorize?: VectorizeIndex;
+    /**
+     * OpenAI API key used by the embeddings adapter. Distinct from
+     * `openRouterApiKey` — only the embedder talks to OpenAI directly;
+     * the Researcher/Synthesizer route through OpenRouter to Anthropic.
+     */
+    openAiEmbeddingApiKey?: string;
   };
   /**
    * Cloudflare Durable Object namespace hosting the per-turn chat run.
@@ -210,9 +243,24 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
   let synthesizerName = 'stub-synthesizer';
 
   if (opts.bindings?.openRouterApiKey) {
-    const { db, storage, openRouterApiKey } = opts.bindings;
+    const { db, storage, openRouterApiKey, vectorize, openAiEmbeddingApiKey } = opts.bindings;
     const openrouter = createOpenRouter({ apiKey: openRouterApiKey });
-    wikiReader = createDirectWikiReader(db, storage);
+    const baseReader = createDirectWikiReader(db, storage);
+    // Compose-or-fallback: if both the Vectorize binding and an OpenAI
+    // embedding key are present, wrap the base reader so `searchSources`
+    // first tries semantic search and then falls through to token overlap.
+    // Otherwise, hand the agent the base reader directly — preserving the
+    // pre-Stream-O behavior bit-for-bit when either binding is missing.
+    wikiReader =
+      vectorize && openAiEmbeddingApiKey
+        ? createVectorWikiReader({
+            db,
+            storage,
+            vectorize,
+            embedder: createOpenAiEmbedder({ apiKey: openAiEmbeddingApiKey }),
+            inner: baseReader,
+          })
+        : baseReader;
     // Pin routing to Anthropic-direct. OpenRouter otherwise picks the
     // cheapest provider; Sonnet 4.6 falls back to Amazon Bedrock when
     // Anthropic itself is at capacity, and Bedrock's tool-call validator

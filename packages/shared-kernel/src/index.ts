@@ -17,4 +17,8 @@ export type {
   R2Body,
   R2Bucket,
   R2BucketLike,
+  VectorizeIndex,
+  VectorizeMatch,
+  VectorizeQueryResult,
+  VectorizeVector,
 } from './cf-types.ts';

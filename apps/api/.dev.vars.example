@@ -41,6 +41,17 @@ GOOGLE_OAUTH_REDIRECT=http://localhost:8787/rpc/ingestion/authCallback
 # Get one at https://openrouter.ai/keys.
 OPEN_ROUTER_API_KEY=
 
+# OpenAI API key used ONLY by the chat `searchSources` embeddings adapter.
+# The chat context's Researcher + Synthesizer still route to Anthropic via
+# OpenRouter; this key powers the semantic-search fallback that wraps the
+# existing D1 token-overlap `WikiReader` (Stream O).
+# Required model: `text-embedding-3-small` (1536-dim, cosine — matches
+# the `tenex-sources` Vectorize index declared in wrangler.toml).
+# Missing this key, OR missing the VECTORIZE binding on the account, →
+# chat falls back to token overlap with zero behavior change. Get one at
+# https://platform.openai.com/api-keys.
+OPENAI_EMBEDDING_API_KEY=
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Optional
 # ──────────────────────────────────────────────────────────────────────────────
