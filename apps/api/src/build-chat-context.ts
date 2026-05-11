@@ -1,5 +1,6 @@
 import {
   type ChatContext,
+  type ConversationDispatcher,
   type ConversationRepository,
   type Researcher,
   type SourceSearchHit,
@@ -9,6 +10,7 @@ import {
   type WikiReader,
   createAgenticResearcher,
   createAiSdkSynthesizer,
+  createCfChatTurnDispatcher,
   createD1ConversationRepository,
   createD1TurnRepository,
   createDirectWikiResearcher,
@@ -156,7 +158,7 @@ interface PageRow {
  * rank by substring/token match. Good enough for demo wikis up to ~hundreds
  * of pages; a dedicated FTS index can replace this later.
  */
-const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader => {
+export const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader => {
   const tokenize = (s: string): string[] => s.toLowerCase().split(/\s+/).filter(Boolean);
   const score = (title: string, body: string, q: string): number => {
     let s = 0;
@@ -434,6 +436,15 @@ export interface BuildChatContextOptions {
     storage: R2Bucket;
     openRouterApiKey?: string;
   };
+  /**
+   * Cloudflare Durable Object namespace hosting the per-turn chat run.
+   * When supplied, the dispatcher is a thin remote client to the DO so
+   * `chat.ask` and `chat.streamAnswer` (separate HTTP requests that can
+   * land on different isolates) share the tape. When omitted (tests, dev
+   * without DO), the in-process `createInMemoryDispatcher` is used; that
+   * one only works when both requests hit the same isolate.
+   */
+  chatTurnNamespace?: DurableObjectNamespace;
 }
 
 export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContext => {
@@ -511,18 +522,26 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     researcher = createDirectWikiResearcher({ wikiReader });
   }
 
-  const dispatcher = createInMemoryDispatcher({
-    researcher,
-    synthesizer,
-    sourceHashes,
-    conversations,
-    turns,
-    eventBus,
-    wikiReader,
-    now: () => new Date(),
-    researcherName,
-    synthesizerName,
-  });
+  // Prefer the Durable Object dispatcher when bound. The DO survives the
+  // `chat.ask` → `chat.streamAnswer` isolate hop on Cloudflare Workers;
+  // the in-memory dispatcher only works when both requests happen to
+  // land in the same isolate (true in some browser flows, false for
+  // separate clients / curl probes / a worker scaling event). Tests and
+  // local dev without a DO binding still get the in-memory version.
+  const dispatcher: ConversationDispatcher = opts.chatTurnNamespace
+    ? createCfChatTurnDispatcher(opts.chatTurnNamespace)
+    : createInMemoryDispatcher({
+        researcher,
+        synthesizer,
+        sourceHashes,
+        conversations,
+        turns,
+        eventBus,
+        wikiReader,
+        now: () => new Date(),
+        researcherName,
+        synthesizerName,
+      });
 
   return {
     clock: systemClock,

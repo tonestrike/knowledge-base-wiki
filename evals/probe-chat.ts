@@ -1,10 +1,15 @@
 /**
- * One-shot chat probe — asks a single hard-coded question against the
- * running api, prints every SSE event verbatim. For diagnosing where
- * the agentic loop is going janky end-to-end.
+ * One-shot chat probe — asks one question against a running api,
+ * prints every SSE event verbatim. For diagnosing where the agentic
+ * loop is going janky end-to-end.
  *
  * Usage:
  *   bun run evals/probe-chat.ts "your question here"
+ *   bun run evals/probe-chat.ts "Q" --apiUrl=https://tenex-api.tonyvantur.workers.dev
+ *   bun run evals/probe-chat.ts "Q" --wikiId=c6379e8e-e2d5-4a66-ba0f-d66d3d8e5a34
+ *
+ * Set NODE_TLS_REJECT_UNAUTHORIZED=0 when hitting the local
+ * self-signed `https://api.tenex.localhost:1355` proxy.
  */
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
@@ -13,19 +18,47 @@ import type { Contract } from '@package/contracts';
 import type { AnswerEvent } from '@package/contracts/chat';
 import type { ConversationId, WikiId } from '@package/contracts/shared';
 
-const API = 'https://api.tenex.localhost:1355';
-const QUESTION = process.argv[2] ?? 'What is constitutional AI?';
+interface ProbeArgs {
+  question: string;
+  apiUrl: string;
+  wikiId?: string;
+}
+
+const parseArgs = (): ProbeArgs => {
+  const out: ProbeArgs = {
+    question: 'What is constitutional AI?',
+    apiUrl: 'https://api.tenex.localhost:1355',
+  };
+  const positional: string[] = [];
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith('--apiUrl=')) out.apiUrl = arg.slice('--apiUrl='.length);
+    else if (arg.startsWith('--wikiId=')) out.wikiId = arg.slice('--wikiId='.length);
+    else positional.push(arg);
+  }
+  if (positional[0]) out.question = positional[0];
+  return out;
+};
+
+const ARGS = parseArgs();
+const API = ARGS.apiUrl;
+const QUESTION = ARGS.question;
 
 const link = new RPCLink({ url: `${API}/rpc` });
 const client = createORPCClient(link) as ContractRouterClient<Contract>;
 
-const wikis = await client.wiki.listWikis({ limit: 1 });
-const wiki = wikis.items[0];
-if (!wiki) {
-  console.error('No wikis');
-  process.exit(1);
+let wiki: { id: string; pageCount?: number };
+if (ARGS.wikiId) {
+  wiki = { id: ARGS.wikiId };
+} else {
+  const wikis = await client.wiki.listWikis({ limit: 1 });
+  const first = wikis.items[0];
+  if (!first) {
+    console.error('No wikis');
+    process.exit(1);
+  }
+  wiki = first;
 }
-console.log(`[probe] wiki=${wiki.id} pages=${wiki.pageCount}`);
+console.log(`[probe] wiki=${wiki.id}${wiki.pageCount ? ` pages=${wiki.pageCount}` : ''}`);
 console.log(`[probe] Q: ${QUESTION}`);
 
 const conv = await client.chat.open({ wikiId: wiki.id as WikiId });

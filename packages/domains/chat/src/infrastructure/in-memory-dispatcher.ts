@@ -9,9 +9,7 @@ import type {
   Synthesizer,
   TurnRepository,
 } from '../application/ports.ts';
-import { researchQuestion } from '../application/research-question.ts';
-import { buildHistory, synthesizeAnswer } from '../application/synthesize-answer.ts';
-import { Turn } from '../domain/turn.ts';
+import { runChatTurn } from '../application/run-chat-turn.ts';
 
 export interface InMemoryDispatcherDeps {
   researcher: Researcher;
@@ -107,159 +105,9 @@ export const createInMemoryDispatcher = (deps: InMemoryDispatcherDeps): Conversa
     question: string;
   }): Promise<void> => {
     const key = subscribeKey(args.conversationId, args.turnId);
-    try {
-      // The "research" step is now a D1 query against the pre-compiled
-      // wiki — no LLM call. Pages are already structured prose with
-      // citations attached (that work happened at compile time). These
-      // events fire effectively instantly; we keep them in the agent log
-      // for narrative continuity.
-      emit(key, { kind: 'AnswerStarted', turnId: args.turnId });
-      emit(key, {
-        kind: 'ResearchStarted',
-        turnId: args.turnId,
-        model: deps.researcherName ?? 'wiki-search',
-      });
-
-      console.info('[chat.dispatcher] research start', {
-        turnId: args.turnId,
-        wikiId: args.wikiId,
-      });
-      // Track which pages we've already announced so an agentic researcher
-      // that surfaces the same page twice (initial search + later
-      // drill-down) doesn't double-emit WikiPageRetrieved.
-      const emittedPages = new Set<string>();
-      const { findings, pages, suggestionPages } = await researchQuestion(deps, {
-        wikiId: args.wikiId,
-        question: args.question,
-        onPartial: ({ findings: count }) => {
-          emit(key, {
-            kind: 'ResearchProgress',
-            turnId: args.turnId,
-            findingsExtracted: count,
-          });
-        },
-        onPageVisited: (p) => {
-          if (emittedPages.has(p.id)) return;
-          emittedPages.add(p.id);
-          emit(key, {
-            kind: 'WikiPageRetrieved',
-            turnId: args.turnId,
-            wikiPageId: p.id,
-            title: p.title,
-            pageType: p.pageType,
-            citationCount: p.citations.length,
-          });
-        },
-      });
-
-      console.info('[chat.dispatcher] research done', {
-        turnId: args.turnId,
-        pageCount: pages.length,
-        findingCount: findings.length,
-        suggestionCount: suggestionPages?.length ?? 0,
-      });
-      // Fallback emit for any page the Researcher returned without firing
-      // `onPageVisited` (e.g. legacy adapters). The Set above keeps this
-      // idempotent with the live-emit path used by the agentic researcher.
-      for (const p of pages) {
-        if (emittedPages.has(p.id)) continue;
-        emittedPages.add(p.id);
-        emit(key, {
-          kind: 'WikiPageRetrieved',
-          turnId: args.turnId,
-          wikiPageId: p.id,
-          title: p.title,
-          pageType: p.pageType,
-          citationCount: p.citations.length,
-        });
-      }
-
-      emit(key, {
-        kind: 'ResearchCompleted',
-        turnId: args.turnId,
-        candidatePageCount: pages.length,
-        findingCount: findings.length,
-      });
-
-      // SF-CHAT-2: if the Turn vanished between `ask` insert and dispatcher
-      // pickup that's a programmer error, not a recoverable state. Fail loud
-      // — the outer catch reshapes it into AnswerFailed for the caller.
-      const turn = await deps.turns.findById(args.turnId);
-      if (!turn) {
-        throw new Error(
-          `Turn not found in dispatcher run: ${args.turnId} (conversationId=${args.conversationId})`,
-        );
-      }
-
-      // Load prior turns of the same Conversation so the Synthesizer can
-      // resolve pronouns / topic continuations ("him", "that one", "why").
-      // `turns.list` returns oldest-first; we drop the *current* turn (it
-      // exists at this point because `ask` inserted it before dispatching)
-      // and let `buildHistory` cap + flatten the rest.
-      const prior = await deps.turns.list({
-        conversationId: args.conversationId,
-        limit: 100,
-      });
-      const history = buildHistory(prior.items.filter((t) => t.id !== args.turnId));
-
-      emit(key, {
-        kind: 'SynthesisStarted',
-        turnId: args.turnId,
-        model: deps.synthesizerName ?? 'anthropic/claude-sonnet-4.6',
-      });
-
-      let working: Turn = turn;
-      for await (const evt of synthesizeAnswer(
-        { synthesizer: deps.synthesizer, sourceHashes: deps.sourceHashes },
-        {
-          turnId: args.turnId,
-          question: args.question,
-          findings,
-          ...(suggestionPages !== undefined ? { suggestionPages } : {}),
-          ...(history.length > 0 ? { history } : {}),
-        },
-      )) {
-        // Skip the use-case's own AnswerStarted — we already fired one
-        // before research kicked off.
-        if (evt.kind === 'AnswerStarted') continue;
-        emit(key, evt);
-        if (evt.kind === 'AnswerSegment') {
-          working = Turn.appendSegment(working, evt.segment);
-          await deps.turns.update(working);
-        }
-        if (evt.kind === 'AnswerFinished') {
-          // Publish-then-persist (see consistency-model comment above).
-          await deps.eventBus.publish({
-            name: 'AnswerProduced',
-            occurredAt: deps.now().toISOString(),
-            payload: {
-              conversationId: args.conversationId,
-              turnId: args.turnId,
-              wikiId: args.wikiId,
-            },
-          });
-          working = Turn.finish(working, deps.now().toISOString());
-          await deps.turns.update(working);
-        }
-      }
-    } catch (err) {
-      const id = errorId();
-      console.error('[chat.in-memory-dispatcher] run failed', {
-        errorId: id,
-        conversationId: args.conversationId,
-        turnId: args.turnId,
-        wikiId: args.wikiId,
-        err:
-          err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
-      });
-      emit(key, {
-        kind: 'AnswerFailed',
-        turnId: args.turnId,
-        message: `Dispatcher run failed (errorId=${id}, turnId=${args.turnId}): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      });
-    }
+    await runChatTurn(deps, args, (e) => {
+      emit(key, e);
+    });
   };
 
   return {

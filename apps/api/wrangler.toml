@@ -39,9 +39,22 @@ bucket_name = "tenex"
 name = "COMPILE_RUN"
 class_name = "CompileRunDO"
 
+# ChatTurnDO hosts one chat turn's research + synth loop so chat.ask
+# (writes to tape) and chat.streamAnswer (subscribes to tape) share a
+# single addressable instance, regardless of which Worker isolate each
+# request lands in. Without this, the in-memory dispatcher's Map silently
+# desyncs across isolates and SSE hangs.
+[[durable_objects.bindings]]
+name = "CHAT_TURN"
+class_name = "ChatTurnDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["CompileRunDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ChatTurnDO"]
 
 [env.dev]
 [env.dev.vars]
@@ -63,6 +76,10 @@ bucket_name = "tenex"
 [[env.dev.durable_objects.bindings]]
 name = "COMPILE_RUN"
 class_name = "CompileRunDO"
+
+[[env.dev.durable_objects.bindings]]
+name = "CHAT_TURN"
+class_name = "ChatTurnDO"
 
 # Production: same Worker serves /rpc/* (api) and apps/web/dist (SPA).
 # Per ADR-0002. Scoped to env.prod so `wrangler dev` (top-level config)
@@ -87,6 +104,10 @@ enabled = true
 [[env.prod.durable_objects.bindings]]
 name = "COMPILE_RUN"
 class_name = "CompileRunDO"
+
+[[env.prod.durable_objects.bindings]]
+name = "CHAT_TURN"
+class_name = "ChatTurnDO"
 
 [env.prod.assets]
 directory = "../web/dist"

@@ -343,6 +343,13 @@ const ensureChatContext = (env: Env) => {
       storage: env.STORAGE,
       openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
     },
+    // When bound, use the Durable Object dispatcher so chat.ask and
+    // chat.streamAnswer survive landing on different Worker isolates.
+    ...((env as unknown as { CHAT_TURN?: DurableObjectNamespace }).CHAT_TURN
+      ? {
+          chatTurnNamespace: (env as unknown as { CHAT_TURN: DurableObjectNamespace }).CHAT_TURN,
+        }
+      : {}),
   });
   return chatContextSingleton;
 };
@@ -821,6 +828,6 @@ app.post('/__seed/lint', async (c) => {
   });
 });
 
-export { CompileRunDO } from './durable-objects.ts';
+export { ChatTurnDO, CompileRunDO } from './durable-objects.ts';
 
 export default app;
