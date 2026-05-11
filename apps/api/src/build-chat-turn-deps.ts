@@ -7,12 +7,12 @@ import {
   createAiSdkSynthesizer,
   createD1ConversationRepository,
   createD1TurnRepository,
+  createDirectWikiReader,
   createMemorySourceHashVerifier,
 } from '@domain/chat';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { InMemoryEventBus } from '@package/shared-kernel';
 import type { LanguageModel } from 'ai';
-import { createDirectWikiReader } from './build-chat-context.ts';
 
 export interface ChatTurnBindings extends Record<string, unknown> {
   DB: D1Database;

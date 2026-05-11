@@ -102,11 +102,10 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     // parameter: client_id" page, which the user has no way to recover
     // from inside our app. The api boundary accepts either
     // `GOOGLE_OAUTH_CLIENT_ID` or bare `GOOGLE_CLIENT_ID` as the secret
-    // name (both are common shapes in our Infisical project at
-    // `/apps/api`).
+    // name (both shapes have been in use).
     if (!cfg.clientId) {
       throw new Error(
-        'Drive OAuth is not configured: set GOOGLE_CLIENT_ID (or GOOGLE_OAUTH_CLIENT_ID) and the matching CLIENT_SECRET / REDIRECT in Infisical at /apps/api for this environment.',
+        'Drive OAuth is not configured: set GOOGLE_CLIENT_ID (or GOOGLE_OAUTH_CLIENT_ID) and the matching CLIENT_SECRET / REDIRECT in apps/api/.dev.vars (or via `wrangler secret put` for prod).',
       );
     }
     const state = crypto.randomUUID();
@@ -172,6 +171,11 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
         u.searchParams.set('q', q);
         u.searchParams.set('fields', 'files(id,name,modifiedTime),nextPageToken');
         u.searchParams.set('pageSize', String(limit));
+        // Required so the response includes folders that live in Shared Drives
+        // and folders the user has accessed via a public "Anyone with the link"
+        // share. Without these the v3 API silently filters to My Drive only.
+        u.searchParams.set('supportsAllDrives', 'true');
+        u.searchParams.set('includeItemsFromAllDrives', 'true');
         return { url: u };
       },
       'listFolders',
@@ -203,6 +207,11 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
         u.searchParams.set('fields', 'files(id,name,mimeType,modifiedTime),nextPageToken');
         u.searchParams.set('pageSize', String(limit));
         if (pageToken) u.searchParams.set('pageToken', pageToken);
+        // Same as listFolders: include items from Shared Drives + folders
+        // shared with "Anyone with the link". Without this a public folder
+        // returns zero files even though the user can see them in the UI.
+        u.searchParams.set('supportsAllDrives', 'true');
+        u.searchParams.set('includeItemsFromAllDrives', 'true');
         return { url: u };
       },
       'listFiles',
@@ -223,7 +232,9 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     const metaRes = await driveFetchWithRefresh(
       cfg,
       () => ({
-        url: `https://www.googleapis.com/drive/v3/files/${driveFileId}?fields=id,name,mimeType,size,modifiedTime`,
+        // supportsAllDrives lets metadata.get + the download URL resolve files
+        // that live in Shared Drives or folders shared publicly via link.
+        url: `https://www.googleapis.com/drive/v3/files/${driveFileId}?fields=id,name,mimeType,size,modifiedTime&supportsAllDrives=true`,
       }),
       'metadata',
     );
@@ -237,8 +248,8 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
           : 'application/pdf'
       : null;
     const downloadUrl = exportMime
-      ? `https://www.googleapis.com/drive/v3/files/${driveFileId}/export?mimeType=${encodeURIComponent(exportMime)}`
-      : `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
+      ? `https://www.googleapis.com/drive/v3/files/${driveFileId}/export?mimeType=${encodeURIComponent(exportMime)}&supportsAllDrives=true`
+      : `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media&supportsAllDrives=true`;
     const res = await driveFetchWithRefresh(cfg, () => ({ url: downloadUrl }), 'fetch');
     const bytes = new Uint8Array(await res.arrayBuffer());
     // Google-native files are exported to a different MIME than their source;

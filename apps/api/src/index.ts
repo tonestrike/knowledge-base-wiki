@@ -33,8 +33,9 @@ type Env = WikiBindings & {
   CACHE: KVNamespace;
   STORAGE: R2Bucket;
   // Drive OAuth credentials. Both prefixed (`GOOGLE_OAUTH_*`) and bare
-  // (`GOOGLE_*`) names are accepted so the Worker reads whichever shape the
-  // Infisical secret tree happens to use today — see `googleOAuthConfig`.
+  // (`GOOGLE_*`) names are accepted so older `.dev.vars` files that used the
+  // bare shape keep working — see `googleOAuthConfig` for the resolution
+  // order.
   GOOGLE_OAUTH_CLIENT_ID?: string;
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_OAUTH_REDIRECT?: string;
@@ -55,9 +56,9 @@ type Env = WikiBindings & {
 
 /**
  * Resolve the Drive OAuth credentials from the Worker env, accepting either
- * the `GOOGLE_OAUTH_*` or bare `GOOGLE_*` secret names. The Infisical project
- * has carried both shapes at different points; the chat / drive flow only
- * cares that *some* matching trio is present.
+ * the `GOOGLE_OAUTH_*` or bare `GOOGLE_*` secret names. Both shapes have been
+ * in use historically; the chat / drive flow only cares that *some* matching
+ * trio is present.
  */
 const googleOAuthConfig = (
   env: Env,
@@ -76,8 +77,8 @@ const DEMO_USER_ID = userId('99999999-2222-4333-8444-555555555555');
 
 // 32-byte zero key — only used as a fallback in the `test` environment so unit
 // tests can construct a context without provisioning a real key. Production
-// MUST set OAUTH_TOKEN_KEY_BASE64 via Infisical; the boot-time check below
-// enforces this.
+// MUST set OAUTH_TOKEN_KEY_BASE64 (via .dev.vars locally or `wrangler secret`
+// in prod); the boot-time check below enforces this.
 const ZERO_KEY_BASE64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 const resolveTokenKey = (env: Env): string => {
@@ -88,7 +89,8 @@ const resolveTokenKey = (env: Env): string => {
   // logs / wrangler tail.
   throw new Error(
     'OAUTH_TOKEN_KEY_BASE64 is required in non-test environments. ' +
-      'Set it via Infisical for the matching environment.',
+      'Set it in apps/api/.dev.vars locally, or via `wrangler secret put` for prod. ' +
+      'Generate a fresh key with: openssl rand -base64 32',
   );
 };
 

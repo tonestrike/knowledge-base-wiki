@@ -69,7 +69,7 @@ Common failures and fixes:
 | `tsc error: Cannot find module '@package/X'` | Add `@package/X` to the consuming package's `dependencies` as `workspace:*`; run `bun install` |
 | `biome: useImportType` | Change `import { Foo }` to `import type { Foo }` for type-only imports |
 | `bun:test` cannot find type declarations | Add `"@types/bun"` and `"types": ["bun"]` to the package's `tsconfig.json` |
-| `with-secrets: command not found` | Run via `bun run` script (bun adds `node_modules/.bin/` to PATH automatically) |
+| `apps/api/.dev.vars not found` | `cp apps/api/.dev.vars.example apps/api/.dev.vars` and fill in values (see [`../operations/secrets.md`](../operations/secrets.md)) |
 
 For UI changes, also visually verify in the browser. `bun run check` doesn't catch broken layouts.
 

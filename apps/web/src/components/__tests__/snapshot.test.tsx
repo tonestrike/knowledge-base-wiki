@@ -3,6 +3,7 @@ import { mockTurn } from '@package/contracts/chat';
 import { mockUnsupportedFinding } from '@package/contracts/verification';
 import { mockWikiPage } from '@package/contracts/wiki';
 import { cleanup, render } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { LiveModeProvider } from '../../lib/live-mode.tsx';
 import { AnswerSegmentView } from '../answer/answer-segment.tsx';
 import { tokenizeProse } from '../answer/span-shimmer.tsx';
@@ -12,9 +13,11 @@ import { LintRibbon } from '../lint/lint-ribbon.tsx';
 import { WikiPageView } from '../wiki-page/wiki-page.tsx';
 
 const wrap = (ui: React.ReactNode) => (
-  <LiveModeProvider initial={{ kind: 'static' }}>
-    <CitationFlightProvider>{ui}</CitationFlightProvider>
-  </LiveModeProvider>
+  <MemoryRouter>
+    <LiveModeProvider initial={{ kind: 'static' }}>
+      <CitationFlightProvider>{ui}</CitationFlightProvider>
+    </LiveModeProvider>
+  </MemoryRouter>
 );
 
 describe('six spectacular elements render without throwing', () => {
@@ -34,8 +37,8 @@ describe('six spectacular elements render without throwing', () => {
   it('CompileTheater renders three lanes', () => {
     const { getByText } = render(wrap(<CompileTheater compileRunId={null} />));
     expect(getByText('Sources')).toBeTruthy();
-    expect(getByText('Agents')).toBeTruthy();
-    expect(getByText('Pages')).toBeTruthy();
+    expect(getByText('Live narration')).toBeTruthy();
+    expect(getByText(/^Pages/)).toBeTruthy();
   });
 
   it('AnswerSegmentView renders each segment in mockTurn (artifact registry + citation chip + span shimmer)', () => {

@@ -25,10 +25,7 @@ bun-debug.log*
 .env.*.local
 !.env.example
 .dev.vars
-
-# infisical session/token cache (ensure no creds get committed)
-.infisical-token
-.infisical/auth.json
+!.dev.vars.example
 
 # editor
 .vscode/*

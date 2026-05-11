@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "with-secrets --env=dev --path=/apps/web --recursive -- vite",
-    "build": "with-secrets --env=prod --path=/apps/web --recursive -- vite build",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "bun test --preload ./test/setup.ts",
@@ -61,7 +61,6 @@
     "@happy-dom/global-registrator": "^15.0.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
-    "@tooling/scripts": "workspace:*",
     "@tooling/tsconfig": "workspace:*",
     "@types/bun": "^1.3.13",
     "@types/react": "^19.0.2",

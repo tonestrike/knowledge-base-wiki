@@ -1,6 +1,44 @@
-# Local-development secrets for `wrangler dev`.
-# Copy to .dev.vars (gitignored) and fill in values.
-# For production: `bun --filter @tenex/api run secrets:put` uploads everything in .dev.vars.
+# apps/api/.dev.vars — local dev secrets for the Cloudflare Worker.
+#
+# Copy this file to `.dev.vars` (gitignored), fill in real values, then run:
+#   bun run dev
+#
+# Wrangler reads `.dev.vars` automatically and exposes each KEY=VALUE on `c.env`
+# inside the Worker. The same file is uploaded as production Worker secrets
+# during `bun --filter @app/api run deploy` (or `bun --filter @app/api run secrets:put`).
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Required
+# ──────────────────────────────────────────────────────────────────────────────
 
-# AUTH_SECRET=
-# DATABASE_URL=
+# AES-GCM key used to encrypt Drive OAuth refresh tokens at rest in D1.
+# Generate one with:  openssl rand -base64 32
+# (32 random bytes, base64-encoded — that's 44 chars ending in '='.)
+# The Worker refuses to start in non-test environments without this set.
+OAUTH_TOKEN_KEY_BASE64=
+
+# Google OAuth client for Drive ingestion.
+# Create one at https://console.cloud.google.com → APIs & Services → Credentials:
+#   1. New OAuth client ID → Web application.
+#   2. Authorized redirect URI: http://localhost:8787/rpc/ingestion/authCallback
+#      (add your prod URL here too once deployed).
+#   3. Enable Drive API, Docs API, Sheets API, Slides API for the project.
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+GOOGLE_OAUTH_REDIRECT=http://localhost:8787/rpc/ingestion/authCallback
+
+# OpenRouter API key. The wiki compiler, the chat agent loop, and the
+# verification linter all call Anthropic models through OpenRouter.
+# Get one at https://openrouter.ai/keys.
+OPEN_ROUTER_API_KEY=
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Optional
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Comma-separated list of web origins the OAuth callback is allowed to 302
+# back to after a successful Drive sign-in. Defends against open-redirect
+# from a tampered `returnTo`. Falls back to the request's own origin when
+# unset, which is correct for single-origin local dev (vite proxies /rpc to
+# the api on :8787).
+# WEB_APP_ORIGINS=http://localhost:5173,http://127.0.0.1:5173

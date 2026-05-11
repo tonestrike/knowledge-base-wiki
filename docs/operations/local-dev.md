@@ -18,38 +18,30 @@ Day-one setup and the most common commands. For why each tool was chosen, see [`
 |---|---|---|
 | Bun | ≥ 1.3.0 | `curl -fsSL https://bun.sh/install \| bash` |
 | Node.js | ≥ 22 (pinned in `.nvmrc`) | `nvm install 22 && nvm use 22`, or system install |
-| Cloudflare account | any | sign up at cloudflare.com (only needed for `wrangler deploy`) |
-| Infisical Machine Identity | one per repo | see [`secrets.md`](secrets.md) |
+| Cloudflare account | any | sign up at cloudflare.com (only needed for `bun run deploy`) |
 
-The Infisical CLI ships as a workspace devDep (`@infisical/cli`); no global install required.
-
-> **Node + wrangler:** wrangler's local dev mode (used by `bun --filter @app/api dev`) requires real Node.js to run its ProxyWorker controller channel. Under bun's node-shebang fallback, the controller IPC breaks silently and HTTP requests hang on `:8787`. Make sure `node --version` returns `v22.x` in the shell where you run dev — the lazy-load nvm pattern in `~/.zshrc` only exposes `node` after you've called it once in the session; eager `nvm use` (or `bun run setup`, which does it for you) sidesteps this.
+> **Node + wrangler:** wrangler's local dev mode (`apps/api/scripts/dev`) requires real Node.js to run its ProxyWorker controller channel. Under bun's node-shebang fallback, the controller IPC breaks silently and HTTP requests hang on `:8787`. Make sure `node --version` returns `v22.x` in the shell where you run dev — the lazy-load nvm pattern in zsh only exposes `node` after you've called it once in the session. The api dev script strips the bun-node shim from PATH and re-resolves real node before exec'ing wrangler.
 
 ## First-time setup
 
 ```sh
 git clone <repo>
 cd tenex
-bun run setup
+bun install
+cp apps/api/.dev.vars.example apps/api/.dev.vars
+# Fill in apps/api/.dev.vars — the file documents each var inline.
+bun run dev
 ```
 
-`setup` is idempotent. It:
+`bun install` runs:
 
-1. Verifies `bun >= 1.3.0`.
-2. Runs `bun install` (which fans out `rulesync generate` via `postinstall` — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, `.agents/` appear locally; gitignored, with `.rulesync/` as the source of truth).
-3. Detects whether `INFISICAL_CLIENT_ID_TENEX` and `INFISICAL_CLIENT_SECRET_TENEX` are already exported in `~/.zshrc`. If both are present, it skips the prompt; otherwise it prompts for the missing one(s) and appends `export` lines to the rc.
-4. Smoke-tests the Machine Identity by exchanging the creds for a token via `with-secrets` and pulling secrets from `/apps/api`.
-5. Runs `bun run check`.
+1. The actual install.
+2. `rulesync generate` via postinstall (regenerates `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, `.agents/` from `.rulesync/`; all gitignored).
+3. `simple-git-hooks` to wire the pre-commit hook.
 
-To target a different shell rc (e.g. `~/.bashrc`), set `SETUP_SHELL_RC` before running:
+`apps/api/scripts/dev` will fail-fast if `.dev.vars` doesn't exist, with a message telling you to copy the example. See [`secrets.md`](secrets.md) for what each var is and how to get values.
 
-```sh
-SETUP_SHELL_RC=~/.bashrc bun run setup
-```
-
-If new exports were appended, open a new shell or `source` the rc so the creds persist.
-
-How to obtain the Machine Identity client ID + secret: see [`secrets.md`](secrets.md#auth-model).
+If you'd rather have a guided setup that also verifies tool versions and seeds `.dev.vars` for you, run `bun run setup` — it's an idempotent convenience wrapper.
 
 ## Pre-commit hook
 
@@ -101,11 +93,9 @@ portless                # starts vite + wrangler under the proxy via turbo
 
 Stop with Ctrl+C. Use `portless list` to inspect active routes, `portless proxy stop` to stop the daemon.
 
-`turbo.json`'s `globalPassThroughEnv` allows `INFISICAL_CLIENT_ID_TENEX` and `INFISICAL_CLIENT_SECRET_TENEX` through to the dev tasks; without that allowlist, turbo (which portless invokes when the workspace has multiple packages) strips arbitrary env vars and `with-secrets` can't authenticate.
-
 The vite proxy in [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) targets `http://127.0.0.1:8787` (explicit IPv4) and Vite itself binds `127.0.0.1` — both pinned to IPv4 because portless connects on IPv4 and Vite's default `localhost` resolution prefers IPv6 on Node 22+, which causes a 502 from portless.
 
-`portless` and `bun --filter @app/{api,web} dev` are interchangeable; both bind the same ports (8787/5173) and share the same `with-secrets` path, so you can pick whichever fits the moment without reconfiguring anything.
+`portless` and `bun --filter @app/{api,web} dev` are interchangeable; both bind the same ports (8787/5173) and share the same `.dev.vars` path, so you can pick whichever fits the moment without reconfiguring anything.
 
 ## Common commands
 
@@ -121,9 +111,8 @@ The vite proxy in [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts) tar
 | Spell-check only | `bun run spell` |
 | Tests only | `bun run test` |
 | Regenerate AI rule files | `bun run rulesync` |
-| Deploy api | `bun --filter @app/api run deploy` |
-| Push prod secrets to Workers | `bun --filter @app/api run secrets:push` |
-| Export dev secrets to `.dev.vars` | `bun --filter @app/api run secrets:export` |
+| Deploy api | `bun run deploy` |
+| Push prod Worker secrets from `.dev.vars` | `bun --filter @app/api run secrets:put` |
 | Clean everything | `bun run clean` |
 
 ## Filtering by package
@@ -146,9 +135,10 @@ turbo run typecheck --filter=@app/api    # also typechecks anything @app/api dep
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `with-secrets: command not found` | `node_modules/.bin/` not on PATH | Run via `bun run` script — bun adds bins automatically |
-| `INFISICAL_CLIENT_ID_TENEX must be set` | Missing in `~/.zshrc` or shell hasn't sourced | `source ~/.zshrc`; create the Machine Identity if needed |
+| `apps/api/.dev.vars not found` | Skipped the cp step after `bun install` | `cp apps/api/.dev.vars.example apps/api/.dev.vars` and fill in values |
+| `OAUTH_TOKEN_KEY_BASE64 is required` at runtime | Required var missing in `.dev.vars` | Generate one with `openssl rand -base64 32` |
+| Wrangler "Ready on …" then HTTP requests hang | Bun's node-shim took over for wrangler's IPC | `nvm use 22` in this shell so real node is first on PATH |
 | `cspell: Unknown word (X)` | Term not in glossary | Add to the relevant `.cspell/glossary.txt` AND `glossary.md` |
-| `tsc error in src/.../X.test.ts` | `bun:test` types missing | Add `"@types/bun": "^1.2.18"` and `"types": ["bun"]` to the package's tsconfig |
+| `tsc error in src/.../X.test.ts` | `bun:test` types missing | Add `"@types/bun": "^1.3.13"` and `"types": ["bun"]` to the package's tsconfig |
 | `bun run check` is slow | Cold turbo cache | Subsequent runs cache typecheck/test outputs; check cache hits |
 | Port 8787 / 5173 in use | Previous dev server didn't shut down | `lsof -i :8787` then `kill <pid>` |

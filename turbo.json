@@ -1,8 +1,6 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["INFISICAL_TOKEN", "INFISICAL_DISABLE_UPDATE_CHECK"],
-  "globalPassThroughEnv": ["INFISICAL_CLIENT_ID_TENEX", "INFISICAL_CLIENT_SECRET_TENEX"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

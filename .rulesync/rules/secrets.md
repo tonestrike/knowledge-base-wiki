@@ -1,84 +1,51 @@
 ---
 targets: ["*"]
-description: Secrets management via Infisical
+description: Secrets management via .dev.vars + wrangler secrets
 globs: ["apps/**", ".dev.vars*", "wrangler.toml", "package.json"]
 ---
 
-# Secrets — Infisical
+# Secrets
 
-Source of truth: one Infisical project `tenex` (workspaceId in `.infisical.json` at the repo root) with envs `dev`, `staging`, `prod`. Folders mirror the monorepo: `/apps/api`, `/apps/web`, `/packages/shared`. Cross-cutting secrets live at `/` and folders use Secret Imports / `--recursive` to inherit.
-
-## Auth model — Machine Identity (the convention)
-
-Each repo gets a per-repo Machine Identity in Infisical, and the contributor exports its credentials in their shell rc with a `_<REPO>` suffix so multiple repos coexist without collision:
-
-```sh
-# in ~/.zshrc (or equivalent)
-export INFISICAL_CLIENT_ID_TENEX=<uuid>
-export INFISICAL_CLIENT_SECRET_TENEX=<hex>
-```
-
-`bun run setup` checks both are present and prompts for whichever is missing. `packages/tooling/scripts/bin/with-secrets` reads them, exchanges them for an `INFISICAL_TOKEN` via `infisical login --method=universal-auth`, and execs the wrapped command under `infisical run --token=<TOKEN>`.
-
-**Agents and ad-hoc scripts should always go through `with-secrets`** (or invoke a package.json script that does):
-
-```sh
-# good — declarative, picks up the right env from package.json
-bun --filter @app/api dev
-
-# good — explicit, the same wrapper, when you need one-off injection
-./packages/tooling/scripts/bin/with-secrets --env=dev --path=/ --recursive -- bun some/script.ts
-
-# fallback — when even with-secrets isn't available (e.g. throwaway worktree
-# whose package.json scripts don't yet route through it), inline the dance:
-TOKEN=$(infisical login --method=universal-auth \
-  --client-id="$INFISICAL_CLIENT_ID_TENEX" \
-  --client-secret="$INFISICAL_CLIENT_SECRET_TENEX" \
-  --plain --silent) && \
-infisical run --token="$TOKEN" \
-  --projectId="$(jq -r .workspaceId .infisical.json)" \
-  --env=dev --path=/ --recursive -- <command>
-```
-
-The `--projectId` flag is required when invoking `infisical run` with `--token` from a subdirectory or a worktree where `.infisical.json` discovery doesn't fire. Pull it from the repo-root `.infisical.json`.
-
-The shell-rc creds (`INFISICAL_CLIENT_ID_TENEX` / `INFISICAL_CLIENT_SECRET_TENEX`) are NOT propagated through `bun run` / turbo by default. `turbo.json`'s `globalPassThroughEnv` lists them so they reach package scripts; if you add a new task that needs them, append it there, don't try to re-export inside the task.
-
-If `INFISICAL_CLIENT_ID_TENEX` is missing from your shell rc but the secret is set, `bun run setup` will prompt for it and `setup` is idempotent — re-run it any time. The Machine Identity ID is visible in the Infisical dashboard under Access Control → Identities.
+Plain environment variables, no external secrets service. One file: `apps/api/.dev.vars` (gitignored). Wrangler reads it natively for local dev. The same file is uploaded as Cloudflare Worker secrets at deploy time.
 
 ## Local dev
 
-Run `infisical login` once (web flow, for the dashboard). Then:
-
 ```sh
-bun --filter @app/api dev      # uses `infisical run --path=/apps/api --recursive` under the hood
-bun --filter @app/web dev
+cp apps/api/.dev.vars.example apps/api/.dev.vars   # one-time, then fill in values
+bun run dev                                        # turbo runs both apps
 ```
 
-If you need a `.dev.vars` file for `wrangler dev` quirks (e.g. binding inspection), generate it:
+`apps/api/scripts/dev` fails fast if `.dev.vars` is missing. `apps/api/.dev.vars.example` is the canonical inventory of every var the Worker reads — comments inline document how to obtain each.
 
-```sh
-bun --filter @app/api run secrets:export    # writes apps/api/.dev.vars (gitignored)
-```
+`apps/web` consumes no secrets directly. The SPA calls the api via same-origin `/rpc/*` in prod and the Vite proxy in dev.
 
 ## CI / deploy
 
-Two options, pick one per workflow:
+`bun run deploy` runs `scripts/deploy`, which:
 
-1. **Preferred — managed Workers Sync.** In Infisical: Project → Integrations → Cloudflare Workers. Source `/apps/api` env `prod`, dest worker `tenex-api`. Secrets push automatically on change; CI just runs `wrangler deploy`.
-2. **CI-pull fallback.** Use a Machine Identity token (`INFISICAL_TOKEN` env var):
-   ```sh
-   infisical export --env=prod --path=/apps/api --format=dotenv | wrangler secret bulk
-   ```
+1. Auto-provisions D1 / KV / R2 if the `wrangler.toml` placeholders are still in place.
+2. Applies every D1 migration to the remote prod database.
+3. Uploads `apps/api/.dev.vars` to the prod Worker via `wrangler secret bulk --env=prod`.
+4. Builds the SPA and deploys the Worker.
+
+For secret-only updates (no code redeploy):
+
+```sh
+bun --filter @app/api run secrets:put
+# or, single var:
+cd apps/api && bunx wrangler secret put VAR --env=prod
+```
 
 ## Adding a secret
 
-1. `infisical secrets set --env=dev --path=/apps/api KEY=value` (or use the dashboard).
-2. If the secret is needed at type-check time, declare it on the `Env` interface in `apps/api/src/index.ts`.
-3. Don't commit `.dev.vars`. Don't commit secrets to `wrangler.toml`. The `[vars]` block is for non-secret config only.
+1. Add `KEY=value` to `apps/api/.dev.vars`.
+2. Add `KEY=` (blank) plus a comment to `apps/api/.dev.vars.example` so the next person knows the var exists.
+3. If consumed at type-check time, declare it on the `Env` interface in `apps/api/src/index.ts`.
+4. Restart `bun run dev` — wrangler reads `.dev.vars` only at startup.
 
 ## Don't
 
-- Don't add per-app Infisical projects — use folders inside the one `tenex` project (the free tier limits projects to 3).
-- Don't introduce `dotenv` packages; `infisical run` already injects into `process.env`.
+- Don't commit `.dev.vars` (gitignored — keep it that way).
+- Don't put secrets in `[vars]` blocks in `wrangler.toml`. Those are plain text in deployments. Use them for non-secret config only (`ENVIRONMENT`, public callback URLs, allow-list origins).
+- Don't add `dotenv` packages. `wrangler dev` already loads `.dev.vars` into `c.env`.
 - Don't use Cloudflare Secrets Store as the primary store; it's beta and lacks a local-dev story.

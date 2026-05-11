@@ -19,6 +19,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
 
+# 0) Surface a friendly error if .dev.vars hasn't been authored yet.
+#    Wrangler would silently start the Worker without secrets and the first
+#    Drive OAuth attempt would die with a cryptic "OAUTH_TOKEN_KEY_BASE64
+#    is required" error — much clearer to flag it before launch.
+if [[ ! -f "$APP_ROOT/.dev.vars" ]]; then
+  printf '\n[api/dev] apps/api/.dev.vars not found.\n' >&2
+  printf '          Run: cp apps/api/.dev.vars.example apps/api/.dev.vars\n' >&2
+  printf '          Then fill in the values (see the comments inside).\n' >&2
+  exit 1
+fi
+
 # 1) Strip `/private/tmp/bun-node-*` entries from PATH.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/private/tmp/bun-node-' | paste -sd ':' -)"
 export PATH

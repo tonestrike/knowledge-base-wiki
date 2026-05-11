@@ -5,13 +5,12 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "with-secrets --env=dev --path=/apps/api --recursive -- ./scripts/dev",
+    "dev": "./scripts/dev",
     "build": "wrangler deploy --dry-run --outdir=dist",
-    "deploy": "bun --filter @app/web run build && with-secrets --env=prod --path=/apps/api --recursive -- wrangler deploy --env=prod",
+    "deploy": "bun --filter @app/web run build && wrangler deploy --env=prod",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "secrets:export": "with-secrets --env=dev --path=/apps/api --recursive -- bash -c 'bunx infisical export --projectId=$(jq -r .workspaceId ../../.infisical.json) --env=dev --path=/apps/api --include-imports --format=dotenv > .dev.vars'",
-    "secrets:push": "with-secrets --env=prod --path=/apps/api --recursive -- bunx infisical export --format=dotenv | wrangler secret bulk --env=prod",
+    "secrets:put": "wrangler secret bulk --env=prod .dev.vars",
     "clean": "rm -rf dist .wrangler .turbo *.tsbuildinfo"
   },
   "dependencies": {
@@ -30,7 +29,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
-    "@tooling/scripts": "workspace:*",
     "@tooling/tsconfig": "workspace:*",
     "@types/bun": "^1.3.13",
     "typescript": "^5.7.2",

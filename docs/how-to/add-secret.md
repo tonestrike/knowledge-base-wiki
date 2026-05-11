@@ -4,30 +4,27 @@ For all secret management mechanics, see [`../operations/secrets.md`](../operati
 
 ## Table of contents
 
-1. [Decide the path](#1-decide-the-path)
-2. [Add it in Infisical](#2-add-it-in-infisical)
-3. [Declare the type if needed](#3-declare-the-type-if-needed)
+1. [Add the value to `.dev.vars`](#1-add-the-value-to-devvars)
+2. [Document it in `.dev.vars.example`](#2-document-it-in-devvarsexample)
+3. [Declare the type](#3-declare-the-type)
 4. [Use it in code](#4-use-it-in-code)
+5. [Push to prod](#5-push-to-prod)
 
-## 1. Decide the path
+## 1. Add the value to `.dev.vars`
 
-| If the secret is used by | Path |
-|---|---|
-| only `apps/api` | `/apps/api` |
-| only `apps/web` | `/apps/web` (only secrets that are safe to ship to the browser at build time) |
-| multiple apps | `/` (shared) |
+```
+KEY=value
+```
 
-For each path, set the value in all environments you need (`dev`, `staging`, `prod`).
+Edit `apps/api/.dev.vars` directly. It's gitignored.
 
-## 2. Add it in Infisical
+## 2. Document it in `.dev.vars.example`
 
-Open the Infisical dashboard for the `tenex` project (workspaceId in `.infisical.json`), navigate to the path, choose the env, set the secret.
+Add the same `KEY=` (blank value) to `apps/api/.dev.vars.example` with a comment explaining what the var is and how to obtain it. This file IS committed — it's what the next contributor copies from.
 
-If you also want a local override that doesn't go to Infisical, set it in `apps/api/.dev.vars` (gitignored) — `wrangler dev` reads that file.
+## 3. Declare the type
 
-## 3. Declare the type if needed
-
-If the secret is consumed by `apps/api`, add it to the `Env` interface in `apps/api/src/index.ts`:
+If the secret is consumed at type-check time by `apps/api`, add it to the `Env` interface in `apps/api/src/index.ts`:
 
 ```ts
 type Env = {
@@ -37,22 +34,35 @@ type Env = {
 };
 ```
 
-If it's consumed by `apps/web` at build time, declare it in `apps/web/src/vite-env.d.ts` (Vite's standard pattern).
+For non-secret prod config (e.g. a public callback URL), prefer `[env.prod.vars]` in `wrangler.toml` instead of `.dev.vars`.
 
 ## 4. Use it in code
 
 ```ts
-// apps/api: bound to context
+// apps/api: bound to the request context
 app.get('/...', (c) => {
   const secret = c.env.AUTH_SECRET;
   // ...
 });
 ```
 
-If `bun --filter @app/api dev` was already running, restart it — the wrapper exchanges new tokens at startup, not on the fly.
+If `bun --filter @app/api dev` was already running, restart it — `wrangler dev` reads `.dev.vars` at startup only.
+
+## 5. Push to prod
+
+```sh
+bun --filter @app/api run secrets:put
+```
+
+Or for a single value:
+
+```sh
+cd apps/api
+bunx wrangler secret put AUTH_SECRET --env=prod
+```
 
 ## Don't
 
-- Don't `console.log` secrets, even in dev. Logs go to Workers' tail.
+- Don't `console.log` secrets, even in dev. Logs go to `wrangler tail`.
 - Don't commit `.dev.vars`.
 - Don't add a secret to `[vars]` in `wrangler.toml` — that's plain text in deployments.

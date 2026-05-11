@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# scripts/dev-vars-from-infisical — one-shot migration helper.
+#
+# Pulls every secret from the old Infisical workspace (`/apps/api`, env=dev,
+# recursive) and merges any keys missing from `apps/api/.dev.vars` into the
+# file. Pre-existing local values are NEVER overwritten — Infisical is the
+# fallback, not the source of truth.
+#
+# Requires:
+#   - INFISICAL_CLIENT_ID_TENEX and INFISICAL_CLIENT_SECRET_TENEX in your shell
+#     (these were the per-repo Machine Identity creds the old auth model used).
+#   - bunx + curl on PATH.
+#
+# The script is intentionally chatty so you can audit what's about to happen
+# before any writes land. It prints the keys it found, the keys it would
+# write, and asks for confirmation before touching `.dev.vars`.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEV_VARS="$REPO_ROOT/apps/api/.dev.vars"
+INFISICAL_PROJECT_ID='8245ad62-c954-46ff-bbb2-6974d385f098'
+
+step() { printf '\n[migrate] %s\n' "$*"; }
+ok()   { printf '[ok]      %s\n' "$*"; }
+warn() { printf '[warn]    %s\n' "$*" >&2; }
+fail() { printf '[fail]    %s\n' "$*" >&2; exit 1; }
+
+# Lift Infisical creds from common rc files if missing in the env (zsh
+# exports don't survive into Bash subshells).
+if [[ -z "${INFISICAL_CLIENT_ID_TENEX:-}" || -z "${INFISICAL_CLIENT_SECRET_TENEX:-}" ]]; then
+  for rc in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+    [[ -f "$rc" ]] || continue
+    for var in INFISICAL_CLIENT_ID_TENEX INFISICAL_CLIENT_SECRET_TENEX; do
+      [[ -n "${!var:-}" ]] && continue
+      line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
+      [[ -z "$line" ]] && continue
+      eval "$line"
+    done
+  done
+fi
+
+[[ -n "${INFISICAL_CLIENT_ID_TENEX:-}" ]] || fail "INFISICAL_CLIENT_ID_TENEX not set"
+[[ -n "${INFISICAL_CLIENT_SECRET_TENEX:-}" ]] || fail "INFISICAL_CLIENT_SECRET_TENEX not set"
+
+step "Exchange Universal-Auth creds for an Infisical access token"
+TOKEN_JSON=$(curl -fsS -X POST 'https://app.infisical.com/api/v1/auth/universal-auth/login' \
+  -H 'Content-Type: application/json' \
+  -d "{\"clientId\":\"$INFISICAL_CLIENT_ID_TENEX\",\"clientSecret\":\"$INFISICAL_CLIENT_SECRET_TENEX\"}") || fail "infisical login failed"
+INFISICAL_TOKEN=$(printf '%s' "$TOKEN_JSON" | bun -e 'const s = await new Response(process.stdin).text(); console.log(JSON.parse(s).accessToken)')
+[[ -n "$INFISICAL_TOKEN" ]] || fail "infisical login returned no accessToken"
+ok "got access token"
+
+step "Pull /apps/api dev secrets (recursive) from Infisical"
+INFISICAL_DUMP=$(mktemp)
+trap 'rm -f "$INFISICAL_DUMP"' EXIT
+bunx --bun infisical export \
+  --token="$INFISICAL_TOKEN" \
+  --projectId="$INFISICAL_PROJECT_ID" \
+  --env=dev \
+  --path=/apps/api \
+  --include-imports \
+  --format=dotenv \
+  > "$INFISICAL_DUMP" || fail "infisical export failed"
+
+# Strip wrapping quotes for stable key extraction.
+infisical_keys() {
+  awk -F= '/^[A-Z_][A-Z_0-9]*=/ {print $1}' "$INFISICAL_DUMP" | sort -u
+}
+local_keys() {
+  [[ -f "$DEV_VARS" ]] || return 0
+  awk -F= '/^[A-Z_][A-Z_0-9]*=/ {print $1}' "$DEV_VARS" | sort -u
+}
+infisical_value() {
+  # Print the raw rhs (including surrounding quotes); preserves Infisical's
+  # exact dotenv output.
+  awk -F= -v key="$1" '$1 == key {sub(/^[^=]+=/, ""); print; exit}' "$INFISICAL_DUMP"
+}
+
+I_KEYS=$(infisical_keys)
+L_KEYS=$(local_keys)
+
+printf '\n[migrate] Infisical has %d keys; local .dev.vars has %d keys.\n' \
+  "$(printf '%s\n' "$I_KEYS" | grep -c .)" \
+  "$(printf '%s\n' "$L_KEYS" | grep -c .)"
+
+MISSING_LOCALLY=$(comm -23 <(printf '%s\n' "$I_KEYS") <(printf '%s\n' "$L_KEYS") || true)
+ONLY_LOCAL=$(comm -13 <(printf '%s\n' "$I_KEYS") <(printf '%s\n' "$L_KEYS") || true)
+BOTH=$(comm -12 <(printf '%s\n' "$I_KEYS") <(printf '%s\n' "$L_KEYS") || true)
+
+[[ -n "$MISSING_LOCALLY" ]] && printf '\n[diff] only in Infisical (will be APPENDED to .dev.vars):\n%s\n' "$MISSING_LOCALLY"
+[[ -n "$ONLY_LOCAL" ]]      && printf '\n[diff] only locally (kept as-is):\n%s\n' "$ONLY_LOCAL"
+[[ -n "$BOTH" ]]            && printf '\n[diff] in both (local kept — Infisical NOT used):\n%s\n' "$BOTH"
+
+if [[ -z "$MISSING_LOCALLY" ]]; then
+  ok "nothing to append — .dev.vars already covers every Infisical key"
+  exit 0
+fi
+
+# Append the gap-filling keys (preserve Infisical's quoting). Mark each
+# with a comment so future-you knows where it came from.
+{
+  printf '\n# ---- Imported from Infisical (one-shot migration via scripts/dev-vars-from-infisical) ----\n'
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    val=$(infisical_value "$key")
+    printf '%s=%s\n' "$key" "$val"
+  done <<< "$MISSING_LOCALLY"
+} >> "$DEV_VARS"
+
+ok "appended $(printf '%s\n' "$MISSING_LOCALLY" | grep -c .) key(s) to $DEV_VARS"

@@ -51,7 +51,6 @@ const useDockWidth = (): {
 } => {
   const [width, setWidth] = useState<number>(DOCK_WIDTH_DEFAULT);
   const [isDragging, setIsDragging] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
   useEffect(() => {
     const stored = window.localStorage.getItem(DOCK_WIDTH_STORAGE_KEY);
     if (stored) {
@@ -129,7 +128,6 @@ export function ChatDock() {
               the user can grab it without precision; cursor is `ew-resize`.
               While dragging, an inset overlay disables text selection
               globally so the cursor doesn't lose the handle on fast moves. */}
-          {/* biome-ignore lint/a11y/useSemanticElements: <hr> can't host pointer interaction; this is the drag handle. */}
           <button
             type="button"
             onPointerDown={startDrag}

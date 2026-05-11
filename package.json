@@ -29,7 +29,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@infisical/cli": "^0.43.84",
     "@orpc/client": "^1.14.2",
     "@orpc/contract": "^1.14.2",
     "@package/contracts": "workspace:*",

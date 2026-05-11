@@ -9,20 +9,16 @@
 #      bun, wrangler's ProxyWorker IPC fails silently and HTTP requests hang).
 #      Auto-sources ~/.nvm/nvm.sh if present so lazy-loaded nvm setups work.
 #   3. bun install (also runs `rulesync generate` via postinstall)
-#   4. Ensure INFISICAL_CLIENT_ID_TENEX + INFISICAL_CLIENT_SECRET_TENEX are
-#      exported in your shell rc (default ~/.zshrc; override with SETUP_SHELL_RC=).
-#      If both are already exported there, the prompt is skipped entirely.
-#   5. Smoke-test the Infisical Machine Identity end-to-end via with-secrets.
-#   6. Run `bun run check`.
-#
-# After first run, open a new shell (or `source` your shell rc) so the exports
-# persist across sessions.
+#   4. If apps/api/.dev.vars is missing, seed it from .dev.vars.example so the
+#      Worker has the env vars it needs. The user fills in their own values.
+#   5. Run `bun run check`.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SHELL_RC="${SETUP_SHELL_RC:-$HOME/.zshrc}"
-WITH_SECRETS="$REPO_ROOT/apps/api/node_modules/.bin/with-secrets"
+API_DIR="$REPO_ROOT/apps/api"
+DEV_VARS="$API_DIR/.dev.vars"
+DEV_VARS_EXAMPLE="$API_DIR/.dev.vars.example"
 
 step() { printf '\n[step] %s\n' "$*"; }
 ok()   { printf '[ok]   %s\n' "$*"; }
@@ -33,38 +29,6 @@ fail() { printf '[fail] %s\n' "$*" >&2; exit 1; }
 # Returns 0 if $1 (current) is >= $2 (minimum), per `sort -V`.
 version_at_least() {
   [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" == "$2" ]]
-}
-
-# If $rc has `export VAR=...`, eval the most recent matching line so the
-# variable lands in the current process env. Used to bring exports already
-# present in the rc into a fresh shell that hasn't sourced it yet.
-load_export_from_rc() {
-  local rc="$1" var="$2" line
-  [[ -f "$rc" ]] || return 0
-  line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
-  [[ -n "$line" ]] && eval "$line"
-}
-
-APPENDED_TO_RC=0
-
-ensure_export() {
-  local var="$1" prompt="$2" silent="$3" value
-  if grep -qE "^export ${var}=" "$SHELL_RC"; then
-    skip "$var already exported in $SHELL_RC"
-    [[ -z "${!var:-}" ]] && load_export_from_rc "$SHELL_RC" "$var"
-    return 0
-  fi
-  if [[ "$silent" == "silent" ]]; then
-    read -r -s -p "$prompt" value
-    printf '\n'
-  else
-    read -r -p "$prompt" value
-  fi
-  [[ -n "$value" ]] || fail "empty value for $var"
-  printf '\nexport %s=%q\n' "$var" "$value" >> "$SHELL_RC"
-  export "$var=$value"
-  APPENDED_TO_RC=1
-  ok "$var appended to $SHELL_RC"
 }
 
 cd "$REPO_ROOT"
@@ -79,9 +43,9 @@ ok "bun $BUN_VERSION"
 # 2) Node.js (wrangler dev requires real Node, not bun)
 step "Verify Node.js >= 22"
 if ! command -v node >/dev/null; then
-  # Lazy-loaded nvm setups (the default in this repo's owner's zshrc) only
-  # expose `node` after the shell function fires. Source nvm.sh once so the
-  # rest of the script and bun-spawned children see the active version.
+  # Lazy-loaded nvm setups only expose `node` after the shell function fires.
+  # Source nvm.sh once so the rest of the script and bun-spawned children
+  # see the active version.
   if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
     # shellcheck disable=SC1091
     set +u; . "$HOME/.nvm/nvm.sh"; set -u
@@ -100,27 +64,21 @@ step "bun install"
 bun install
 ok "deps installed"
 
-# 4) Infisical Machine Identity creds
-step "Configure Infisical Machine Identity creds in $SHELL_RC"
-if [[ ! -f "$SHELL_RC" ]]; then
-  touch "$SHELL_RC"
-  warn "$SHELL_RC did not exist; created it"
+# 4) Seed apps/api/.dev.vars from the committed example if missing.
+step "Ensure apps/api/.dev.vars exists"
+if [[ -f "$DEV_VARS" ]]; then
+  skip ".dev.vars already present at $DEV_VARS"
+else
+  [[ -f "$DEV_VARS_EXAMPLE" ]] || fail "missing $DEV_VARS_EXAMPLE — repo is in an unexpected state"
+  cp "$DEV_VARS_EXAMPLE" "$DEV_VARS"
+  ok "wrote $DEV_VARS (copied from .dev.vars.example)"
+  warn "open $DEV_VARS and fill in real values before running \`bun --filter @app/api dev\`"
 fi
-ensure_export INFISICAL_CLIENT_ID_TENEX     "Infisical Machine Identity client ID: " plain
-ensure_export INFISICAL_CLIENT_SECRET_TENEX "Infisical Machine Identity client secret (input hidden): " silent
 
-# 5) auth smoke test
-step "Smoke-test Infisical Machine Identity"
-[[ -x "$WITH_SECRETS" ]] || fail "with-secrets bin missing at $WITH_SECRETS — bun install may have failed"
-"$WITH_SECRETS" --env=dev --path=/apps/api --recursive -- true >/dev/null
-ok "auth + secret fetch ok"
-
-# 6) full check
+# 5) full check
 step "Run bun run check"
 bun run check
 ok "check passed"
 
 printf '\n[done] First-run setup complete.\n'
-if [[ "$APPENDED_TO_RC" -eq 1 ]]; then
-  printf '       New exports were added to %s. Open a new shell or run: source %s\n' "$SHELL_RC" "$SHELL_RC"
-fi
+printf '       Next: fill in apps/api/.dev.vars, then run \`bun run dev\`.\n'

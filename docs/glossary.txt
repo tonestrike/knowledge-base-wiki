@@ -156,3 +156,6 @@ scannability
 Shelob
 Sindarin
 autonumber
+
+pgvector
+Vectorize

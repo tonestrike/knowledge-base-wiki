@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 # scripts/deploy — one-shot tenex production deploy.
 #
-# Reuses the dev Infisical env (/apps/api dev) as the prod secret source
-# because for this demo we don't run a separate prod env in Infisical.
-# Future-you can switch to `--env=prod` once a real prod env exists.
-#
 # Steps (each idempotent):
-#   1. Verify Infisical creds + wrangler binary.
+#   1. Verify tooling (wrangler, node, .dev.vars present).
 #   2. Verify wrangler.toml has real D1 + KV ids in [env.prod] (auto-
 #      runs `wrangler d1 create / kv namespace create / r2 bucket create`
 #      if the placeholders are still in place; pipes the ids back).
 #   3. Apply every D1 migration to the remote prod db, in declared order.
 #      Migrations use `CREATE TABLE IF NOT EXISTS` so re-running is safe.
-#   4. Push the dev-env Infisical secrets to the prod Worker via
+#   4. Push apps/api/.dev.vars to the prod Worker via
 #      `wrangler secret bulk --env=prod`.
 #   5. Build the web SPA + deploy the Worker via `wrangler deploy
 #      --env=prod`.
@@ -23,26 +19,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 API_DIR="$REPO_ROOT/apps/api"
 WRANGLER_TOML="$API_DIR/wrangler.toml"
-PROJECT_ID="$(jq -r .workspaceId "$REPO_ROOT/.infisical.json")"
+DEV_VARS="$API_DIR/.dev.vars"
 
 step() { printf '\n[deploy] %s\n' "$*"; }
 ok() { printf '[ok]     %s\n' "$*"; }
 warn() { printf '[warn]   %s\n' "$*" >&2; }
 fail() { printf '[fail]   %s\n' "$*" >&2; exit 1; }
-
-# Lift Infisical creds from rc files if they're not already in shell.
-RC_CANDIDATES=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
-for var in INFISICAL_CLIENT_ID_TENEX INFISICAL_CLIENT_SECRET_TENEX; do
-  if [[ -z "${!var:-}" ]]; then
-    for rc in "${RC_CANDIDATES[@]}"; do
-      [[ -f "$rc" ]] || continue
-      line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
-      [[ -z "$line" ]] && continue
-      eval "$line"
-      break
-    done
-  fi
-done
 
 # Resolve real node + strip bun-shim (wrangler hates the bun node shim).
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/private/tmp/bun-node-' | paste -sd ':' -)"
@@ -59,20 +41,14 @@ fi
 command -v node >/dev/null || fail "real node not on PATH after bun-shim strip"
 
 step "Verify prerequisites"
-[[ -n "${INFISICAL_CLIENT_ID_TENEX:-}" ]] || fail "INFISICAL_CLIENT_ID_TENEX missing — run \`bun run setup\` first"
-[[ -n "${INFISICAL_CLIENT_SECRET_TENEX:-}" ]] || fail "INFISICAL_CLIENT_SECRET_TENEX missing"
+[[ -f "$DEV_VARS" ]] || fail "$DEV_VARS missing — copy .dev.vars.example and fill in production values"
 [[ -n "${CLOUDFLARE_API_TOKEN:-}" || -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || warn \
   "No CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID in env — wrangler will prompt for OAuth on first command."
-ok "creds + tooling look fine"
+ok "tooling looks fine"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2) Wrangler resource ids
 # ──────────────────────────────────────────────────────────────────────────────
-
-# Walks the wrangler.toml looking for `database_id =
-# "TODO_run_wrangler_d1_create"` etc. If found, runs `wrangler d1 create`
-# (or kv / r2) and substitutes the returned id back into wrangler.toml.
-# Idempotent: a non-TODO id is left alone.
 
 step "Verify wrangler resource ids in $WRANGLER_TOML"
 cd "$API_DIR"
@@ -87,12 +63,10 @@ ensure_d1() {
   raw=$(bunx wrangler d1 create tenex 2>&1 || true)
   new_id=$(printf '%s' "$raw" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
   if [[ -z "$new_id" ]]; then
-    # Already exists case: query for it.
     printf '       d1 create returned no id (probably already exists); querying list…\n'
     new_id=$(bunx wrangler d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tenex") | .uuid' | head -1)
   fi
   [[ -n "$new_id" ]] || fail "could not get D1 id; output was: $raw"
-  # macOS sed `-i ''`
   sed -i.bak "s/TODO_run_wrangler_d1_create/$new_id/g" "$WRANGLER_TOML"
   rm -f "$WRANGLER_TOML.bak"
   ok "D1 id wired: $new_id"
@@ -171,41 +145,15 @@ done
 ok "remote D1 schema is up to date"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4) Secrets — reuse dev Infisical env
+# 4) Secrets — push apps/api/.dev.vars to the prod Worker
 # ──────────────────────────────────────────────────────────────────────────────
 
-step "Push Infisical /apps/api dev secrets to prod Worker"
-# `infisical export --format=dotenv` emits KEY=VALUE lines. Pipe to
-# `wrangler secret bulk` which reads dotenv on stdin. We re-pull the
-# Machine Identity token here rather than going through `with-secrets`
-# because we want EXPORT (not RUN) — we need the dotenv stream, not
-# secrets injected into a wrapped command.
-INFISICAL_TOKEN=$(bunx infisical login \
-  --method=universal-auth \
-  --client-id="$INFISICAL_CLIENT_ID_TENEX" \
-  --client-secret="$INFISICAL_CLIENT_SECRET_TENEX" \
-  --plain --silent)
-export INFISICAL_TOKEN
-
-# Use a tempfile rather than a pipe — `wrangler secret bulk` reading
-# stdin from a pipe of `infisical export --format=dotenv` only processed
-# the first key in testing (likely a buffering / EOF interaction in the
-# pipe). Writing to a tempfile + `wrangler secret bulk <file>` is
-# reliable. The file lives in $TMPDIR with mode 600 and is shredded on
-# exit so secrets never linger.
-SECRETS_TMP=$(mktemp -t tenex-secrets-XXXXXX)
-chmod 600 "$SECRETS_TMP"
-trap 'rm -f "$SECRETS_TMP"' EXIT
-bunx infisical export \
-  --token="$INFISICAL_TOKEN" \
-  --projectId="$PROJECT_ID" \
-  --env=dev \
-  --path=/apps/api \
-  --include-imports \
-  --format=dotenv \
-  > "$SECRETS_TMP"
-# wrangler secret bulk accepts dotenv or JSON via a positional file arg.
-bunx wrangler secret bulk --env=prod "$SECRETS_TMP"
+step "Push apps/api/.dev.vars to prod Worker secrets"
+# wrangler secret bulk reads a dotenv-formatted file and uploads each KEY=VALUE
+# as a Worker secret. For this demo we treat .dev.vars as the source of truth
+# for prod values too. If you want separate dev/prod values, keep a second file
+# (e.g. .prod.vars, gitignored) and pass it here instead.
+bunx wrangler secret bulk --env=prod "$DEV_VARS"
 ok "Worker secrets synced"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -213,9 +161,6 @@ ok "Worker secrets synced"
 # ──────────────────────────────────────────────────────────────────────────────
 
 step "Build web SPA"
-# `bun --filter` was misbehaving from inside the script (likely a stale
-# `.turbo` cache or workspace-resolution quirk). Invoke the workspace
-# package's build directly by cd-ing in — clearer + zero ambiguity.
 (cd "$REPO_ROOT/apps/web" && bun run build)
 ok "vite build complete (apps/web/dist)"
 
