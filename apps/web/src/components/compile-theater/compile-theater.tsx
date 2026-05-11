@@ -43,12 +43,27 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [thoughts.length]);
+  // Render real filenames from CompileStarted when the new pipeline supplied
+  // them; fall back to positional placeholders for old fixtures / streams
+  // that pre-date the `sourceFilenames` field. We strip the `.pdf` suffix
+  // and any leading date prefix (`2024-01_`) so the card labels stay
+  // readable in the narrow Sources lane.
+  const friendlySourceName = (raw: string): string => {
+    const base = raw.replace(/\.[a-z0-9]+$/i, '');
+    const stripped = base.replace(/^\d{4}[-_]\d{1,2}[-_]/, '');
+    return stripped.replace(/[-_]/g, ' ');
+  };
   const sourceCards =
     compileStarted && compileStarted.kind === 'CompileStarted'
-      ? Array.from({ length: compileStarted.sourceCount }, (_, i) => ({
-          id: `${compileStarted.compileRunId}-${i}`,
-          name: `Source ${i + 1}`,
-        }))
+      ? compileStarted.sourceFilenames && compileStarted.sourceFilenames.length > 0
+        ? compileStarted.sourceFilenames.map((filename, i) => ({
+            id: `${compileStarted.compileRunId}-${i}`,
+            name: friendlySourceName(filename),
+          }))
+        : Array.from({ length: compileStarted.sourceCount }, (_, i) => ({
+            id: `${compileStarted.compileRunId}-${i}`,
+            name: `Source ${i + 1}`,
+          }))
       : [];
 
   return (

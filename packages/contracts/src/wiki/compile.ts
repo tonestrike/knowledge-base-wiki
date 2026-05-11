@@ -42,6 +42,13 @@ export const CompileStarted = z.object({
   compileRunId: CompileRunId,
   folderId: FolderId,
   sourceCount: z.number().int().nonnegative(),
+  /**
+   * Filenames of the sources the orchestrator is about to read, in
+   * folder order. Optional so older fixtures stay valid; new compiles
+   * include it so the CompileTheater Sources lane can render real
+   * filenames instead of "Source 1/2/3…" positional placeholders.
+   */
+  sourceFilenames: z.array(z.string()).optional(),
 });
 
 export const SchemaInferredEvent = z.object({

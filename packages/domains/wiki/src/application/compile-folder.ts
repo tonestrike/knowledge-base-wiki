@@ -88,6 +88,7 @@ export async function compileFolder(
       compileRunId: input.compileRunId,
       folderId: input.folderId,
       sourceCount: sourceList.length,
+      sourceFilenames: sourceList.map((s) => s.filename),
     });
 
     // Pipeline-narrated checkpoints (`AgentThought`). These are deterministic
@@ -256,6 +257,38 @@ export async function compileFolder(
     await deps.runs.update(run);
 
     const conceptDrafts: ConceptPage[] = [];
+    // Per-compile slug deduper. D1 enforces UNIQUE(wiki_id, slug); the
+    // Drafter slugs from page title alone, so two different pageTypes
+    // with similar titles (e.g. "Alignment Faking in Large Language
+    // Models" as both Paper and Phenomenon) collide and the whole
+    // insertMany rolls back. We prefix every slug with the pageType so
+    // each bucket has its own namespace, and suffix `-2`, `-3`, … on
+    // the rare within-pageType collision.
+    const usedSlugs = new Set<string>();
+    const uniqueSlug = (pageType: string, baseSlug: string): string => {
+      const ptSlug = pageType
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      const stem = `${ptSlug}-${baseSlug}`;
+      if (!usedSlugs.has(stem)) {
+        usedSlugs.add(stem);
+        return stem;
+      }
+      for (let n = 2; n < 100; n += 1) {
+        const candidate = `${stem}-${n}`;
+        if (!usedSlugs.has(candidate)) {
+          usedSlugs.add(candidate);
+          return candidate;
+        }
+      }
+      // Last resort: append a short id slice. UUID v4 first 8 chars is
+      // ~32 bits of entropy — collision-free in practice.
+      const fallback = `${stem}-${deps.newId().slice(0, 8)}`;
+      usedSlugs.add(fallback);
+      return fallback;
+    };
 
     // Bucket findings by (pageType, normalized title). A bucket becomes
     // ONE Concept page. Previous design collapsed across titles within
@@ -392,7 +425,7 @@ export async function compileFolder(
         id: pid,
         wikiId: wid,
         pageType,
-        slug: draft.slug,
+        slug: uniqueSlug(pageType, draft.slug),
         title: draft.title,
         body: draft.body,
         claims,
