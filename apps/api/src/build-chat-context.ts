@@ -159,11 +159,13 @@ interface PageRow {
  */
 const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader => {
   const tokenize = (s: string): string[] => s.toLowerCase().split(/\s+/).filter(Boolean);
-  const score = (p: WikiPageSummary, q: string): number => {
+  const score = (title: string, body: string, q: string): number => {
     let s = 0;
+    const titleLower = title.toLowerCase();
+    const bodyLower = body.toLowerCase();
     for (const t of tokenize(q)) {
-      if (p.title.toLowerCase().includes(t)) s += 5;
-      if (p.body.toLowerCase().includes(t)) s += 1;
+      if (titleLower.includes(t)) s += 5;
+      if (bodyLower.includes(t)) s += 1;
     }
     return s;
   };
@@ -214,6 +216,51 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
     };
   };
 
+  // Per-search cache so N citations to the same source = 1 R2 round trip.
+  // Scoped inside searchPages so different invocations don't poison each
+  // other if a source is rewritten between calls.
+  const expandWithSourceEvidence = async (
+    page: WikiPageSummary,
+    sourceTextCache: Map<SourceId, string | null>,
+  ): Promise<string> => {
+    // Cap on total expanded body so the synth prompt stays bounded even when
+    // a page has many citations. We always include the original body; once
+    // appended evidence pushes past `bodyCap`, remaining excerpts are skipped.
+    const bodyCap = 8000;
+    const perExcerptCap = 600;
+    if (page.citations.length === 0) return page.body;
+    let out = page.body;
+    let appendedHeader = false;
+    for (const cit of page.citations) {
+      if (out.length >= bodyCap) break;
+      const sid = cit.span.sourceId;
+      let text = sourceTextCache.get(sid);
+      if (text === undefined) {
+        const obj = await storage.get(`sources/${sid}/text`);
+        text = obj ? await obj.text() : null;
+        sourceTextCache.set(sid, text);
+      }
+      if (!text) continue;
+      const { start, end } = cit.span.byteRange;
+      const slice = text.slice(start, end).trim();
+      if (!slice) continue;
+      const capped = slice.length > perExcerptCap ? `${slice.slice(0, perExcerptCap)}...` : slice;
+      // Quote the slice line-by-line so internal newlines don't break the
+      // markdown blockquote.
+      const quoted = capped
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n');
+      const sidShort = sid.slice(0, 8);
+      if (!appendedHeader) {
+        out += '\n\n---\n## Cited evidence\n';
+        appendedHeader = true;
+      }
+      out += `\n### [${cit.label}] (${sidShort})\n${quoted}\n`;
+    }
+    return out;
+  };
+
   return {
     async searchPages({ wikiId, query, limit }) {
       const rows = await db
@@ -224,12 +271,21 @@ const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiReader =
         .all<PageRow>();
       const hydrated: WikiPageSummary[] = [];
       for (const r of rows.results) hydrated.push(await hydrate(r));
-      return hydrated
-        .map((p) => ({ p, s: score(p, query) }))
+      const ranked = hydrated
+        // Score against the ORIGINAL page body — expansion is for the synth
+        // only and shouldn't tilt search ranking toward pages whose source
+        // excerpts happen to contain query tokens.
+        .map((p) => ({ p, s: score(p.title, p.body, query) }))
         .filter((x) => x.s > 0)
         .sort((a, b) => b.s - a.s)
-        .slice(0, limit)
-        .map((x) => x.p);
+        .slice(0, limit);
+      const sourceTextCache = new Map<SourceId, string | null>();
+      const expanded: WikiPageSummary[] = [];
+      for (const { p } of ranked) {
+        const body = await expandWithSourceEvidence(p, sourceTextCache);
+        expanded.push({ ...p, body });
+      }
+      return expanded;
     },
     async listSamplePages({ wikiId, limit }) {
       // No score / query — just return the first `limit` pages from the
