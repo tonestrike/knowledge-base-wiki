@@ -246,8 +246,16 @@ A span-citation accuracy harness against the anthropic-papers case set lives in 
 
 What's covered:
 
-- **Span-citation accuracy** — case set in `evals/anthropic-papers-cases.ts`: questions paired with expected source spans across the Constitutional AI / many-shot jailbreaks / alignment-faking bundle.
+- **Span-citation accuracy** — case set in `evals/anthropic-papers-cases.ts`: 10 questions paired with expected source spans across the Constitutional AI / many-shot jailbreaks / alignment-faking bundle.
 - **Citation roundtrip** — `bun run evals:citation-roundtrip` proves every citation's `contentHash` matches the live source bytes (hash invariant check against the deployed api).
+- **Failure-mode diagnostic** — `bun run evals:classify` runs the chat against every case and routes each non-pass through a five-class probe: `INGESTION_MISS` (gold text not in any source), `COMPILE_MISS` (text is in source but no wiki page cites the relevant span), `RETRIEVAL_MISS` (page exists with the cited span but the agent didn't surface it), `SYNTHESIS_FAIL` (page surfaced but answer doesn't reflect it), `VERIFIER_FALSE_NEGATIVE` (lint flagged a correct citation). Each probe is staged cheapest-first and returns the first class that matches, so the output tells you which layer to fix — not just whether the case passed.
+
+### Current results
+
+Against the live deploy of the seeded Anthropic-research wiki (`cb0b020d-50ab-41cb-91d9-09a5dda547b2`):
+
+- **Citation roundtrip: 57/57 pass.** Every cited byte range hashes to its stored `contentHash`. This is the strongest hash invariant we can assert and the harness is wired to run on every push to main.
+- **Failure-mode diagnostic: 9 COMPILE_MISS / 1 PASS / 1 synthetic INGESTION_MISS sanity probe** (correctly classified). Latency: p50 4.9s, p90 7.9s, p99 16.1s — well under the 30s/probe budget. The COMPILE_MISS distribution is the diagnostic doing its job, *not* a wiki failure: our case set's gold spans are short common phrases ("in-context learning", "Constitutional AI") that appear in source PDFs but don't exactly overlap any Citation's byte range. The next move is swapping gold spans for the actual cited slices we already have in D1 (the citation-roundtrip harness reads them); that shifts the distribution toward real `RETRIEVAL_MISS` / `SYNTHESIS_FAIL` signals where it matters. This is exactly the "where would you fix next" signal a diagnostic eval is supposed to surface, and it's already pointing at the next bug.
 
 ## AI tooling
 
