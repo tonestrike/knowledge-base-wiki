@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# scripts/deploy — one-shot tenex production deploy.
+#
+# Reuses the dev Infisical env (/apps/api dev) as the prod secret source
+# because for this demo we don't run a separate prod env in Infisical.
+# Future-you can switch to `--env=prod` once a real prod env exists.
+#
+# Steps (each idempotent):
+#   1. Verify Infisical creds + wrangler binary.
+#   2. Verify wrangler.toml has real D1 + KV ids in [env.prod] (auto-
+#      runs `wrangler d1 create / kv namespace create / r2 bucket create`
+#      if the placeholders are still in place; pipes the ids back).
+#   3. Apply every D1 migration to the remote prod db, in declared order.
+#      Migrations use `CREATE TABLE IF NOT EXISTS` so re-running is safe.
+#   4. Push the dev-env Infisical secrets to the prod Worker via
+#      `wrangler secret bulk --env=prod`.
+#   5. Build the web SPA + deploy the Worker via `wrangler deploy
+#      --env=prod`.
+#   6. Print the deployed URL.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+API_DIR="$REPO_ROOT/apps/api"
+WRANGLER_TOML="$API_DIR/wrangler.toml"
+PROJECT_ID="$(jq -r .workspaceId "$REPO_ROOT/.infisical.json")"
+
+step() { printf '\n[deploy] %s\n' "$*"; }
+ok() { printf '[ok]     %s\n' "$*"; }
+warn() { printf '[warn]   %s\n' "$*" >&2; }
+fail() { printf '[fail]   %s\n' "$*" >&2; exit 1; }
+
+# Lift Infisical creds from rc files if they're not already in shell.
+RC_CANDIDATES=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+for var in INFISICAL_CLIENT_ID_TENEX INFISICAL_CLIENT_SECRET_TENEX; do
+  if [[ -z "${!var:-}" ]]; then
+    for rc in "${RC_CANDIDATES[@]}"; do
+      [[ -f "$rc" ]] || continue
+      line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
+      [[ -z "$line" ]] && continue
+      eval "$line"
+      break
+    done
+  fi
+done
+
+# Resolve real node + strip bun-shim (wrangler hates the bun node shim).
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/private/tmp/bun-node-' | paste -sd ':' -)"
+export PATH
+if ! command -v node >/dev/null 2>&1 && [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh"
+  if [[ -f "$REPO_ROOT/.nvmrc" ]] && command -v nvm >/dev/null 2>&1; then
+    nvm use >/dev/null 2>&1 || true
+  fi
+  set -u
+fi
+command -v node >/dev/null || fail "real node not on PATH after bun-shim strip"
+
+step "Verify prerequisites"
+[[ -n "${INFISICAL_CLIENT_ID_TENEX:-}" ]] || fail "INFISICAL_CLIENT_ID_TENEX missing — run \`bun run setup\` first"
+[[ -n "${INFISICAL_CLIENT_SECRET_TENEX:-}" ]] || fail "INFISICAL_CLIENT_SECRET_TENEX missing"
+[[ -n "${CLOUDFLARE_API_TOKEN:-}" || -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || warn \
+  "No CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID in env — wrangler will prompt for OAuth on first command."
+ok "creds + tooling look fine"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2) Wrangler resource ids
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Walks the wrangler.toml looking for `database_id =
+# "TODO_run_wrangler_d1_create"` etc. If found, runs `wrangler d1 create`
+# (or kv / r2) and substitutes the returned id back into wrangler.toml.
+# Idempotent: a non-TODO id is left alone.
+
+step "Verify wrangler resource ids in $WRANGLER_TOML"
+cd "$API_DIR"
+
+ensure_d1() {
+  if ! grep -q 'database_id = "TODO_run_wrangler_d1_create"' "$WRANGLER_TOML"; then
+    ok "D1 ids already set"
+    return
+  fi
+  printf '       creating D1 database "tenex" on Cloudflare…\n'
+  local raw new_id
+  raw=$(bunx wrangler d1 create tenex 2>&1 || true)
+  new_id=$(printf '%s' "$raw" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+  if [[ -z "$new_id" ]]; then
+    # Already exists case: query for it.
+    printf '       d1 create returned no id (probably already exists); querying list…\n'
+    new_id=$(bunx wrangler d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tenex") | .uuid' | head -1)
+  fi
+  [[ -n "$new_id" ]] || fail "could not get D1 id; output was: $raw"
+  # macOS sed `-i ''`
+  sed -i.bak "s/TODO_run_wrangler_d1_create/$new_id/g" "$WRANGLER_TOML"
+  rm -f "$WRANGLER_TOML.bak"
+  ok "D1 id wired: $new_id"
+}
+
+ensure_kv() {
+  if ! grep -q 'id = "TODO_run_wrangler_kv_create"' "$WRANGLER_TOML"; then
+    ok "KV ids already set"
+    return
+  fi
+  printf '       creating KV namespace "tenex-CACHE" on Cloudflare…\n'
+  local raw new_id
+  raw=$(bunx wrangler kv namespace create CACHE 2>&1 || true)
+  new_id=$(printf '%s' "$raw" | grep -oE '"id":\s*"[a-f0-9]{32}"' | head -1 | sed 's/.*"\([a-f0-9]\{32\}\)".*/\1/')
+  if [[ -z "$new_id" ]]; then
+    new_id=$(printf '%s' "$raw" | grep -oE '[a-f0-9]{32}' | head -1)
+  fi
+  if [[ -z "$new_id" ]]; then
+    new_id=$(bunx wrangler kv namespace list --json 2>/dev/null | jq -r '.[] | select(.title | endswith("CACHE")) | .id' | head -1)
+  fi
+  [[ -n "$new_id" ]] || fail "could not get KV id; output was: $raw"
+  sed -i.bak "s/TODO_run_wrangler_kv_create/$new_id/g" "$WRANGLER_TOML"
+  rm -f "$WRANGLER_TOML.bak"
+  ok "KV id wired: $new_id"
+}
+
+ensure_r2() {
+  if bunx wrangler r2 bucket list --json 2>/dev/null | jq -e '.[] | select(.name=="tenex")' >/dev/null 2>&1; then
+    ok "R2 bucket 'tenex' exists"
+    return
+  fi
+  printf '       creating R2 bucket "tenex" on Cloudflare…\n'
+  bunx wrangler r2 bucket create tenex 2>&1 || true
+  ok "R2 bucket 'tenex' ready"
+}
+
+ensure_d1
+ensure_kv
+ensure_r2
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3) D1 migrations (remote)
+# ──────────────────────────────────────────────────────────────────────────────
+
+step "Apply D1 migrations to remote prod db"
+# Domain migrations live in packages/domains/*/src/infrastructure/migrations/
+# Run in a deterministic order: ingestion → wiki → chat → verification.
+# Each migration uses `CREATE TABLE IF NOT EXISTS` so re-running is safe.
+DOMAIN_ORDER=(ingestion wiki chat verification)
+for domain in "${DOMAIN_ORDER[@]}"; do
+  dir="$REPO_ROOT/packages/domains/$domain/src/infrastructure/migrations"
+  [[ -d "$dir" ]] || { warn "skipping $domain — no migrations dir"; continue; }
+  shopt -s nullglob
+  for sql in "$dir"/*.sql; do
+    file_name=$(basename "$sql")
+    printf '       applying %s/%s…\n' "$domain" "$file_name"
+    bunx wrangler d1 execute tenex --remote --env=prod --file="$sql" --yes >/dev/null
+  done
+  shopt -u nullglob
+done
+ok "remote D1 schema is up to date"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4) Secrets — reuse dev Infisical env
+# ──────────────────────────────────────────────────────────────────────────────
+
+step "Push Infisical /apps/api dev secrets to prod Worker"
+# `infisical export --format=dotenv` emits KEY=VALUE lines. Pipe to
+# `wrangler secret bulk` which reads dotenv on stdin. We re-pull the
+# Machine Identity token here rather than going through `with-secrets`
+# because we want EXPORT (not RUN) — we need the dotenv stream, not
+# secrets injected into a wrapped command.
+INFISICAL_TOKEN=$(bunx infisical login \
+  --method=universal-auth \
+  --client-id="$INFISICAL_CLIENT_ID_TENEX" \
+  --client-secret="$INFISICAL_CLIENT_SECRET_TENEX" \
+  --plain --silent)
+export INFISICAL_TOKEN
+
+bunx infisical export \
+  --token="$INFISICAL_TOKEN" \
+  --projectId="$PROJECT_ID" \
+  --env=dev \
+  --path=/apps/api \
+  --include-imports \
+  --format=dotenv \
+  | bunx wrangler secret bulk --env=prod
+ok "Worker secrets synced"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5) Build web + deploy worker
+# ──────────────────────────────────────────────────────────────────────────────
+
+step "Build web SPA"
+cd "$REPO_ROOT"
+bun --filter @app/web run build
+ok "vite build complete (apps/web/dist)"
+
+step "Deploy Worker"
+cd "$API_DIR"
+bunx wrangler deploy --env=prod
+
+step "Done"
+printf '\n      Tip: visit your Worker URL (printed above) and the SPA should load.\n'
+printf '      Add the prod redirect to Google Cloud Console:\n'
+printf '        https://<prod-host>/rpc/ingestion/authCallback\n\n'
