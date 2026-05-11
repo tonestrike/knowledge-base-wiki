@@ -122,13 +122,7 @@ export function ChatDock() {
             ⌘K to toggle · every claim cites its source · drag the left edge to resize
           </p>
         </SheetHeader>
-        {wikiId ? (
-          <ChatPanelLoader wikiId={wikiId} />
-        ) : (
-          <div className="flex flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
-            Open a wiki to start chatting.
-          </div>
-        )}
+        {wikiId ? <ChatPanelLoader wikiId={wikiId} /> : <ChatDockEmptyState />}
       </SheetContent>
     </Sheet>
   );
@@ -140,6 +134,65 @@ export function ChatDock() {
  * keyed by `conversationId` so swapping wikis fully resets `useChat`'s
  * internal state.
  */
+/**
+ * Shown when the dock opens with no `wikiId` in scope (Cmd+K from the
+ * home page, or any route that doesn't carry a wiki context). Resolves
+ * the user's most-recent wiki in the background; if one exists we auto-
+ * bind to it so the user can chat immediately. If there are none, we
+ * surface a clear CTA pointing at the home picker so they can compile
+ * a folder first.
+ */
+function ChatDockEmptyState() {
+  const { openFor, close } = useChatDock();
+  const list = useQuery({
+    ...orpc.wiki.listWikis.queryOptions({ input: { limit: 1 } }),
+  });
+  const newest = list.data?.items[0];
+
+  // Auto-bind once if a wiki is found. The dock immediately re-renders
+  // with `wikiId` set, mounting the actual chat panel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: openFor + close are stable from context
+  useEffect(() => {
+    if (newest?.id) openFor(newest.id);
+  }, [newest?.id]);
+
+  if (list.isPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
+        Loading conversation context…
+      </div>
+    );
+  }
+  if (newest) {
+    // Brief flicker while the effect fires; render a soft pulse so it
+    // doesn't look broken.
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
+        Opening your latest wiki…
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="font-serif text-2xl tracking-tight">No wikis yet</p>
+      <p className="max-w-xs text-sm text-muted-foreground">
+        Compile a Drive folder first — once a wiki exists, chat will ground every answer in its
+        pages.
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          close();
+          window.location.assign('/');
+        }}
+        className="mt-2 rounded-full border border-accent bg-accent px-5 py-2 font-mono text-xs uppercase tracking-[0.25em] text-accent-foreground shadow-[0_0_24px_-8px_var(--accent)] transition-transform hover:-translate-y-0.5"
+      >
+        Connect a folder
+      </button>
+    </div>
+  );
+}
+
 function ChatPanelLoader({ wikiId }: { wikiId: string }) {
   const [conversationId, setConversationId] = useState<string | null>(null);
 

@@ -108,11 +108,26 @@ function SourceExcerpt({
   rangeEnd: number;
 }) {
   if (rangeStart >= text.length) {
+    // The citation's byte range is past the end of what we extracted —
+    // usually because the underlying PDF only yielded a short metadata
+    // snippet (scanned / image-only / partial extraction). Rather than
+    // dead-ending the user with a bare error, show what text DID get
+    // extracted so they at least see the source's existing content +
+    // a one-line note explaining the mismatch.
     return (
-      <p className="text-sm text-muted-foreground">
-        Span is outside the extracted text (range {rangeStart}–{rangeEnd}, source length{' '}
-        {text.length}).
-      </p>
+      <div className="space-y-3">
+        <p className="text-xs italic text-muted-foreground">
+          The model cited bytes {rangeStart}–{rangeEnd}, but the extracted source text only spans{' '}
+          {text.length} bytes. Showing the available extract instead.
+        </p>
+        {text.trim().length > 0 ? (
+          <p className="whitespace-pre-wrap text-base text-muted-foreground">{text}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No text was extracted from this source — likely a scanned or image-only PDF.
+          </p>
+        )}
+      </div>
     );
   }
   const start = Math.max(0, rangeStart - CONTEXT_CHARS);
