@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef } from 'react';
 import { ErrorState } from '../states/error.tsx';
 import { AgentLane } from './agent-lane.tsx';
+import { DraftingGhost } from './drafting-ghost.tsx';
 import { EmergingPage } from './emerging-page.tsx';
 import { SourceCard } from './source-card.tsx';
 import { ThoughtLine } from './thought-line.tsx';
@@ -53,16 +54,47 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
     const stripped = base.replace(/^\d{4}[-_]\d{1,2}[-_]/, '');
     return stripped.replace(/[-_]/g, ' ');
   };
+  const sourceFilenames =
+    compileStarted && compileStarted.kind === 'CompileStarted'
+      ? (compileStarted.sourceFilenames ?? [])
+      : [];
+  // Compute per-source status from the AgentThought stream:
+  //   queued  → no Researcher thought has mentioned this source yet
+  //   reading → the LATEST "Reading <filename>" thought is this source
+  //   done    → an older "Reading <filename>" thought referenced this
+  //             source AND a newer one referenced something else (or
+  //             we've left the Researcher phase entirely).
+  // The Researcher emits one thought per source like
+  // `Reading 2024-12_alignment-faking.pdf for Paper, Phenomenon, …`,
+  // so the filename appears verbatim near the start of the message.
+  const readerLines = thoughts
+    .filter((t) => t.agent === 'Researcher' && t.message.startsWith('Reading '))
+    .map((t) => t.message);
+  const lastReader = readerLines.at(-1);
+  const isPastResearch = events.some(
+    (e) => e.kind === 'PageDrafted' || e.kind === 'IndexBuilt' || e.kind === 'CompileFinished',
+  );
   const sourceCards =
     compileStarted && compileStarted.kind === 'CompileStarted'
-      ? compileStarted.sourceFilenames && compileStarted.sourceFilenames.length > 0
-        ? compileStarted.sourceFilenames.map((filename, i) => ({
-            id: `${compileStarted.compileRunId}-${i}`,
-            name: friendlySourceName(filename),
-          }))
+      ? sourceFilenames.length > 0
+        ? sourceFilenames.map((filename, i) => {
+            const everRead = readerLines.some((line) => line.includes(filename));
+            const isReading = !isPastResearch && lastReader?.includes(filename) === true;
+            const status: 'queued' | 'reading' | 'done' = isReading
+              ? 'reading'
+              : everRead
+                ? 'done'
+                : 'queued';
+            return {
+              id: `${compileStarted.compileRunId}-${i}`,
+              name: friendlySourceName(filename),
+              status,
+            };
+          })
         : Array.from({ length: compileStarted.sourceCount }, (_, i) => ({
             id: `${compileStarted.compileRunId}-${i}`,
             name: `Source ${i + 1}`,
+            status: 'queued' as const,
           }))
       : [];
 
@@ -106,7 +138,7 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
         <AgentLane name="Sources">
           <AnimatePresence>
             {sourceCards.map((s) => (
-              <SourceCard key={s.id} id={s.id} name={s.name} />
+              <SourceCard key={s.id} id={s.id} name={s.name} status={s.status} />
             ))}
           </AnimatePresence>
         </AgentLane>
@@ -143,6 +175,39 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
             {drafted.map((e) => (
               <EmergingPage key={e.pageId} event={e} />
             ))}
+            {/* Ghost cards for in-flight Drafter calls. The orchestrator
+                emits one "Drafting <PageType> page from N findings…"
+                AgentThought per Drafter dispatch. We count those, subtract
+                the PageDrafted events that have already landed, and mount
+                that many pulsing ghosts so the user sees the queue depth.
+                Cap at 8 ghosts to keep the lane readable. */}
+            {(() => {
+              const draftThoughts = thoughts.filter(
+                (t) => t.agent === 'Drafter' && t.message.startsWith('Drafting '),
+              );
+              const draftingTypes = draftThoughts
+                .map((t) => /^Drafting\s+([A-Za-z]+)\s+page/.exec(t.message)?.[1])
+                .filter((p): p is string => typeof p === 'string');
+              // Subtract one ghost per PageDrafted of that type so the
+              // ghost queue drains as real pages land.
+              const remainingByType = new Map<string, number>();
+              for (const t of draftingTypes) {
+                remainingByType.set(t, (remainingByType.get(t) ?? 0) + 1);
+              }
+              for (const e of drafted) {
+                const pt = e.pageType ?? e.subtype;
+                if (!pt) continue;
+                const left = remainingByType.get(pt) ?? 0;
+                if (left > 0) remainingByType.set(pt, left - 1);
+              }
+              const ghosts: string[] = [];
+              for (const [pt, n] of remainingByType.entries()) {
+                for (let i = 0; i < n && ghosts.length < 8; i += 1) ghosts.push(`${pt}-${i}`);
+              }
+              return ghosts.map((k) => (
+                <DraftingGhost key={`ghost-${k}`} pageType={k.split('-')[0] ?? ''} />
+              ));
+            })()}
           </AnimatePresence>
         </AgentLane>
       </div>
