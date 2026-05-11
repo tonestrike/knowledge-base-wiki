@@ -5,6 +5,7 @@ import { DesignSystemRoute } from './routes/design-system.tsx';
 import { GapsRoute } from './routes/gaps.tsx';
 import { IngestRoute } from './routes/ingest.tsx';
 import { LintRoute } from './routes/lint.tsx';
+import { PresentRoute } from './routes/present.tsx';
 import { RootRoute } from './routes/root.tsx';
 import { WikiPageRoute } from './routes/wiki-page.tsx';
 import { WikiRoute } from './routes/wiki.tsx';
@@ -25,4 +26,7 @@ export const router = createBrowserRouter([
   // CompileRun surfaces its wikiId.
   { path: '/compile/:compileRunId', element: <CompileRoute /> },
   { path: '/design-system', element: <DesignSystemRoute /> },
+  // Non-technical talk-style explainer of what tenex does and why.
+  // Full-screen slide deck; ← / → / space to navigate, F for fullscreen.
+  { path: '/present', element: <PresentRoute /> },
 ]);
