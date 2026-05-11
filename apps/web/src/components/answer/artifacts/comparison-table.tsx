@@ -7,14 +7,19 @@ export function ComparisonTable({ artifact }: { artifact: ComparisonTableArtifac
   const { props, citations } = artifact;
   const byId = new Map<string, (typeof citations)[number]>(citations.map((c) => [c.id, c]));
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <table className="w-full text-sm">
+    // Horizontal scroll for wide tables — the chat dock is narrow and a
+    // 3+ column ComparisonTable would otherwise clip the rightmost column
+    // off-screen. `overflow-x-auto` shows a scrollbar only when needed;
+    // `min-w-max` lets the table size to its content (rather than
+    // squeezing into the dock width) so each column is readable.
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="min-w-max text-sm">
         <thead className="bg-muted">
           <tr>
             {props.columns.map((col) => (
               <th
                 key={col}
-                className="px-3 py-2 text-left font-mono text-xs uppercase tracking-wider"
+                className="whitespace-nowrap px-3 py-2 text-left font-mono text-xs uppercase tracking-wider"
               >
                 {col}
               </th>
@@ -30,7 +35,7 @@ export function ComparisonTable({ artifact }: { artifact: ComparisonTableArtifac
                   const c = cell.citationId ? byId.get(cell.citationId) : undefined;
                   const cellKey = `${rowKey}-c${j}-${cell.value}`;
                   return (
-                    <td key={cellKey} className="px-3 py-2">
+                    <td key={cellKey} className="max-w-xs px-3 py-2 align-top">
                       <span>{cell.value}</span>
                       {c ? (
                         <span className="ml-2">
