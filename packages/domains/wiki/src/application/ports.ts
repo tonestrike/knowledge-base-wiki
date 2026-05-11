@@ -10,7 +10,7 @@ import type {
   WikiPage as WikiPageWire,
   Wiki as WikiWire,
 } from '@package/contracts/wiki';
-import type { EventBus } from '@package/shared-kernel';
+import type { EventBus, Tracer } from '@package/shared-kernel';
 import type { z } from 'zod';
 import type { Backlink } from '../domain/backlink.ts';
 import type { CompileRun } from '../domain/compile-run.ts';
@@ -144,6 +144,8 @@ export interface WikiDeps {
   eventBus: EventBus;
   newId: () => string;
   now: () => Date;
+  /** Observability port. Optional — `noOpTracer` is the safe default. */
+  tracer?: Tracer;
 }
 
 // Internal runtime deps used inside the CompileRunDO. Adds an emit() that

@@ -11,13 +11,19 @@ import {
   createMemorySourceHashVerifier,
 } from '@domain/chat';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { InMemoryEventBus } from '@package/shared-kernel';
+import { InMemoryEventBus, resolveTracer } from '@package/shared-kernel';
 import type { LanguageModel } from 'ai';
 
 export interface ChatTurnBindings extends Record<string, unknown> {
   DB: D1Database;
   STORAGE: R2Bucket;
   OPEN_ROUTER_API_KEY: string;
+  // Observability — see `resolveTracer`. All optional; defaults to console.
+  LANGFUSE_HOST?: string;
+  LANGFUSE_PUBLIC_KEY?: string;
+  LANGFUSE_SECRET_KEY?: string;
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_EXPORTER_OTLP_HEADERS?: string;
 }
 
 /**
@@ -45,14 +51,21 @@ export const buildChatTurnRuntimeDeps = (env: ChatTurnBindings): RunChatTurnDeps
   const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
     provider: { order: ['anthropic'], allow_fallbacks: false },
   }) as LanguageModel;
+  // Resolve the tracer from Worker env. Durable Objects don't get a
+  // per-request `waitUntil` — spans fire-and-forget the OTLP export. For a
+  // Cloudflare DO, the isolate lives for the duration of the storage-bound
+  // run anyway, so fetch can complete naturally.
+  const tracer = resolveTracer(env);
   const researcher: Researcher = createAgenticResearcher({
     model: sonnet,
     wikiReader,
     modelName: 'anthropic/claude-sonnet-4.6',
+    tracer,
   });
   const synthesizer: Synthesizer = createAiSdkSynthesizer({
     model: sonnet,
     modelName: 'anthropic/claude-sonnet-4.6',
+    tracer,
   });
   const sourceHashes = createMemorySourceHashVerifier({
     async readSourceText(sourceId) {
@@ -76,5 +89,6 @@ export const buildChatTurnRuntimeDeps = (env: ChatTurnBindings): RunChatTurnDeps
     now: () => new Date(),
     researcherName: 'agent-loop · anthropic/claude-sonnet-4.6',
     synthesizerName: 'anthropic/claude-sonnet-4.6',
+    tracer,
   };
 };

@@ -13,7 +13,7 @@ import type {
   LintFinding as LintFindingWire,
   LintRun as LintRunWire,
 } from '@package/contracts/verification';
-import type { EventBus } from '@package/shared-kernel';
+import type { EventBus, Tracer } from '@package/shared-kernel';
 import type { LintFinding } from '../domain/lint-finding.ts';
 import type { LintRun } from '../domain/lint-run.ts';
 
@@ -84,6 +84,8 @@ export interface VerificationDeps {
   eventBus: EventBus;
   newId: () => string;
   now: () => Date;
+  /** Observability port. Optional — `noOpTracer` is the safe default. */
+  tracer?: Tracer;
 }
 
 // Runtime variant used inside the LintRunDO (and lintWiki tests). It adds an

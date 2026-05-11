@@ -1,4 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { type Tracer, noOpTracer, previewText } from '@package/shared-kernel';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { AnthropicVerifier } from '../application/ports.ts';
@@ -51,6 +52,12 @@ export interface AnthropicVerifierOptions {
   retryBaseDelayMs?: number;
   // Injected for tests; in prod this is `setTimeout`-based.
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Optional Tracer. Every `audit()` call wraps `generateObject` in an
+   * `llm.call` span with OTel GenAI semantic-convention attributes. Falls
+   * back to `noOpTracer` so existing call sites keep working unchanged.
+   */
+  tracer?: Tracer;
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -102,6 +109,7 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
   const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
   const baseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? 500);
   const sleep = opts.sleep ?? defaultSleep;
+  const tracer = opts.tracer ?? noOpTracer;
 
   return {
     async audit({ claim, citedSlices }) {
@@ -110,33 +118,60 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
         .join('\n');
       const userPrompt = `Claim:\n${claim.claimText}\n\nCited slices:\n${slicesXml}`;
 
+      const span = tracer.startSpan('llm.call', {
+        'gen_ai.system': 'openrouter',
+        'gen_ai.request.model': modelId,
+        'gen_ai.operation.name': 'verifier.audit',
+        provider: 'openrouter',
+        model: modelId,
+        'verifier.claim_id': claim.id,
+        'verifier.citation_count': citedSlices.length,
+        'prompt.preview': previewText(userPrompt) ?? '',
+        'system.preview': previewText(SYSTEM_PROMPT) ?? '',
+      });
+      const callStart = Date.now();
       let lastError: unknown;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const { object } = await generateObject({
-            model: provider.chat(modelId),
-            schema: VerdictSchema,
-            schemaName: 'Verdict',
-            schemaDescription: 'Verifier verdict for a single Claim against its cited Spans.',
-            system: SYSTEM_PROMPT,
-            prompt: userPrompt,
-            temperature,
-            maxOutputTokens: maxTokens,
-          });
-          return object;
-        } catch (err) {
-          lastError = err;
-          if (attempt === maxAttempts || !isRetryable(err)) {
-            throw err;
+      try {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            const { object, usage } = await generateObject({
+              model: provider.chat(modelId),
+              schema: VerdictSchema,
+              schemaName: 'Verdict',
+              schemaDescription: 'Verifier verdict for a single Claim against its cited Spans.',
+              system: SYSTEM_PROMPT,
+              prompt: userPrompt,
+              temperature,
+              maxOutputTokens: maxTokens,
+            });
+            span.setAttributes({
+              'gen_ai.usage.input_tokens': usage?.inputTokens ?? 0,
+              'gen_ai.usage.output_tokens': usage?.outputTokens ?? 0,
+              'gen_ai.attempts': attempt,
+              'verifier.verdict': object.verdict,
+              'completion.preview': previewText(JSON.stringify(object)) ?? '',
+              latency_ms: Date.now() - callStart,
+            });
+            span.setStatus('ok');
+            return object;
+          } catch (err) {
+            lastError = err;
+            if (attempt === maxAttempts || !isRetryable(err)) {
+              span.recordException(err);
+              throw err;
+            }
+            // Exponential backoff: 500ms, 1000ms, 2000ms, ...
+            const delay = baseDelayMs * 2 ** (attempt - 1);
+            await sleep(delay);
           }
-          // Exponential backoff: 500ms, 1000ms, 2000ms, ...
-          const delay = baseDelayMs * 2 ** (attempt - 1);
-          await sleep(delay);
         }
+        // Unreachable — the loop either returns or throws — but TS demands a
+        // statement here.
+        span.recordException(lastError);
+        throw lastError;
+      } finally {
+        span.end();
       }
-      // Unreachable — the loop either returns or throws — but TS demands a
-      // statement here.
-      throw lastError;
     },
   };
 };

@@ -1,5 +1,6 @@
 import { lintFindingId } from '@package/contracts/shared';
 import type { Claim, LintRunId, WikiId, WikiPageId } from '@package/contracts/shared';
+import { noOpTracer } from '@package/shared-kernel';
 import { Correction } from '../domain/correction.ts';
 import { LintFinding, type Verdict } from '../domain/lint-finding.ts';
 import { LintRun, type RunningLintRun } from '../domain/lint-run.ts';
@@ -41,55 +42,81 @@ export async function lintWiki(
   deps: LintRuntimeDeps,
   input: { lintRunId: LintRunId; wikiId: WikiId },
 ): Promise<LintWikiResult> {
+  const tracer = deps.tracer ?? noOpTracer;
   const startedAt = deps.now().toISOString();
   const all = await deps.claims.listClaimsForWiki(input.wikiId);
 
-  const pending = LintRun.start({
-    id: input.lintRunId,
-    wikiId: input.wikiId,
-    totalClaims: all.length,
-    startedAt,
-  });
-  await deps.runs.insert(pending);
-  await deps.emit({ kind: 'LintRunStarted', lintRunId: pending.id, totalClaims: all.length });
-  let run: RunningLintRun = LintRun.run(pending);
-  await deps.runs.update(run);
+  // Count citations up-front so the span reflects the audit size even when
+  // individual `auditClaim` calls fail and turn into synthetic findings.
+  let citationCount = 0;
+  for (const { claim } of all) citationCount += claim.citations.length;
 
-  const sem = createSemaphore(Math.max(1, deps.concurrency));
-  await Promise.all(
-    all.map(({ wikiPageId, claim }) =>
-      sem(() => auditOneClaim(deps, input.lintRunId, wikiPageId, claim)).then(async (finding) => {
-        await deps.findings.insertMany([finding]);
-        run = LintRun.tally(run, tallyDelta(finding.verdict));
-        await deps.runs.update(run);
-        await deps.emit({
-          kind: 'ClaimAudited',
-          lintRunId: run.id,
-          lintFindingId: finding.id,
-          claimId: claim.id,
-          wikiPageId,
-          verdict: finding.verdict,
-        });
-      }),
-    ),
-  );
-
-  const finishedAt = deps.now().toISOString();
-  const finished = LintRun.finish(run, finishedAt);
-  await deps.runs.update(finished);
-  await deps.emit({
-    kind: 'LintRunFinished',
-    lintRunId: finished.id,
-    unsupportedCount: finished.unsupportedCount,
-    contradictedCount: finished.contradictedCount,
+  const lintSpan = tracer.startSpan('lint.run', {
+    'lint.run_id': input.lintRunId,
+    'lint.wiki_id': input.wikiId,
+    'lint.pages_checked': new Set(all.map((c) => c.wikiPageId)).size,
+    'lint.claims_total': all.length,
+    'lint.citations_total': citationCount,
   });
 
-  return {
-    finishedAt,
-    totalClaims: finished.totalClaims,
-    unsupportedCount: finished.unsupportedCount,
-    contradictedCount: finished.contradictedCount,
-  };
+  try {
+    const pending = LintRun.start({
+      id: input.lintRunId,
+      wikiId: input.wikiId,
+      totalClaims: all.length,
+      startedAt,
+    });
+    await deps.runs.insert(pending);
+    await deps.emit({ kind: 'LintRunStarted', lintRunId: pending.id, totalClaims: all.length });
+    let run: RunningLintRun = LintRun.run(pending);
+    await deps.runs.update(run);
+
+    const sem = createSemaphore(Math.max(1, deps.concurrency));
+    await Promise.all(
+      all.map(({ wikiPageId, claim }) =>
+        sem(() => auditOneClaim(deps, input.lintRunId, wikiPageId, claim)).then(async (finding) => {
+          await deps.findings.insertMany([finding]);
+          run = LintRun.tally(run, tallyDelta(finding.verdict));
+          await deps.runs.update(run);
+          await deps.emit({
+            kind: 'ClaimAudited',
+            lintRunId: run.id,
+            lintFindingId: finding.id,
+            claimId: claim.id,
+            wikiPageId,
+            verdict: finding.verdict,
+          });
+        }),
+      ),
+    );
+
+    const finishedAt = deps.now().toISOString();
+    const finished = LintRun.finish(run, finishedAt);
+    await deps.runs.update(finished);
+    await deps.emit({
+      kind: 'LintRunFinished',
+      lintRunId: finished.id,
+      unsupportedCount: finished.unsupportedCount,
+      contradictedCount: finished.contradictedCount,
+    });
+
+    lintSpan.setAttributes({
+      'lint.unsupported': finished.unsupportedCount,
+      'lint.contradicted': finished.contradictedCount,
+    });
+    lintSpan.setStatus('ok');
+    return {
+      finishedAt,
+      totalClaims: finished.totalClaims,
+      unsupportedCount: finished.unsupportedCount,
+      contradictedCount: finished.contradictedCount,
+    };
+  } catch (err) {
+    lintSpan.recordException(err);
+    throw err;
+  } finally {
+    lintSpan.end();
+  }
 }
 
 // Audit a single claim with full failure isolation. Any rejection from

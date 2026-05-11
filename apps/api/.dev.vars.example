@@ -51,3 +51,26 @@ OPEN_ROUTER_API_KEY=
 # unset, which is correct for single-origin local dev (vite proxies /rpc to
 # the api on :8787).
 # WEB_APP_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Observability (optional — every LLM call + top-level use-case emits OTel
+# spans regardless of what you set here)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Default: no env vars → ConsoleTracer writes one structured JSON line per
+# finished span to stdout (visible via `wrangler tail` or in dev console).
+# That's enough to inspect spans without any external account.
+#
+# Langfuse-ready: set the three LANGFUSE_* vars and the OTLP exporter
+# auto-derives the endpoint (`${LANGFUSE_HOST}/api/public/otel/v1/traces`)
+# and `Authorization: Basic base64(public:secret)` header. Sign up + get
+# keys at https://cloud.langfuse.com (or self-host).
+# LANGFUSE_HOST=https://cloud.langfuse.com
+# LANGFUSE_PUBLIC_KEY=pk-lf-…
+# LANGFUSE_SECRET_KEY=sk-lf-…
+#
+# Generic OTLP/HTTP backends (Honeycomb, Grafana Cloud, Tempo, anything
+# OTel-aware): set the endpoint that EXCLUDES the trailing `/v1/traces` —
+# the exporter appends it. Headers are W3C-style "k=v,k2=v2".
+# OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
+# OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=YOUR_API_KEY
