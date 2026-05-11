@@ -4,49 +4,67 @@ Companion to [`code-tour.md`](./code-tour.md). Diagrams the path the
 perspective text takes from the user's textarea into every model call
 during the compile, with file:line references.
 
-## At a glance
+## Compile-time flow
 
-```
-                 [user's textarea on ingest page]
-                              │
-                              ▼
-              StartCompileInput.perspective
-                              │
-                              ▼
-              dispatcher.start({ perspective })
-                              │
-                              ▼
-                ChatTurnDO… (oops, wiki)
-              CompileRunDO.fetch('/start')
-                              │
-                              ▼
-              compileFolder({ ..., perspective })
-                              │
-        ┌────────────┬────────┴────────┬────────────┐
-        ▼            ▼                 ▼            ▼            ▼
-    inferSchema  planCompile  researchSource(*)  draftPage(*)  narrateIndexes
-        │            │                 │            │            │
-        └────────────┴────┐         ┌──┴────────────┴────────────┘
-                          ▼         ▼
-            withPerspective(SYSTEM, perspective, { stage })
-                              │
-                              ▼
-              [LLM gets HARD-CONSTRAINT preamble + stage clause]
-                              │
-                              ▼
-         perspectiveUserHeader(perspective) on the USER message
-                              │
-                              ▼
-                          [model output]
-                              │
-                              ▼
-                  Wiki.perspective persisted in D1
-                              │
-                              ▼
-              Chat-time: getWikiMeta() → synth wikiContext
+```mermaid
+flowchart TD
+    UX["User's textarea<br/>(ingest.tsx)"] --> Contract["StartCompileInput.perspective<br/>(contracts/wiki/compile.ts)"]
+    Contract --> Handler["startCompile handler<br/>(wiki/interface/index.ts)"]
+    Handler --> Client["createCfCompileRunDispatcher<br/>(wiki/infrastructure/cf-compile-run-dispatcher.ts)"]
+    Client -->|POST /start| DO["CompileRunDO.fetch<br/>(wiki/infrastructure/durable_objects/compile-run-do.ts)"]
+    DO --> Run["compileFolder({ perspective })<br/>(wiki/application/compile-folder.ts)"]
+
+    Run --> Stage1["inferSchema<br/>{ stage: 'schema' }"]
+    Run --> Stage2["planCompile<br/>{ stage: 'plan' }"]
+    Run --> Stage3["researchSource (per source)<br/>{ stage: 'research' }"]
+    Run --> Stage4["draftPage (per bucket)<br/>{ stage: 'draft' }"]
+    Run --> Stage5["narrateIndexes<br/>{ stage: 'narrate' }"]
+
+    Stage1 --> Helper
+    Stage2 --> Helper
+    Stage3 --> Helper
+    Stage4 --> Helper
+    Stage5 --> Helper
+
+    Helper["withPerspective(SYSTEM, perspective, { stage })<br/>(wiki/application/perspective-preamble.ts)"] --> Prompt["LLM gets:<br/>HARD-CONSTRAINT preamble<br/>+ universal rules<br/>+ stage-specific clause<br/>+ user-message reminder"]
+
+    Prompt --> Output["Model output<br/>(PageTypes / findings / page bodies / narration)"]
+    Output --> Persist["wikis.perspective stored in D1<br/>(wiki/infrastructure/d1-wiki-repo.ts<br/>+ migrations/002_perspective.sql)"]
+
+    classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
+    classDef stage fill:#2a1f3d,stroke:#a878d8,color:#fff;
+    classDef enforce fill:#3d2a1f,stroke:#d89878,color:#fff;
+    class UX,Persist edge;
+    class Stage1,Stage2,Stage3,Stage4,Stage5 stage;
+    class Helper,Prompt enforce;
 ```
 
-`(*)` runs once per source / once per draft bucket.
+## Chat-time flow — picking the lens back up
+
+```mermaid
+flowchart LR
+    Q["User question<br/>chat.ask"] --> Turn["runChatTurn<br/>(chat/application/run-chat-turn.ts)"]
+    Turn --> Meta["wikiReader.getWikiMeta(wikiId)<br/>returns { perspective, pageTypes, folderName }"]
+    Meta --> Agent["Agentic researcher<br/>(agentic-researcher.ts)"]
+    Meta --> Synth["Synthesizer<br/>(ai-sdk-synthesizer.ts)"]
+
+    Agent --> AgentSys["System prompt now includes<br/>'Wiki taxonomy' block:<br/>– PageType list<br/>– perspective (first line)"]
+    AgentSys --> Tools["Agent uses:<br/>listPagesByType / searchWiki /<br/>searchSources / readWikiPage"]
+
+    Tools --> Findings["Pages → findings<br/>(quoteText = full page body)"]
+
+    Findings --> Synth
+    Synth --> Ctx["User message prepended with<br/>&lt;wiki-context&gt; block:<br/>– perspective<br/>– section names"]
+    Ctx --> Answer["AnswerEvent stream<br/>(prose + citations + artifacts)"]
+
+    classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
+    classDef ctx fill:#3d2a1f,stroke:#d89878,color:#fff;
+    class Q,Answer edge;
+    class AgentSys,Ctx ctx;
+```
+
+`(*)` `researchSource` runs once per source; `draftPage` runs once per
+`(pageType, title)` bucket. Everything else runs once per compile.
 
 ## File map
 

@@ -155,3 +155,4 @@ Quenya
 scannability
 Shelob
 Sindarin
+autonumber

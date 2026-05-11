@@ -19,6 +19,44 @@ ingest time. Cheap questions, deeper answers.
 
 ---
 
+## System at a glance
+
+```mermaid
+flowchart LR
+    User((User)) --> Web["apps/web<br/>(React + Vite)"]
+    Web -->|oRPC over HTTP| API["apps/api<br/>(Hono on Workers)"]
+
+    API --> Ingestion[@domain/ingestion]
+    API --> Wiki[@domain/wiki]
+    API --> Chat[@domain/chat]
+    API --> Verification[@domain/verification]
+
+    Ingestion -->|Drive walk + extract| R2[(R2: sources/&lt;id&gt;/text)]
+    Ingestion --> D1S[(D1: sources)]
+
+    Wiki -->|compile pipeline| CompileDO["CompileRunDO<br/>(per-run state)"]
+    CompileDO --> OpenRouter["OpenRouter →<br/>Sonnet 4.6 / Haiku 4.5"]
+    CompileDO --> R2W[(R2: wiki_pages/&lt;id&gt;.md)]
+    CompileDO --> D1W[(D1: wikis, wiki_pages,<br/>claims, citations, backlinks)]
+
+    Chat -->|per-turn| ChatDO["ChatTurnDO<br/>(per-turn tape)"]
+    ChatDO --> OpenRouter
+    ChatDO --> D1W
+    ChatDO --> R2W
+    ChatDO --> R2[(...)]
+
+    classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
+    classDef ctx fill:#2a1f3d,stroke:#a878d8,color:#fff;
+    classDef store fill:#1f3d2a,stroke:#78d898,color:#fff;
+    classDef do_ fill:#3d2a1f,stroke:#d89878,color:#fff;
+    class User,Web,API edge;
+    class Ingestion,Wiki,Chat,Verification ctx;
+    class R2,R2W,D1S,D1W store;
+    class CompileDO,ChatDO do_;
+```
+
+---
+
 ## The journey
 
 A user does this:
@@ -30,6 +68,14 @@ A user does this:
    opportunities" or "scenes and characters for a screenplay"
 4. The compile pipeline runs end-to-end under that lens
 5. They land on the compiled wiki, can browse pages, can chat
+
+```mermaid
+flowchart LR
+    A["Pick a folder"] --> B["Watch ingest"]
+    B --> C["Choose a perspective"]
+    C --> D["Compile under that lens"]
+    D --> E["Read the wiki<br/>+ ask questions"]
+```
 
 Below, the actual code that powers each step.
 
@@ -81,6 +127,20 @@ the response; a DO is the only addressable home that survives.
 
 The run executes [`compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts)
 which orchestrates **five stages**, each backed by an LLM call.
+
+```mermaid
+flowchart TD
+    Start([CompileStarted]) --> S1["A · SchemaInferrer<br/>reads head sources, picks PageTypes"]
+    S1 --> S2["B · Planner<br/>assigns PageTypes per source"]
+    S2 --> S3["C · Researcher<br/>extracts findings per (source, pageType)"]
+    S3 --> S4["D · Drafter<br/>one page per (pageType, title) bucket"]
+    S4 --> S5["E · Linker + IndexBuilder<br/>resolves [[backlinks]], builds indexes"]
+    S5 --> S6["Narrator<br/>opinionated thesis + glossary"]
+    S6 --> End([CompileFinished])
+
+    classDef stage fill:#2a1f3d,stroke:#a878d8,color:#fff;
+    class S1,S2,S3,S4,S5,S6 stage;
+```
 
 ### Stage A — SchemaInferrer
 
@@ -224,19 +284,39 @@ short of fine-tuning.
 
 When a user asks a question, four layers cooperate:
 
-```
-user types question
-  ↓
-chat.ask → ChatTurnDO.start (DO holds the tape)
-  ↓
-runChatTurn → researchQuestion → AgenticResearcher (4 tools)
-  ↓                                  ↓
-  ↓                              listPagesByType / searchWiki /
-  ↓                              readWikiPage / searchSources
-  ↓
-synthesizeAnswer → AiSdkSynthesizer (streamText + 8 artifact tools)
-  ↓
-SSE stream of AnswerEvents → web/chat-transport → ai-elements
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Web as apps/web<br/>chat-dock + chat-transport
+    participant API as apps/api<br/>chat.ask / chat.streamAnswer
+    participant DO as ChatTurnDO
+    participant Runner as runChatTurn
+    participant Agent as AgenticResearcher<br/>(4 tools)
+    participant Synth as AiSdkSynthesizer<br/>(8 artifact tools)
+    participant LLM as OpenRouter →<br/>Sonnet 4.6
+
+    User->>Web: types question
+    Web->>API: POST chat.ask
+    API->>DO: POST /start
+    DO-->>API: 202 (turnId)
+    API-->>Web: { turnId }
+    Web->>API: POST chat.streamAnswer
+    API->>DO: GET /subscribe (SSE)
+
+    DO->>Runner: runChatTurn(args, emit)
+    Runner->>Agent: research({ wikiId, question })
+    Agent->>LLM: streamText with 4 tools
+    LLM-->>Agent: tool calls (listPagesByType, searchWiki, readWikiPage, searchSources)
+    Agent-->>Runner: pages + findings
+    Runner->>Synth: stream({ findings, wikiContext })
+    Synth->>LLM: streamText with artifact tools
+    LLM-->>Synth: prose + [[cite:UUID]] + tool calls
+    Synth-->>Runner: AnswerProseDelta / AnswerThinking / AnswerSegment events
+    Runner->>DO: emit (verified + sequenced)
+    DO-->>API: SSE frames
+    API-->>Web: AnswerEvent stream
+    Web-->>User: ai-elements rendered
 ```
 
 ### Why a Durable Object for chat too
