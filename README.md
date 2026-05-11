@@ -2,7 +2,7 @@
 
 TypeScript monorepo. Bun + Turborepo + Hono on Cloudflare Workers + Vite/React on the frontend. Domain-driven, contract-first.
 
-The product is a **folder-grounded wiki**: point it at a Google Drive folder, the API ingests every PDF / Doc / Sheet / Slide, the compiler turns the collection into a wiki of typed pages with byte-range citations, a verification pass lints every claim against its cited span, and a chat surface answers questions over the wiki with the same span-verifying loop.
+The product is a **folder-grounded wiki**: point it at a Google Drive folder, the API ingests every PDF / Google Doc / Sheet / Slide / DOCX / Markdown, the compiler turns the collection into a wiki of typed pages with byte-range citations, a verification pass lints every claim against its cited span, and a chat surface answers questions over the wiki with the same span-verifying loop.
 
 ## Live demo
 
@@ -209,18 +209,18 @@ So the chat agent's research loop today is a tool-using loop over the wiki itsel
 
 The architecture is set up for this: `WikiReader` is an interface, the composition root in `apps/api/src/build-chat-context.ts` picks the implementation, and the citation/lint contract (`SourceHashVerifier`) is agnostic to how candidate pages are surfaced. Adding the vector path is additive — it doesn't change the wiki schema, the synthesizer, or the verifier.
 
-### We indexed PDFs (mostly), not every document type
+### Ingestion is an extension point — six formats today
 
-The ingestion pipeline supports PDFs, Google Docs, Google Sheets, and Google Slides today (`packages/domains/ingestion/src/infrastructure/`), with PDF being the primary path. Word, image-with-OCR, raw text, transcripts, etc. are **all out of scope** for this submission — not because they're hard, but because file-format handling is an orthogonal problem that doesn't affect the wiki's core thesis.
+The ingestion pipeline supports six source formats out of the box (`packages/domains/ingestion/src/infrastructure/`): PDF, Google Doc, Google Sheet, Google Slide, Word (`.docx`), and plain Markdown (`.md`). Each is a self-contained `Extractor` adapter; image-with-OCR, audio transcripts, and structured CSV/JSON are deliberately out of scope — not because they're hard, but because file-format handling is orthogonal to the wiki's core thesis.
 
-The architecture deliberately makes ingestion an extension point:
-- Each format is its own `Extractor` adapter in `packages/domains/ingestion/src/infrastructure/` (see `pdf-extractor.ts`, `google-doc-extractor.ts`, etc.).
-- A new format = a new file in that directory + one line in the `buildIngestionContext` factory in `apps/api/src/index.ts`. The wiki compile, the chat agent, the verifier, and the SPA see nothing new.
+The architecture makes adding the next format trivial:
+- Each format is its own `Extractor` adapter in `packages/domains/ingestion/src/infrastructure/` — see `pdf-extractor.ts` (via `unpdf`), `google-doc-extractor.ts`, `google-sheet-extractor.ts`, `google-slide-extractor.ts`, `docx-extractor.ts` (via `mammoth`), `markdown-extractor.ts`.
+- A new format = a new file in that directory + one line in the `extractors` registry inside `buildIngestionContext` in `apps/api/src/index.ts`, plus the MIME string in the `SourceMime` union (`packages/contracts/src/ingestion/sources.ts` + `packages/domains/ingestion/src/domain/manifest.ts`). The wiki compile, the chat agent, the verifier, and the SPA see nothing new.
 - The `Manifest` value object in the ingestion domain carries `mime` + raw bytes — every downstream stage works in terms of the extracted text, not the source format.
 
-**Given more time we would have added:** Word (`docx`), images via VLM captioning (Sonnet 4.6 vision → text), audio transcripts (Whisper), plain Markdown, structured CSV/JSON. Each is a self-contained Extractor; none requires changes outside `packages/domains/ingestion/`.
+**Given more time we would have added:** images via VLM captioning (Sonnet 4.6 vision → text), audio transcripts (Whisper), structured CSV/JSON, and HTML. Each is a self-contained Extractor; none requires changes outside `packages/domains/ingestion/`.
 
-The choice was: prove the wiki concept end-to-end on one well-understood format, rather than spread engineering thin across many formats with a thinner wiki on top.
+The choice was: prove the wiki concept end-to-end across a tight set of well-understood formats, rather than spread engineering thin across every format with a thinner wiki on top.
 
 ### Observability via OTel; Langfuse-ready
 

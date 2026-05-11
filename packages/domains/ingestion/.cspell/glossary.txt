@@ -17,3 +17,10 @@ sheet
 slide
 doc
 unpdf
+docx
+markdown
+mammoth
+ooxml
+wordprocessingml
+openxmlformats
+officedocument

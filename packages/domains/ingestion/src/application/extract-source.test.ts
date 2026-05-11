@@ -20,6 +20,8 @@ const makeRegistry = (calls: string[]): ExtractorRegistry => ({
   doc: makeExtractor('doc', calls),
   sheet: makeExtractor('sheet', calls),
   slide: makeExtractor('slide', calls),
+  docx: makeExtractor('docx', calls),
+  markdown: makeExtractor('markdown', calls),
 });
 
 describe('extractSource', () => {
@@ -50,7 +52,7 @@ describe('extractSource', () => {
     expect(calls).toEqual(['doc:0', 'sheet:0', 'slide:0']);
   });
 
-  it('routes text/plain and text/markdown through the pdf extractor (text-as-PDF reuse)', async () => {
+  it('routes text/plain and text/markdown through the markdown extractor', async () => {
     const calls: string[] = [];
     await extractSource(makeRegistry(calls), {
       mime: 'text/plain',
@@ -60,6 +62,15 @@ describe('extractSource', () => {
       mime: 'text/markdown',
       bytes: new Uint8Array([6, 7]),
     });
-    expect(calls).toEqual(['pdf:1', 'pdf:2']);
+    expect(calls).toEqual(['markdown:1', 'markdown:2']);
+  });
+
+  it('routes DOCX MIME through the docx extractor', async () => {
+    const calls: string[] = [];
+    await extractSource(makeRegistry(calls), {
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: new Uint8Array([1, 2, 3, 4]),
+    });
+    expect(calls).toEqual(['docx:4']);
   });
 });

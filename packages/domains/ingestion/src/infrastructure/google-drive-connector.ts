@@ -255,14 +255,21 @@ export const createGoogleDriveConnector = (cfg: GoogleDriveConnectorConfig): Dri
     // Google-native files are exported to a different MIME than their source;
     // we record the original Google MIME so the extractor router picks the
     // right path. (The bytes themselves are text/plain or text/csv or PDF.)
+    //
+    // Some Drive uploads arrive with a non-standard markdown MIME — Drive sets
+    // `text/x-markdown` for .md files uploaded via the web UI prior to ~2024.
+    // Normalize to `text/markdown` so the extractor router only has to handle
+    // one variant.
+    const rawMime = meta.mimeType === 'text/x-markdown' ? 'text/markdown' : meta.mimeType;
     const manifest = Manifest.create({
       driveFileId,
       filename: meta.name,
-      mime: meta.mimeType as
+      mime: rawMime as
         | 'application/pdf'
         | 'application/vnd.google-apps.document'
         | 'application/vnd.google-apps.spreadsheet'
         | 'application/vnd.google-apps.presentation'
+        | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         | 'text/plain'
         | 'text/markdown',
       sizeBytes: meta.size ? Number(meta.size) : bytes.length,
