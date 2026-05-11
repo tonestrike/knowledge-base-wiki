@@ -159,3 +159,7 @@ autonumber
 
 pgvector
 Vectorize
+Langfuse
+Mermaid
+OTLP
+jailbreaks
