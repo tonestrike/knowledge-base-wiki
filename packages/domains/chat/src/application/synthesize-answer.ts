@@ -109,23 +109,56 @@ const errorId = (): string => {
 };
 
 /**
- * Drives the Synthesizer for one Turn. Yields a fully-typed `AnswerEvent`
- * stream:
+ * # synthesizeAnswer — the citation tripwire
  *
- *   AnswerStarted → (AnswerProseDelta | AnswerSegment)* → AnswerFinished
+ * Wraps the Synthesizer with the fabrication-prevention layer. Yields
+ * a fully-typed AnswerEvent stream:
  *
- * Citation-bearing segments are hash-verified BEFORE emission. A failed hash
- * check, an unknown citation id, or a malformed Artifact all abort the stream
- * with `AnswerFailed` — the fabrication tripwire spec §5.1.1 calls for.
+ *     AnswerStarted →
+ *     (AnswerProseDelta | AnswerThinking | AnswerSegment)* →
+ *     AnswerFinished | AnswerFailed
  *
- * SF-CHAT-1: tripwire violations (`CitationTripwireError`) are kept as-is in
- * the `AnswerFailed.message` so the UI can show a domain-specific banner;
- * infrastructure errors (network / model / repo) are logged with structured
- * context including an `errorId` and `turnId` and reshaped into a generic
- * AnswerFailed carrying the same correlation id.
+ * ## The tripwire — why every citation is hash-verified
  *
- * The function never emits a citation that the model invented: every Citation
- * id must already appear in `input.findings`.
+ * The Synthesizer emits `[[cite:UUID]]` markers in prose and
+ * `citationIds` arrays on artifact tool calls. This use-case:
+ *
+ *   1. **Resolves** each marker against the known findings (exact id
+ *      match OR unique prefix match for the model's habit of
+ *      abbreviating UUIDs to 8 chars).
+ *   2. **Verifies** the Citation's contentHash against the source
+ *      text by re-hashing the bytes at `(sourceId, byteRange)`.
+ *      `SourceHashVerifier` reads the source text from R2, slices,
+ *      and SHA-256s. Mismatch → `CitationTripwireError`.
+ *   3. **Drops or aborts** depending on severity:
+ *      - Unknown / unresolvable citation id in prose → log + drop
+ *        the marker, prose continues (model hallucinated an id but
+ *        the surrounding prose is still grounded).
+ *      - Unknown citation id in artifact citations → drop that
+ *        citation; if EVERY citation is bad, drop the artifact.
+ *      - Hash mismatch on a resolvable citation → tripwire abort.
+ *        The entire Turn fails with AnswerFailed; this is the
+ *        fabrication signal — the model produced a verbatim quote
+ *        that doesn't match the source bytes.
+ *
+ * ## Error policy
+ *
+ * Two error classes, mapped differently:
+ *
+ *   - `CitationTripwireError` — domain-level. Message passes through
+ *     to AnswerFailed verbatim so the UI can show a specific banner.
+ *   - Anything else (network, model, repo) — infrastructure. Logged
+ *     with a structured errorId + turnId for Sentry; reshaped into a
+ *     generic AnswerFailed carrying the same correlation id so the
+ *     operator can match logs ↔ user reports.
+ *
+ * ## Empty-findings branch
+ *
+ * If research returned zero findings AND zero suggestion pages, the
+ * dispatcher upstream fills `suggestionPages` from
+ * `listSamplePages` so the agent has SOMETHING to compose a guided
+ * "couldn't match that, here's what's here" response from. We never
+ * hand-roll user-facing copy — the synth composes it.
  */
 export async function* synthesizeAnswer(
   deps: SynthesizeAnswerDeps,

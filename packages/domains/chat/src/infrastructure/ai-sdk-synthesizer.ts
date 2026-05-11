@@ -3,23 +3,72 @@ import { z } from 'zod';
 import type { Synthesizer, SynthesizerEvent, SynthesizerInput } from '../application/ports.ts';
 
 /**
- * Per-kind artifact tools. Each tool's `inputSchema` carries one artifact
- * kind's props (mirroring `@package/contracts/shared/artifact` minus the
- * `min(N)/max(N)` array refinements — those become JSON-Schema
- * `minItems`/`maxItems` constraints that the slice instructions ban for
- * structured-output prompts). Putting the artifact registry behind a tool
- * call sidesteps Anthropic's structured-output validator entirely: tool
- * schemas are checked one tool at a time, never compiled into a single
- * combined grammar, so we avoid both the "Empty schema ({}) that accepts any
- * JSON value is not supported" failure and the "compiled grammar is too
- * large" failure the previous `streamObject` adapter ran into.
+ * # AiSdkSynthesizer — the chat answer composer
  *
- * Each tool's `execute` is a no-op that returns the input back as the
- * result — `streamText` requires `execute` to be present to keep the
- * tool-call loop progressing, but the work itself happens downstream when
- * the use-case re-validates each artifact against the typed `Artifact`
- * registry. The actual artifact payload travels in the tool *input*, which
- * we surface as an `artifact` segment.
+ * Stage 2 of the chat pipeline. Given the user's question, the
+ * Researcher's findings, and a wiki-context block, streams a typed
+ * sequence of `SynthesizerEvent`s the use-case turns into AnswerEvents.
+ *
+ * The output is a structured answer composed of three primitive
+ * segment kinds:
+ *
+ *   - `prose` — natural-language explanation
+ *   - `citation` — a clickable chip backed by a Citation entity
+ *   - `artifact` — a typed React component (ComparisonTable, Timeline,
+ *     KeyMetric, Quote, LineChart, BarChart, CodeBlock, Markdown)
+ *
+ * ## The artifact-as-tool pattern (load-bearing)
+ *
+ * The synth uses `streamText({ tools, toolChoice: 'auto' })` where the
+ * eight artifact kinds are the tools. Each tool's `inputSchema`
+ * carries one artifact's props shape. The model picks which tool to
+ * call for each structured-data segment.
+ *
+ * Why tools and not `streamObject` with a discriminated-union schema:
+ * Anthropic's structured-output validator rejects a combined grammar
+ * for `Artifact = ComparisonTable | Timeline | …` with "compiled
+ * grammar too large" or "empty schema" errors. Per-tool schemas are
+ * validated independently, sidestepping that entirely.
+ *
+ * Each `execute` is a no-op identity function — `streamText` requires
+ * `execute` to keep the loop progressing, but we don't run the tool's
+ * effect server-side. The actual artifact payload travels in the
+ * tool's *input* (the model's emitted JSON); we surface that as an
+ * `artifact` segment downstream, where the use-case re-validates it
+ * against the canonical `Artifact` registry (which DOES have
+ * min/max refinements the streaming schema can't carry).
+ *
+ * ## Citations are inline, not tool-shaped
+ *
+ * Prose claims are paired with `[[cite:UUID]]` markers in the text
+ * stream. This adapter scans the text-delta buffer with a regex,
+ * emits everything before the marker as `prose`, closes the prose
+ * run, emits a `citation` segment carrying the UUID, then continues.
+ * Why not a citation tool? Tool calls are heavyweight (one round-
+ * trip per call) and citations are common — inline markers let prose
+ * + citations stream together in one model turn.
+ *
+ * ## Live train-of-thought
+ *
+ * While the model is composing an artifact tool call, its
+ * `tool-input-*` parts stream the partial JSON. The adapter watches
+ * for new top-level keys appearing in the buffer and emits
+ * `thinking` events ("Drafting comparison table…", "Adding columns:
+ * model, training data, …") throttled to one per ~400ms. These reach
+ * the UI as `reasoning-delta`s so the user sees movement during the
+ * otherwise-silent 15-25s the synth spends drafting a structured
+ * artifact.
+ *
+ * ## Why the wiki-context block exists
+ *
+ * The findings come from a wiki the user already shaped under a
+ * perspective. The page bodies use the source documents' vocabulary
+ * while their titles + structure use the perspective's. Without
+ * context, the synth would hallucinate "this wiki doesn't cover X"
+ * when the user's question vocabulary doesn't match the page bodies'
+ * source vocabulary. The `<wiki-context>` block prepended to the
+ * user message names the perspective + section vocabulary so the
+ * synth knows the framing is deliberate.
  */
 const citationIds = z
   .array(z.string())
@@ -246,9 +295,17 @@ const errorId = (): string => {
   return r.slice(0, 8);
 };
 
-// `[[cite:UUID]]` — UUID-shaped to avoid eating literal brackets in prose.
+// `[[cite:UUID]]` — the marker the synth's system prompt instructs the
+// model to inline after every factual claim. We scan the text-delta
+// buffer for these in `drainPending()` below. UUID-shaped suffix so
+// literal `[[…]]` brackets in prose can never accidentally match.
 const CITE_MARKER = /\[\[cite:([0-9a-fA-F-]{8,})\]\]/;
 
+// Carried across one synthesizer run. The streaming LLM emits text
+// deltas that get scanned for citation markers; this state machine
+// tracks the open prose segment, the pending un-drained tail, and the
+// next segment index to allocate. All helpers below (closeProse,
+// emitProse, drainPending) mutate this.
 interface SegmentState {
   /** Next segment index to allocate. */
   nextIndex: number;

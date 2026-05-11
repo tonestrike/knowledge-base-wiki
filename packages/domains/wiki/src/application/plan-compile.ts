@@ -1,3 +1,37 @@
+/**
+ * # planCompile — the Planner stage
+ *
+ * Stage 2 of compileFolder. Given the schema's PageTypes + every
+ * source's text, decides which PageTypes the Researcher should look
+ * for in each source. Output is a flat task list:
+ *
+ *     [{ sourceId, pageTypes: [...] }, ...]
+ *
+ * The Researcher iterates this list (one LLM call per source) and
+ * extracts findings only for the assigned PageTypes — so what the
+ * Planner picks here directly determines which sections of the wiki
+ * get populated.
+ *
+ * ## Why a separate stage instead of "extract everything per source"
+ *
+ * Two reasons:
+ *
+ *   1. **Cost** — emitting a "draft 6 page types" instruction to a
+ *      strong model on a 30-page PDF takes ~30s. The Planner uses
+ *      Haiku and runs once over every source's first 3KB at low
+ *      temperature — a few seconds total. It pre-filters so the
+ *      Researcher only gets sensible (source, pageType) pairs.
+ *   2. **Perspective enforcement** — when the user picks a perspective,
+ *      the planner's stage clause tells it to assign 3+ PageTypes per
+ *      source so the same source produces findings for Opportunity,
+ *      Pain, Wedge, etc. — not just the single topically-obvious one.
+ *      That fan-out is THE fix for "schema looked great but only Tool
+ *      had pages." See perspective-preamble.ts STAGE_DIRECTIVES.plan.
+ *
+ * Defense in depth: the Researcher AND the orchestrator both filter
+ * pageType names against the schema — a hallucinated PageType here
+ * just gets dropped.
+ */
 import {
   type SourceId,
   type WikiSchema,

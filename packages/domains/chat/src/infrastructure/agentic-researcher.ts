@@ -14,35 +14,60 @@ const SOURCE_SEARCH_LIMIT = 6;
 const TYPE_LIST_LIMIT = 12;
 
 /**
- * "Really try hard." A ToolLoopAgent-style researcher built on
- * `streamText({ tools, stopWhen })`. The model decides what to search
- * for, drills into promising hits, and may follow up with a refined
- * query before declaring it has enough context.
+ * # AgenticResearcher — the chat agent loop
  *
- * Three tools:
- *   - `searchWiki({ query })`     — token-overlap search over page
- *                                   title + compiled body
- *   - `readWikiPage({ pageId })`  — full body + citation list for a hit
- *   - `searchSources({ query })`  — token-overlap search over the raw
- *                                   source text (PDF extract, markdown)
- *                                   for every Source cited anywhere in
- *                                   this wiki. Returns citing pages so
- *                                   the agent can drill back into real
- *                                   WikiPages. The fallback when page
- *                                   search misses content the user's
- *                                   phrasing should plausibly hit.
+ * Stage 1 of the chat pipeline. Given a user's question and a wiki id,
+ * surfaces the pages relevant to answer it. Built on
+ * `streamText({ tools, stopWhen: stepCountIs(8) })`: the model
+ * decides what to search for, drills into promising hits, follows up
+ * with refined queries, then stops when it has enough context.
  *
- * Loop budget: the agent stops after `maxSteps` generations (default 8).
- * The output text the model produces during the loop is discarded — the
- * synthesizer composes the user-facing answer downstream from the
- * aggregated findings.
+ * ## The four tools, ordered by intended use
  *
- * Page deduplication: the same wiki page may be surfaced multiple times
- * (initial search + a later drill-down + a source-search citing page).
- * We dedupe by id and only fire `onPageVisited` the first time. The
- * synthesizer dedupes findings by page id internally via the citation-id
- * set, but emitting one finding per unique page keeps the synth prompt
- * smaller.
+ *   - `listPagesByType({ pageType })` — enumerate every Concept page
+ *     of a given type (browse the wiki's "Opportunity" section by
+ *     name). The agent's first tool when the user's question maps to
+ *     one of the wiki's PageType names. Beats keyword-guessing.
+ *
+ *   - `searchWiki({ query })` — token-overlap search over page title +
+ *     body. Used for keyword-shaped queries or as a follow-up after
+ *     listPagesByType.
+ *
+ *   - `readWikiPage({ pageId })` — fetch a single page's full body +
+ *     citation list. The agent calls this on the 2-4 most promising
+ *     hits from list/search calls to confirm they actually answer.
+ *
+ *   - `searchSources({ query })` — token-overlap search over the raw
+ *     source documents (extracted PDF text, markdown). Returns the
+ *     wiki pages that cite each matching source. Used when page-level
+ *     search misses content the user's phrasing should plausibly hit
+ *     — the compiled pages may use different vocabulary than the
+ *     source documents.
+ *
+ * ## Wiki-taxonomy injection
+ *
+ * Before the loop starts, `getWikiMeta(wikiId)` fetches the wiki's
+ * PageType list + perspective + folder name. `buildSystem(meta)`
+ * injects a "Wiki taxonomy" block into the system prompt naming the
+ * actual sections of THIS wiki. That's how the agent knows "business
+ * ideas" → Opportunity, "what could go wrong" → Risk, etc.
+ *
+ * ## Deduplication
+ *
+ * The same wiki page can be surfaced by multiple tools (initial
+ * listPagesByType + later searchWiki + a searchSources citing page).
+ * `noteVisit` dedupes by page id and only fires `onPageVisited` the
+ * first time so the dispatcher emits exactly one WikiPageRetrieved
+ * event per unique page. The final findings array has one entry per
+ * unique page surfaced.
+ *
+ * ## Error policy
+ *
+ * The loop's own catch swallows model failures and returns whatever
+ * pages we managed to gather. Throwing here would surface
+ * AnswerFailed to the user; the empty-findings branch downstream
+ * composes a graceful "couldn't match, here's what we have" reply
+ * from listSamplePages instead.
  */
 const SYSTEM_BASE = `You are Researcher. Your job is to find AS MANY relevant wiki pages as possible so that another agent can compose a thorough, well-cited answer. You have four tools — use them all when appropriate.
 
@@ -144,9 +169,25 @@ const errorId = (): string => {
 
 export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researcher => ({
   async research(input: ResearcherInput): Promise<ResearcherOutput> {
+    // `visited` is the canonical working set the loop builds up. Each
+    // tool's `execute` callback adds pages via `noteVisit` below; at
+    // the end of the run we return [...visited.values()] as the
+    // research output. Order doesn't matter — the synth treats
+    // findings as a set.
     const visited = new Map<WikiPageId, WikiPageSummary>();
     const searchLimit = opts.searchLimit ?? 6;
 
+    // Called by every tool's execute() when a page enters the working
+    // set. Deduplicates by page id (the same page is often surfaced
+    // by multiple tools — initial listPagesByType + a later
+    // searchWiki + the citing-pages of a searchSources hit).
+    //
+    // The two callbacks fire the FIRST time we see a page only:
+    //   - `onPartial` → emits ResearchProgress to the SSE tape (UI
+    //     spinner / count)
+    //   - `onPageVisited` → emits one WikiPageRetrieved event with
+    //     title + pageType, which the chat dock renders as a
+    //     "Reading X" line in the reasoning bubble
     const noteVisit = (page: WikiPageSummary): void => {
       if (visited.has(page.id)) return;
       visited.set(page.id, page);
@@ -154,12 +195,14 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       input.onPageVisited?.(page);
     };
 
-    // Track queries the agent has already run so we can tell the model
-    // "you already tried this" instead of letting it burn a step on a
-    // repeat. The probe-chat trace showed a question with thin wiki
-    // coverage chewed 40s on duplicate searches. Same map covers both
-    // page-search and source-search to discourage repeating the exact
-    // phrasing across tools.
+    // Per-tool seen-set used to short-circuit the model's habit of
+    // repeating the same query verbatim. Each tool's execute() checks
+    // its own set first; on a repeat it returns an `error: "you
+    // already ran this"` shape that costs ONE wasted step but breaks
+    // the loop pattern. Separate sets per tool (queriedTerms /
+    // sourcesQueriedTerms / typedListed) so a searchWiki call doesn't
+    // prevent a same-phrase searchSources call — those are genuinely
+    // different probes against different indexes.
     const queriedTerms = new Set<string>();
     const sourcesQueriedTerms = new Set<string>();
     const typedListed = new Set<string>();

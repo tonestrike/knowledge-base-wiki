@@ -29,25 +29,55 @@ export interface RunChatTurnArgs {
 }
 
 /**
- * The one true chat-turn execution loop.
+ * # runChatTurn — the chat-turn execution loop
  *
- * Both transports — the in-process `createInMemoryDispatcher` (dev / tests)
- * and the Cloudflare `ChatTurnDO` (prod) — call this with their own
- * `emit` adapter. The runner produces an ordered AnswerEvent stream:
+ * One function, called once per Turn. Drives the entire answer
+ * lifecycle and emits a strictly-ordered AnswerEvent stream that
+ * downstream subscribers can rely on:
  *
- *   AnswerStarted → ResearchStarted → WikiPageRetrieved* →
- *   ResearchCompleted → SynthesisStarted → (AnswerThinking|AnswerProseDelta|
- *   AnswerSegment)* → AnswerFinished | AnswerFailed
+ *     AnswerStarted
+ *     ResearchStarted
+ *     (WikiPageRetrieved | ResearchProgress)*
+ *     ResearchCompleted
+ *     SynthesisStarted
+ *     (AnswerThinking | AnswerProseDelta | AnswerSegment)*
+ *     AnswerFinished | AnswerFailed
  *
- * The terminal event (AnswerFinished / AnswerFailed) is always emitted
- * exactly once; consumers can use it to close subscribers and mark the
- * tape as done.
+ * The terminal event (AnswerFinished / AnswerFailed) is emitted
+ * EXACTLY ONCE; the DO uses that signal to mark the tape done and
+ * close subscribers.
  *
- * Consistency model (SF-CHAT-3): on AnswerFinished we publish
- * `AnswerProduced` BEFORE the final `Turn.finish` persist. Publish
- * failure surfaces as AnswerFailed and persist never runs; persist
- * failure also surfaces as AnswerFailed. The wiki-side `AnswerProduced`
- * consumer must be idempotent on (conversationId, turnId).
+ * ## Why this function exists separately from the dispatcher
+ *
+ * Two transports call this same runner:
+ *
+ *   - **In-memory dispatcher** — dev + tests. Tape lives in a per-
+ *     isolate Map. Fast but doesn't survive isolate hops.
+ *   - **ChatTurnDO** — prod. Tape lives in a Durable Object's storage,
+ *     so chat.ask + chat.streamAnswer (two separate Worker requests
+ *     that can land on different isolates) share state.
+ *
+ * Extracting the loop into a pure function (taking deps + args +
+ * emit) lets both transports share the exact same logic. The DO just
+ * wraps it with a sequenced + durable emit.
+ *
+ * ## Why fetch wikiMeta here, not in the synth
+ *
+ * The synth's interface is `stream({ findings, history?, wikiContext? })`
+ * — it shouldn't know about wikiId lookups. The runner is the layer
+ * that already has both wikiId and wikiReader, so it gets the meta
+ * and threads it as a typed value into the synth's input. Clean
+ * separation; the synth stays a thin adapter.
+ *
+ * ## Consistency model
+ *
+ * On AnswerFinished, we publish `AnswerProduced` cross-context BEFORE
+ * the final `Turn.finish` persist. Failure to publish surfaces as
+ * AnswerFailed and persist never runs — preventing the wiki side from
+ * never hearing about a successful chat. Persist failure also
+ * surfaces as AnswerFailed. The wiki-side consumer must be idempotent
+ * on (conversationId, turnId) so a future retry / outbox drain is
+ * harmless.
  */
 export async function runChatTurn(
   deps: RunChatTurnDeps,

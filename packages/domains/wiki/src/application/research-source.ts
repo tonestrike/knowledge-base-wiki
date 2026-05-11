@@ -1,3 +1,39 @@
+/**
+ * # researchSource — the Researcher stage
+ *
+ * Stage 3 of compileFolder. Called once per source with the PageTypes
+ * the Planner assigned. Returns:
+ *
+ *     [{ pageType, title, evidence, spanStart, spanEnd }, ...]
+ *
+ * `evidence` is a verbatim quote from the source. `spanStart` /
+ * `spanEnd` are byte offsets — these become the `byteRange` on the
+ * Citation, and the orchestrator hashes that exact slice into the
+ * Citation's `contentHash`. At chat time, the SourceHashVerifier
+ * re-hashes the slice and rejects on mismatch. **This is the
+ * fabrication tripwire** — a Researcher cannot make up a quote without
+ * also having to make up byte ranges that survive a hash check.
+ *
+ * ## Schema looseness on purpose
+ *
+ * The structured-output schema is intentionally lenient: only
+ * `pageType`, `title`, `evidence` are min(1), the byte-range integers
+ * have no min/max. Anthropic's structured-output validator rejects
+ * `minimum` on integers ("For 'integer' type, property 'minimum' is
+ * not supported"), so cap rules live in the prompt and a post-stream
+ * clamp (`Math.max(0, Math.min(spanEnd, len))`). Strict refinements
+ * here caused multi-source compiles to fail outright with "No object
+ * generated."
+ *
+ * ## Perspective enforcement at this stage
+ *
+ * The research-stage clause (perspective-preamble.ts
+ * STAGE_DIRECTIVES.research) is the most aggressive of the five: it
+ * requires the model to produce at least one finding per assigned
+ * PageType, REINTERPRETING the same source text through each angle.
+ * The example "one source about a generative-video product yields
+ * Tool, Pain, Opportunity, Wedge findings" lives in that clause.
+ */
 import { z } from 'zod';
 import { perspectiveUserHeader, withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';

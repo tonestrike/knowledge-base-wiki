@@ -41,23 +41,48 @@ export interface ChatTurnDOFactoryArgs<Env> {
 }
 
 /**
- * Per-turn Durable Object that runs the chat agent loop + synth.
+ * # ChatTurnDO — the per-turn Durable Object
  *
- * Two endpoints:
+ * Hosts one chat turn's research + synth loop. Required for prod on
+ * Cloudflare Workers because:
+ *
+ *   - `chat.ask` and `chat.streamAnswer` are two HTTP requests
+ *   - Workers route each request to an arbitrary isolate
+ *   - The per-turn event tape needs to be visible to both
+ *
+ * Without the DO, the in-memory dispatcher's `Map<turnId, Tape>`
+ * silently falls out of sync across isolates and the SSE consumer
+ * waits forever on an empty tape. The DO gives both requests a
+ * single addressable home keyed by `${conversationId}:${turnId}`.
+ *
+ * ## Two endpoints
+ *
  *   - `POST /start` with `{ conversationId, turnId, wikiId, question }`
- *     starts the run, anchored via `state.waitUntil` so it survives the
- *     fetch response. Idempotent: re-/start on an in-flight or finished
- *     turn returns 202 without restarting.
- *   - `GET /subscribe` opens an SSE stream that first replays the durable
- *     tape, then registers a live subscriber. Frames are
- *     `data: { seq, event }`; the client dedupes on `seq`.
+ *     starts the run, anchored via `state.waitUntil` so it outlives
+ *     the fetch response. Idempotent: re-/start on an in-flight or
+ *     finished turn returns 202 without re-running.
  *
- * Why a DO at all: the previous in-memory dispatcher kept the tape in a
- * per-isolate `Map`. On Cloudflare Workers, `chat.ask` (writes the tape)
- * and `chat.streamAnswer` (reads the tape) are separate HTTP requests
- * that can land in different isolates; the second one finds an empty
- * tape and waits forever. The DO gives both requests a single
- * addressable home keyed by `${conversationId}:${turnId}`.
+ *   - `GET /subscribe` opens an SSE stream. Replays the durable tape
+ *     first, then registers a live subscriber for new events. Frames
+ *     are `data: { seq, event }\n\n`; the dispatcher client dedupes
+ *     on `seq`. If the run already terminated when /subscribe is
+ *     called, replay + close (which is the late-subscriber path that
+ *     keeps refresh-after-finish working).
+ *
+ * ## Status state machine
+ *
+ *     undefined → 'running' → 'finished' | 'failed'
+ *
+ * Retry path: a 'failed' run can be /start-ed again; we clear the
+ * tape first so subscribers don't replay stale events from the
+ * previous attempt. Mirrors the wiki's CompileRunDO.
+ *
+ * ## Factory pattern
+ *
+ * Cloudflare requires the DO class to be exported by name from the
+ * Worker's entrypoint. We expose `createChatTurnDOClass({ buildDeps })`
+ * so apps/api can wire the class with real bindings while tests can
+ * wire it with stubs.
  */
 export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
   buildDeps,
@@ -144,11 +169,27 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
       return new Response('not found', { status: 404 });
     }
 
+    // Called by /start (via state.waitUntil). Spins up runChatTurn
+    // with an `emit` closure that does two things for every event the
+    // runner produces:
+    //   1. Sequences the event and persists it to the DO's durable
+    //      tape (so late /subscribe callers can replay)
+    //   2. Fan-outs to every live SSE subscriber registered on
+    //      this.subscribers
+    //
+    // runChatTurn is the same loop the in-memory dispatcher uses (see
+    // packages/domains/chat/src/application/run-chat-turn.ts) — this
+    // DO just wraps it with sequencing + durability.
     private async run(args: RunChatTurnArgs): Promise<void> {
       const tape: SequencedEvent[] =
         (await this.state.storage.get<SequencedEvent[]>(TAPE_KEY)) ?? [];
       let nextSeq = tape.length > 0 ? (tape[tape.length - 1]?.seq ?? 0) + 1 : 1;
 
+      // The emit callback passed into runChatTurn. Every AnswerEvent
+      // the runner produces (AnswerStarted, WikiPageRetrieved,
+      // AnswerProseDelta, …) flows through here. Order matters: the
+      // tape is the durable source of truth so we write to storage
+      // BEFORE we notify subscribers.
       const emit = async (event: AnswerEvent): Promise<void> => {
         const sequenced: SequencedEvent = { seq: nextSeq++, event };
         tape.push(sequenced);
@@ -156,7 +197,8 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
         // Snapshot subscribers before iteration; mutating the Set
         // mid-iteration loses entries silently. Failed sends drop only
         // that subscriber so a single misbehaving consumer cannot wedge
-        // the loop forever.
+        // the loop forever. New /subscribe arrivals catch up via the
+        // tape replay in fetch() above.
         const snapshot = [...this.subscribers];
         for (const s of snapshot) {
           try {

@@ -1,3 +1,72 @@
+/**
+ * # compileFolder — the wiki build orchestrator
+ *
+ * Owns the entire ingestion-to-wiki pipeline. Called once per CompileRun
+ * (from inside the CompileRunDO) and drives five LLM-backed stages
+ * sequentially. Each stage's output feeds the next; together they turn
+ * a folder of source documents into a typed, cross-linked wiki.
+ *
+ * ## Stages, in order
+ *
+ *   1. **inferSchema** (Sonnet 4.6) — picks PageTypes + Relations from
+ *      the first 10 sources. Under a perspective, names are biased
+ *      toward the lens's vocabulary (Opportunity / Pain / Wedge), not
+ *      the corpus's literal shape (Tool / Topic / Concept). The schema
+ *      cascades into every downstream stage.
+ *
+ *   2. **planCompile** (Haiku 4.5) — for each source, decides which
+ *      PageTypes apply. Under a perspective, assigns MULTIPLE angles
+ *      per source so one source about a Tool also produces Opportunity
+ *      / Pain / Wedge / Risk findings.
+ *
+ *   3. **researchSource** (Haiku 4.5, run sequentially per source) —
+ *      extracts findings: { pageType, title, evidence, byteRange }
+ *      tuples grounded by verbatim quotes from the source. Each
+ *      finding's byteRange becomes a Citation downstream — re-hashed
+ *      at chat time to prevent fabrication.
+ *
+ *   4. **draftPage** (Sonnet 4.6, run in parallel across buckets) —
+ *      groups findings by `(pageType, normalizedTitle)`; each bucket
+ *      becomes one Concept page. The Drafter writes markdown with
+ *      inline citation references. Capped at 24 total drafts with a
+ *      round-robin across PageTypes so no section starves.
+ *
+ *   5. **resolveBacklinks + buildIndexes + narrateIndexes** — scans
+ *      `[[link]]` markers, partitions by relation cardinality, builds
+ *      one Index page per PageType, then gets a Haiku narrator to
+ *      write opinionated thesis + per-section narratives + glossary
+ *      (all under the perspective lens).
+ *
+ * Throughout: the perspective string is threaded into every LLM call
+ * via `withPerspective(SYSTEM, perspective, { stage })` (see
+ * perspective-preamble.ts). When perspective is unset the universal
+ * preamble is a no-op and the pipeline runs in its generic mode.
+ *
+ * ## Event tape
+ *
+ * The orchestrator emits typed `CompileEvent`s via the injected
+ * `deps.emit` callback. The CompileRunDO captures these into a durable
+ * tape so SSE subscribers see live progress AND late subscribers can
+ * replay. Two event kinds:
+ *
+ *   - **Structural** (CompileStarted / SchemaInferred / PageDrafted /
+ *     BacklinkResolved / IndexBuilt / CompileFinished) — drive the
+ *     CompileTheater UI's Sources / Pages / Indexes lanes.
+ *   - **AgentThought** — deterministic narration strings ("Reading 8
+ *     sources…") for the Agents lane. Zero LLM cost.
+ *
+ * ## Consistency model
+ *
+ * Per-source Researcher failures are isolated (allSettled) — a single
+ * bad source emits ResearchFailed but the run continues with the rest.
+ * The Drafter's per-bucket calls are similarly isolated. Only schema
+ * inference and the final indexing pass are fatal-on-throw.
+ *
+ * The CompileFinished cross-context event is published BEFORE marking
+ * the run finished in D1 — failure to publish surfaces as
+ * CompileFailed and the wiki context's downstream consumers never see
+ * a half-baked run.
+ */
 import {
   type Citation,
   type Claim,
@@ -36,11 +105,14 @@ type EnrichedFinding = {
   sourceContentHash: ContentHash;
 };
 
+// Called once per source-text load (inside the Researcher loop below
+// when binding evidence spans into typed Citations).
+//
 // SF11 — content hashes are load-bearing for the verification context's
 // span check. Silently padding zeros to fake a hash on regex mismatch
 // would mean spans pass verification against a synthesized hash that
-// doesn't match the actual source bytes. Throw instead so the orchestrator
-// turns bad upstream data into a CompileFailed event.
+// doesn't match the actual source bytes. Throw instead so the
+// orchestrator turns bad upstream data into a CompileFailed event.
 const ensureContentHash = (raw: string): ContentHash => {
   if (/^[a-z0-9]+:[a-f0-9]+$/.test(raw)) return raw as ContentHash;
   throw new Error(
@@ -48,11 +120,18 @@ const ensureContentHash = (raw: string): ContentHash => {
   );
 };
 
-// Citations carry the hash of the *slice* their byteRange covers, not the
-// whole-source hash — chat's SourceHashVerifier re-hashes `text.slice(start,
-// end)` and compares. Storing the source's whole-file hash here would make
-// every citation tripwire at chat time. Web Crypto is portable across Bun
-// (tests) and workerd (prod).
+// Called once per Drafter-emitted citation (in the per-bucket draft
+// loop below). Each citation in a drafted page references a
+// `(sourceId, spanStart, spanEnd)` triple — we hash THAT slice and
+// store it on the Citation. At chat time, the SourceHashVerifier
+// re-hashes the same slice and rejects on mismatch. That's the
+// fabrication tripwire: a Drafter cannot invent a citation without
+// also inventing byte ranges that survive the re-hash.
+//
+// Citations carry the hash of the SLICE, not the whole-source hash —
+// storing the whole-file hash would make every citation tripwire on
+// any later source edit. Web Crypto is portable across Bun (tests)
+// and workerd (prod).
 const sliceHash = async (text: string, start: number, end: number): Promise<ContentHash> => {
   const slice = text.slice(start, end);
   const bytes = new TextEncoder().encode(slice);
@@ -91,11 +170,18 @@ export async function compileFolder(
       sourceFilenames: sourceList.map((s) => s.filename),
     });
 
-    // Pipeline-narrated checkpoints (`AgentThought`). These are deterministic
-    // template strings — zero LLM cost — that surface in the CompileTheater's
-    // Agents lane so the user sees what the orchestrator is doing right now.
-    // The typed events (CompileStarted / SchemaInferred / PageDrafted / …)
-    // still fire on their own and drive the Sources / Pages lanes.
+    // Pipeline-narrated checkpoints (`AgentThought`). These are
+    // deterministic template strings — zero LLM cost — that surface in
+    // the CompileTheater's Agents lane so the user sees what the
+    // orchestrator is doing right now. Called throughout this function
+    // at every stage transition and inside the Researcher/Drafter
+    // loops; pairs with the typed events (CompileStarted /
+    // SchemaInferred / PageDrafted / …) that drive the Sources / Pages
+    // / Indexes lanes of the CompileTheater UI.
+    //
+    // The `agent` arg is a closed enum of personas the theater renders
+    // with distinct icons / colors — see
+    // `apps/web/src/components/compile-theater/compile-theater.tsx`.
     const thought = (
       agent: 'Compiler' | 'SchemaInferrer' | 'Researcher' | 'Drafter' | 'Linker' | 'IndexBuilder',
       message: string,

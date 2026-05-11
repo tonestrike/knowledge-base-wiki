@@ -1,3 +1,39 @@
+/**
+ * # draftPage — the Drafter stage
+ *
+ * Stage 4 of compileFolder. Called once per `(pageType, normalizedTitle)`
+ * bucket of related Researcher findings. Produces one Concept page:
+ *
+ *     { title, slug, body, claims: [{ paragraphId, claimText, citations }] }
+ *
+ * The body is markdown (~3-6 H2 sections, magazine-quality prose).
+ * Each claim in the body must be paired with a citation pointing back
+ * to a finding by `(sourceId, spanStart, spanEnd)`. The orchestrator
+ * then hashes the source slice and binds the resulting `contentHash`
+ * onto a real Citation entity — the Drafter never sees content hashes.
+ *
+ * ## Why the Drafter doesn't invent contentHashes
+ *
+ * Provenance is owned by the orchestrator. Letting the model emit
+ * hash values would let it pretend a quote came from a source — the
+ * verification tripwire would never catch the lie because the hash
+ * would self-consistently match a quote the model just invented.
+ * Keeping hashes out of the Drafter's schema forces every citation
+ * through the (sourceId, byteRange) → hash pipeline.
+ *
+ * ## Model choice
+ *
+ * Pinned to Sonnet 4.6 because prose quality is the surface a reader
+ * judges first. The other LLM stages can use Haiku; this one cannot.
+ *
+ * ## Perspective enforcement at this stage
+ *
+ * The draft-stage clause (perspective-preamble.ts
+ * STAGE_DIRECTIVES.draft) demands that the page opens with the
+ * IMPLICATION under the perspective — not "background context." If
+ * the model produces prose that could appear in any generic
+ * encyclopedia, that's a failure mode the clause names explicitly.
+ */
 import {
   type ContentHash,
   type SourceId,
