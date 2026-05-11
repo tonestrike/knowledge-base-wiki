@@ -147,6 +147,31 @@ export async function runChatTurn(
     });
     const history = buildHistory(prior.items.filter((t) => t.id !== args.turnId));
 
+    // Fetch the wiki's perspective + section names and pass them to the
+    // synth. Without this, the synth can hallucinate "this wiki doesn't
+    // cover X" when the user's question uses different vocabulary than
+    // the page bodies (which often inherit the source documents'
+    // language). The taxonomy + perspective tells the synth the framing
+    // is deliberate so it uses the findings as-written.
+    let wikiContext:
+      | { perspective?: string; pageTypes?: ReadonlyArray<string>; folderName?: string }
+      | undefined;
+    try {
+      const meta = await deps.wikiReader.getWikiMeta(args.wikiId);
+      if (meta) {
+        wikiContext = {
+          ...(meta.perspective ? { perspective: meta.perspective } : {}),
+          ...(meta.pageTypes.length > 0 ? { pageTypes: meta.pageTypes.map((pt) => pt.name) } : {}),
+          ...(meta.folderName ? { folderName: meta.folderName } : {}),
+        };
+      }
+    } catch (metaErr) {
+      console.warn(
+        '[chat.run-turn] getWikiMeta failed; synth runs without taxonomy hint',
+        metaErr instanceof Error ? metaErr.message : metaErr,
+      );
+    }
+
     await emit({
       kind: 'SynthesisStarted',
       turnId: args.turnId,
@@ -162,6 +187,7 @@ export async function runChatTurn(
         findings,
         ...(suggestionPages !== undefined ? { suggestionPages } : {}),
         ...(history.length > 0 ? { history } : {}),
+        ...(wikiContext ? { wikiContext } : {}),
       },
     )) {
       // Skip the use-case's own AnswerStarted — already emitted at top.

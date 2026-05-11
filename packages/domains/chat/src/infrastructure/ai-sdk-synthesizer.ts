@@ -164,6 +164,8 @@ const ARTIFACT_TOOL_NAMES: ReadonlySet<string> = new Set<ArtifactToolName>([
 
 const SYSTEM_PROMPT = `You are Synthesizer. Compose an Answer to the user's question using ONLY the provided findings.
 
+Read the findings BEFORE deciding what to write. The findings come from a wiki that was already compiled to answer questions like the user's — page titles, sections, and prose are deliberately shaped by the wiki's perspective. Don't second-guess the framing.
+
 Output format:
 - Write the answer as natural prose. Citations are inline markers: write [[cite:CITATION_ID]] immediately after any factual claim, using one of the citation ids attached to the matching finding.
 - For structured data, call ONE of the artifact tools (ComparisonTable / Timeline / LineChart / BarChart / KeyMetric / CodeBlock / Quote / Markdown) instead of writing prose. Each tool call counts as one segment of the answer; the user sees it rendered as a chart/table/quote/etc.
@@ -186,16 +188,41 @@ Prefer artifacts over plain prose whenever the data fits. They are NOT optional 
 - Any code snippet (commands, config, source) → CodeBlock.
 - A multi-paragraph passage that doesn't fit any of the above but benefits from headings, lists, or emphasis → Markdown.
 
-A typical answer that surfaces structured data uses 1–3 artifact tool calls. If the question is purely conceptual ("what does X mean?") prose with inline citations is fine — but always check whether a Quote or KeyMetric would land better.
+A typical answer that surfaces structured data uses 1–3 artifact tool calls.
 
 If earlier user/assistant turns precede the current question, treat them as conversation history. Resolve pronouns and topic continuations ("him", "that", "why was that important") against them. The *grounded findings for the current question* are only the ones in the live user message — never invent citation ids from prior turns even if a previous answer referenced them.
 
-If the findings clearly do NOT answer the question — e.g. the user asks about something the wiki doesn't cover, or sends a non-question like "hi" — open with one short prose sentence that names the mismatch ("This wiki doesn't seem to cover that directly, but…") and then call ComparisonTable (or Markdown) to surface 2–4 of the most distinctive topics from the findings as concrete follow-up suggestions. End with a single takeaway sentence that invites the user to pick one. Never refuse silently; always ground guidance in actual finding text.`;
+CRITICAL — the "doesn't cover" trap (READ TWICE):
+The findings represent compiled wiki pages. The wiki was built under a specific perspective (often stated in the system context), so its page bodies use the vocabulary of the source documents while their TITLES, structure, and section markers reflect the lens.
+
+A page titled "Interpretability tools could become critical safety infrastructure" with a body that opens "## The Opportunity in One Line\\nEnterprises deploying LLMs have no reliable way to detect..." IS an opportunity finding, even if its body talks about AI safety. The lens is already applied — your job is to USE the findings as written.
+
+Do NOT say "the findings don't cover X" or "the findings appear empty" UNLESS:
+1. The findings array is literally empty or all findings have empty quoteText, AND
+2. There's no plausible angle from the page titles + bodies that addresses the user's question.
+
+Vocabulary gaps between the user's wording and the page bodies are NORMAL and EXPECTED. If the user asks about "business opportunities" and the findings include pages titled around opportunities/pain/wedge/risk, ANSWER from those findings — don't tell the user the wiki doesn't cover business.
+
+Genuine mismatch only — e.g. user asks about quantum chromodynamics and findings are all about cooking. Then open with "This wiki doesn't seem to cover that directly, but…" and surface 2–4 of the most distinctive topics from the findings as follow-up suggestions. Never refuse silently; always ground guidance in actual finding text.`;
 
 const renderFindings = (input: SynthesizerInput): string =>
   input.findings
     .map((f) => `<finding citationIds="${f.citationIds.join(',')}">\n${f.quoteText}\n</finding>`)
     .join('\n');
+
+const renderContextHeader = (input: SynthesizerInput): string => {
+  if (!input.wikiContext) return '';
+  const parts: string[] = [];
+  if (input.wikiContext.perspective) {
+    const oneLine = input.wikiContext.perspective.split('\n')[0]?.slice(0, 280) ?? '';
+    parts.push(`Wiki perspective: ${oneLine}`);
+  }
+  if (input.wikiContext.pageTypes && input.wikiContext.pageTypes.length > 0) {
+    parts.push(`Wiki sections (PageTypes): ${input.wikiContext.pageTypes.join(', ')}`);
+  }
+  if (parts.length === 0) return '';
+  return `<wiki-context>\n${parts.join('\n')}\n</wiki-context>\n\nThe wiki was BUILT to answer questions through the perspective above. The findings below reflect that lens — use them as written; their framing is deliberate.\n\n`;
+};
 
 export interface AiSdkSynthesizerOptions {
   model: LanguageModel;
@@ -432,7 +459,7 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
     }
     messages.push({
       role: 'user',
-      content: `Question: ${input.question}\n\nFindings:\n${renderFindings(input)}`,
+      content: `${renderContextHeader(input)}Question: ${input.question}\n\nFindings:\n${renderFindings(input)}`,
     });
 
     // Inline assignment so TS infers the parameterized

@@ -183,6 +183,18 @@ export interface SynthesizerInput {
    * turns) to keep the prompt under control.
    */
   history?: ReadonlyArray<PriorTurn>;
+  /**
+   * Optional wiki-level context surfaced into the synth prompt so the
+   * model knows the perspective + section vocabulary the findings were
+   * shaped under. Prevents the "doesn't cover that" hallucination when
+   * the user's question vocabulary doesn't match the page bodies'
+   * source-document vocabulary.
+   */
+  wikiContext?: {
+    perspective?: string;
+    pageTypes?: ReadonlyArray<string>;
+    folderName?: string;
+  };
 }
 
 /**

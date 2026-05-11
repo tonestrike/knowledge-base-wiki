@@ -29,6 +29,9 @@ export interface SynthesizeAnswerInput extends SynthesizerInput {
    * here's what this wiki covers" response — never a hand-written string.
    */
   suggestionPages?: ReadonlyArray<WikiPageSummary>;
+  // `wikiContext` is inherited from SynthesizerInput; documented here as
+  // the runner is expected to pass it through so the synthesizer knows
+  // the wiki's perspective + section vocabulary.
 }
 
 /**
@@ -212,6 +215,7 @@ export async function* synthesizeAnswer(
       question: augmentedQuestion,
       findings: synthesizerFindings,
       ...(input.history !== undefined ? { history: input.history } : {}),
+      ...(input.wikiContext !== undefined ? { wikiContext: input.wikiContext } : {}),
     })) {
       if (evt.kind === 'proseDelta') {
         yield {
