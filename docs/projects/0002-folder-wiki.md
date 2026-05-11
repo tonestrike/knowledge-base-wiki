@@ -269,3 +269,21 @@ The 13 slices are organized contract-first for maximum parallelism. Phase 0 is g
 **Time framing.** Per project memory `feedback-time-framing.md`: do not size in weeks/days. Ambition over hours; the 13 slices fit the day's wallclock when run with the recommended parallelism.
 
 **Forcing function.** Every architectural decision is graded by whether it makes one of the three Demo Moments more convincing as a client pitch (per `take-home-direction.md` memory). If a slice's "Done when" doesn't connect to a Moment, demote it.
+
+## Phase 8 surface — outstanding work after Phase 5 chat smoke test
+
+Surfaced by the user while smoke-testing chat against a freshly compiled wiki. Phase 5 chat ships, but the wiki was being treated as a search target instead of as the typed table-of-contents over the source corpus. These items move the product from "usable end-to-end" to "feels like a real wiki product" — they all serve Demo Moment 2 (cross-doc Q&A with span-jumping citations).
+
+1. **Wiki-as-typed-guide, not search-target.** The wiki is a typed ToC over a corpus of source PDFs/text. Chat must use the wiki to TRAVERSE to underlying source slices — not just BM25 the wiki page bodies. Findings handed to the synthesizer must include the actual source-slice text, cited via wiki Citations (so the verifier still has a span to check). Code paths: `apps/api/src/build-chat-context.ts`, `packages/domains/chat/src/application/research-question.ts`, `packages/domains/chat/src/application/synthesize-answer.ts`.
+
+2. **Agentic chat search loop.** The chat synth should "really try hard" — not give up after one BM25 round. Expose tools to the LLM so it can iteratively explore: `searchWiki(query)`, `expandQuery(question)`, `getPage(id)`, `readSourceSlice(citationId)`. Loop until enough findings are collected or a budget cap is hit. Today's single-pass BM25 + suggestion fallback is the floor, not the ceiling.
+
+3. **IndexPages = traversal aids.** Each IndexPage should have a body: PageType description + per-entry teaser using the first claim text from each ConceptPage. They're a real wiki ToC for that PageType, not a flat link list. Wire into the wiki compile path (`@domain/wiki` IndexBuilder).
+
+4. **Wiki overview UI = file-structure.** `/wiki/:id` should look like a real wiki: left sidebar with hierarchical tree (PageType → IndexPage → ConceptPages), main pane shows the overview / selected page. Not a flat grid. Code paths: `apps/web/src/routes/` wiki routes.
+
+5. **Delete-wiki capability.** Required so users can re-compile against the same folder — `UNIQUE(wikis.folder_id)` blocks otherwise and users get stuck on a stale compile. Add a delete action in the wiki UI; cascade through `wiki_pages`, `claims`, `citations`, `compile_runs`.
+
+6. **Citation slice-hash invariant.** `Citation.span.contentHash` MUST be `sha256(source.text.slice(start, end))` (the byte-range slice), NOT the source's whole-file hash. The chat `SourceHashVerifier` enforces this. Both compile + seed paths (`apps/api/src/seed-wiki.ts`) must compute it correctly. Already partially fixed in the post-Phase-5 chat smoke pass; keep as a forward-going invariant — any new path that mints citations must hash the slice, not the file.
+
+Self-contained brief and code paths in `wiki-product-priorities.md` (project memory).
