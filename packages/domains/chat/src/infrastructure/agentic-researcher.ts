@@ -1,5 +1,5 @@
 import type { WikiPageId } from '@package/contracts/shared';
-import { type Tracer, noOpTracer, previewText, withSpan } from '@package/shared-kernel';
+import { type Tracer, noOpTracer, startLlmCallSpan, withSpan } from '@package/shared-kernel';
 import { type LanguageModel, stepCountIs, streamText, tool } from 'ai';
 import { z } from 'zod';
 import type {
@@ -413,16 +413,13 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
 
     // Span over the whole agent loop. Token usage + final visited-page
     // count attach in the finally block.
-    const llmSpan = tracer.startSpan('llm.call', {
-      'gen_ai.system': 'openrouter',
-      'gen_ai.request.model': opts.modelName ?? 'unknown',
-      'gen_ai.operation.name': 'researcher.loop',
-      provider: 'openrouter',
+    const llmCall = startLlmCallSpan(tracer, {
+      system: 'openrouter',
       model: opts.modelName ?? 'unknown',
-      'chat.wiki_id': input.wikiId,
-      'prompt.preview': previewText(input.question) ?? '',
+      operation: 'researcher.loop',
+      prompt: input.question,
+      extra: { 'chat.wiki_id': input.wikiId },
     });
-    const callStart = Date.now();
     // Inline the streamText() call so TS infers the fully-parameterized
     // result type (with our tool set baked in) — see the synth adapter
     // for the same reason this is inline-assigned.
@@ -444,9 +441,8 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       for await (const _part of result.fullStream) {
         // intentionally consumed for side effects
       }
-      llmSpan.setStatus('ok');
     } catch (err) {
-      llmSpan.recordException(err);
+      llmCall.span.recordException(err);
       const id = errorId();
       console.error('[chat.agentic-researcher] loop failed', {
         errorId: id,
@@ -464,20 +460,21 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       // worse than a partial result.
     } finally {
       clearTimeout(timer);
+      let inputTokens = 0;
+      let outputTokens = 0;
       try {
         const usage = await result.usage;
-        llmSpan.setAttributes({
-          'gen_ai.usage.input_tokens': usage?.inputTokens ?? 0,
-          'gen_ai.usage.output_tokens': usage?.outputTokens ?? 0,
-        });
+        inputTokens = usage?.inputTokens ?? 0;
+        outputTokens = usage?.outputTokens ?? 0;
       } catch {
         /* usage unavailable */
       }
-      llmSpan.setAttributes({
-        'chat.visited_pages': visited.size,
-        latency_ms: Date.now() - callStart,
+      llmCall.recordSuccess({
+        inputTokens,
+        outputTokens,
+        extra: { 'chat.visited_pages': visited.size },
       });
-      llmSpan.end();
+      llmCall.span.end();
     }
 
     const pages = [...visited.values()];
