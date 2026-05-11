@@ -232,14 +232,16 @@ export function IngestRoute() {
 }
 
 /**
- * Perspective picker: preset chips + an editable textarea preloaded with
- * the chosen preset's full system-prompt addition. The user can tweak
- * the prompt before kicking off compile so they see EXACTLY what the
- * model will be told.
+ * Perspective picker. Two columns on desktop: a tidy vertical radio-list
+ * of presets on the left, the editable prompt textarea on the right.
+ * Each preset row is one line — title + one-line subtitle, selected
+ * indicator dot. Clicking a row swaps the textarea body so the user
+ * sees EXACTLY what the model will be told and can edit before
+ * kicking off compile.
  *
- * The selected/edited text is what the parent sends as
- * `StartCompileInput.perspective`. Empty text (or the "Generic" preset)
- * runs the compile with no perspective — the pre-perspective behavior.
+ * Empty textarea = no perspective (the "Skip" button is a shortcut
+ * that does the same thing — clear + confirm). "Custom" preset is the
+ * intentional empty-canvas starting point.
  */
 function PerspectivePicker({
   selectedId,
@@ -259,58 +261,79 @@ function PerspectivePicker({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className="space-y-5 rounded-lg border border-border bg-card/40 p-6"
+      className="space-y-5"
     >
-      <div className="space-y-2">
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          Presets
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {PERSPECTIVE_PRESETS.map((p) => {
-            const active = p.id === selectedId;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => onSelect(p)}
-                className={`flex max-w-xs flex-col gap-0.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                  active
-                    ? 'border-accent bg-accent/10 text-foreground'
-                    : 'border-border bg-card/50 text-muted-foreground hover:border-accent/40 hover:bg-card hover:text-foreground'
-                }`}
-                aria-pressed={active}
-              >
-                <span className="font-medium">{p.label}</span>
-                <span className="text-[11px] text-muted-foreground">{p.subtitle}</span>
-              </button>
-            );
-          })}
+      <div className="grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+        {/* Preset list. Vertical, single column, unified border so the
+            rows read as one connected control instead of five floating
+            cards. Selected row gets a soft accent fill; no heavy ring. */}
+        <div className="space-y-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            Presets
+          </p>
+          <ul className="overflow-hidden rounded-md border border-border bg-card/40">
+            {PERSPECTIVE_PRESETS.map((p, i) => {
+              const active = p.id === selectedId;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(p)}
+                    aria-pressed={active}
+                    className={`flex w-full items-start gap-3 px-3.5 py-2.5 text-left transition-colors ${
+                      i > 0 ? 'border-t border-border/70' : ''
+                    } ${
+                      active
+                        ? 'bg-accent/10 text-foreground'
+                        : 'text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      aria-hidden
+                      className={`mt-1.5 size-1.5 shrink-0 rounded-full transition-colors ${
+                        active ? 'bg-accent' : 'bg-muted-foreground/30'
+                      }`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium leading-snug">{p.label}</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                        {p.subtitle}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {/* Textarea column. Same border + bg treatment as the preset
+            list so the two read as paired panels. Pre-wrap font-mono
+            so multi-line prompts render legibly. */}
+        <div className="space-y-2">
+          <label
+            htmlFor="perspective-prompt"
+            className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            Prompt — edit freely before compiling
+          </label>
+          <textarea
+            id="perspective-prompt"
+            value={text}
+            onChange={(e) => onTextChange(e.target.value)}
+            rows={14}
+            placeholder="Leave blank to run a generic compile. Or pick a preset on the left and tune it here."
+            className="block w-full resize-y rounded-md border border-border bg-card/40 px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-accent/60 focus:bg-background"
+          />
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Threaded into every compile prompt (schema inference, source extraction, page drafting,
+            section narration) as a "Perspective:" preamble. Stored on the wiki so you can see the
+            lens it was built under.
+          </p>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <label
-          htmlFor="perspective-prompt"
-          className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground"
-        >
-          Prompt — edit freely before compiling
-        </label>
-        <textarea
-          id="perspective-prompt"
-          value={text}
-          onChange={(e) => onTextChange(e.target.value)}
-          rows={12}
-          placeholder="Leave blank to run a generic compile."
-          className="block w-full rounded-md border border-border bg-background px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-accent/60"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          This text is threaded into every compile prompt (schema inference, source extraction, page
-          drafting, section narration) as a "Perspective:" preamble. Stored on the wiki so you can
-          see the lens it was built under.
-        </p>
-      </div>
-
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex items-center justify-end gap-3 border-t border-border/60 pt-4">
         <button
           type="button"
           onClick={() => {

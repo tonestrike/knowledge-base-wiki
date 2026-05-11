@@ -1,6 +1,6 @@
 import type { WikiSchema } from '@package/contracts/shared';
 import { z } from 'zod';
-import { withPerspective } from './perspective-preamble.ts';
+import { perspectiveUserHeader, withPerspective } from './perspective-preamble.ts';
 import type { LlmClient } from './ports.ts';
 
 // Narrator — runs once per CompileRun, after Drafter, before IndexBuilder.
@@ -106,8 +106,8 @@ You are NOT writing about page types in general — you are writing about page t
   const folderLine = input.folderName ? `Folder: ${input.folderName}\n\n` : '';
   const { result } = await deps.llm.generateObject({
     model: NARRATOR_MODEL,
-    system: withPerspective(SYSTEM, input.perspective),
-    prompt: `${folderLine}WikiSchema sections (PageType, description, sample concept entries):\n\n${sections}`,
+    system: withPerspective(SYSTEM, input.perspective, { stage: 'narrate' }),
+    prompt: `${perspectiveUserHeader(input.perspective)}${folderLine}WikiSchema sections (PageType, description, sample concept entries):\n\n${sections}`,
     schema: NarrateOutput,
     schemaName: 'WikiNarrative',
     schemaDescription:

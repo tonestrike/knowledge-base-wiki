@@ -107,13 +107,17 @@ export function ChatDock() {
   return (
     <aside
       aria-hidden={!open}
-      // Position relative so the absolute drag handle anchors inside.
-      // `shrink-0` so flex doesn't squeeze the dock when the content
-      // column has long text. `relative` for the drag handle. The width
-      // is set via inline style; transition lives in className so it
-      // animates open/close (and we suppress it during drag via the
-      // inline `transition` override).
-      className="relative flex shrink-0 flex-col overflow-hidden border-l border-border bg-card transition-[width] duration-200 ease-out"
+      // Sticky + viewport-tall so the dock always fills the browser
+      // window and stays in view as the user scrolls the wiki content
+      // beside it. Prior version flowed inline and got pushed below
+      // the long wiki page; on tall pages the composer ended up off
+      // the bottom of the screen.
+      //
+      // `relative` for the drag handle anchor. `shrink-0` so flex
+      // doesn't squeeze the dock. The width is inline (drag is
+      // continuous); the CSS transition handles open/close, suppressed
+      // during drag via the inline `transition` override.
+      className="sticky top-0 flex h-screen shrink-0 flex-col overflow-hidden border-l border-border bg-card transition-[width] duration-200 ease-out"
       style={{
         width: `${renderedWidth}px`,
         ...(isDragging ? { transition: 'none' } : {}),

@@ -5,7 +5,7 @@ import {
   WikiSchema,
 } from '@package/contracts/shared';
 import { z } from 'zod';
-import { withPerspective } from './perspective-preamble.ts';
+import { perspectiveUserHeader, withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // SchemaInferrer model — quality matters; one inference per CompileRun.
@@ -76,8 +76,8 @@ export async function inferSchema(
 
   const { result } = await deps.llm.generateObject({
     model: SCHEMA_MODEL,
-    system: withPerspective(SYSTEM, input.perspective),
-    prompt: sample,
+    system: withPerspective(SYSTEM, input.perspective, { stage: 'schema' }),
+    prompt: `${perspectiveUserHeader(input.perspective)}${sample}`,
     schema: InferOutput,
     schemaName: 'WikiSchemaWithReason',
     schemaDescription: 'A typed schema for the folder plus a one-sentence reason.',

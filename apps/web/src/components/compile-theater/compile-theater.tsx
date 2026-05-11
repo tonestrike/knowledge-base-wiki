@@ -603,13 +603,23 @@ function DraftingConstellation({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="relative flex w-full items-center justify-center py-8"
+      // Caption-above-grid layout. Prior version absolute-positioned the
+      // caption at the bottom; as pages streamed in and the grid grew
+      // taller, the caption visibly jumped each row. Stacking the
+      // caption ABOVE the grid in normal flow pins it to a stable slot
+      // — the grid expands downward without moving the label.
+      className="relative flex w-full flex-col items-center gap-4 py-8"
     >
-      <motion.div
-        className="absolute h-40 w-40 rounded-full bg-accent/10 blur-3xl"
-        animate={reduce ? undefined : { scale: [1, 1.2, 1], opacity: [0.4, 0.7, 0.4] }}
-        transition={{ repeat: Number.POSITIVE_INFINITY, duration: 3, ease: 'easeInOut' }}
-      />
+      <motion.div aria-hidden className="-z-10 absolute inset-0 flex items-center justify-center">
+        <motion.div
+          className="h-40 w-40 rounded-full bg-accent/10 blur-3xl"
+          animate={reduce ? undefined : { scale: [1, 1.2, 1], opacity: [0.4, 0.7, 0.4] }}
+          transition={{ repeat: Number.POSITIVE_INFINITY, duration: 3, ease: 'easeInOut' }}
+        />
+      </motion.div>
+      <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+        Crystallizing pages from the corpus…
+      </p>
       <div className="relative grid grid-cols-3 gap-3">
         <AnimatePresence>
           {drafted.slice(-9).map((e, i) => (
@@ -635,9 +645,6 @@ function DraftingConstellation({
           ))}
         </AnimatePresence>
       </div>
-      <p className="absolute bottom-0 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-        Crystallizing pages from the corpus…
-      </p>
     </motion.div>
   );
 }

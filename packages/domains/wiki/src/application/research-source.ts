@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { withPerspective } from './perspective-preamble.ts';
+import { perspectiveUserHeader, withPerspective } from './perspective-preamble.ts';
 import type { ExtractedSourceText, LlmClient } from './ports.ts';
 
 // Researcher — high volume, runs N times per CompileRun (one per source).
@@ -57,12 +57,12 @@ export async function researchSource(
   const known = new Set(input.pageTypes);
   const { result } = await deps.llm.generateObject({
     model: RESEARCHER_MODEL,
-    system: withPerspective(SYSTEM, input.perspective),
+    system: withPerspective(SYSTEM, input.perspective, { stage: 'research' }),
     // Trim source text to first 60K chars (~20 pages) so Sonnet can pull
     // findings from a substantial chunk while leaving headroom for 20 JSON
     // findings. Earlier 10K cap was too small for 500-page legal docs;
     // 60K hits the sweet spot for the demo dataset.
-    prompt: `PageTypes: ${input.pageTypes.join(', ')}\n\n<source filename="${input.source.filename}">\n${input.source.text.slice(0, 60000)}\n</source>`,
+    prompt: `${perspectiveUserHeader(input.perspective)}PageTypes: ${input.pageTypes.join(', ')}\n\n<source filename="${input.source.filename}">\n${input.source.text.slice(0, 60000)}\n</source>`,
     schema: ResearchOutput,
     schemaName: 'ResearchOutput',
     schemaDescription: 'Typed findings extracted from one source.',
