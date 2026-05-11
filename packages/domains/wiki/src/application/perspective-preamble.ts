@@ -32,25 +32,56 @@ Specifically:
   explain how the chosen PageTypes serve it. One sentence, no filler.`,
 
   plan: `STAGE: Planner
-You are deciding which PageTypes apply to each source. Prioritize PageTypes
-that the perspective makes load-bearing; drop PageTypes that the perspective
-would not surface even if the source technically contains evidence for them.
-A source might contain background content that "matches" a PageType under a
-literal read — skip it if the PERSPECTIVE would not act on it.`,
+You are deciding which PageTypes apply to each source. CRITICAL — when a
+perspective is set, almost every source supports MULTIPLE perspective-shaped
+PageTypes from different angles, NOT one literal PageType. Failing to
+recognize this is the most common way perspective compiles produce empty
+sections.
+
+Rules:
+- For every source you keep, assign 3+ PageTypes when the schema has 4+,
+  and ALL PageTypes when the schema has 5 or fewer. The perspective makes
+  multi-angle coverage the default, not the exception.
+- "Source X is literally about a Tool" is NOT a reason to assign only the
+  Tool PageType under a business-opportunities perspective. That same
+  source ALSO implies Opportunity (gap if the tool is weak), Pain (what
+  the tool solves and how much it costs), Wedge (why now), Customer
+  (who's buying), Risk (what could undermine it). Assign all the angles
+  a perspective-holder would extract.
+- Only drop a source entirely if it has zero perspective-holder value at
+  all — not because its literal topic doesn't match a PageType name.
+- The pageTypes-per-source cap is 6; aim for the cap when the schema
+  supports it.`,
 
   research: `STAGE: Researcher
-You are extracting findings from raw source text. The PERSPECTIVE is the
-filter: a finding is worth extracting ONLY if a perspective-holder would
-ACT on it (open a deal, write a scene, revisit a decision, cite a claim).
-- Skip "background context" findings — every finding must produce a TAKEAWAY
-  under the perspective.
-- Lift verbatim quotes that the perspective makes evidentiary. Paraphrase
-  is a failure mode here; the chat layer re-displays these quotes to users
-  who clicked through the citation.
-- Title each finding the way a perspective-holder would refer to it. Generic
-  noun-phrase titles ("Validation sets purpose") are wrong when the
-  perspective demands a finding-shaped title ("ML practitioners overspend on
-  validation tooling because purpose is muddied").`,
+You are extracting findings from raw source text. The Planner already
+filtered which PageTypes apply to this source — don't second-guess that.
+For EACH assigned PageType, you MUST produce at least 1 finding (ideally
+2-3) by reading the source through that PageType's angle under the
+PERSPECTIVE.
+
+This means REINTERPRETING the same source content multiple ways:
+- A source describing one generative-video product under a business-
+  opportunities perspective produces a Tool finding ("this product
+  exists, does X"), a Pain finding ("creators currently use 3+ tools to
+  cover what it bundles, paying ~$Y/mo each"), an Opportunity finding
+  ("integrated video AI is fragmented — consolidator opportunity"),
+  a Wedge finding ("compute cost dropping makes pricing pressure
+  inevitable"), etc. SAME SOURCE, DIFFERENT ANGLES.
+- If a PageType seems hard to find for a given source, REREAD the source
+  asking specifically "what would a perspective-holder extract here as
+  a {PageType}?" Don't give up after one pass.
+
+Findings rules:
+- Lift verbatim quotes (the evidence field). Paraphrase is a failure
+  mode — the chat layer re-displays these to users clicking citations.
+- Title each finding the way a perspective-holder would refer to it.
+  Generic noun-phrase titles ("Validation sets purpose") are wrong;
+  finding-shaped titles ("ML teams overspend on validation tooling
+  because purpose is muddied") are right.
+- Every PageType assigned by the Planner must appear in your findings
+  array AT LEAST ONCE. Returning findings for only one of three assigned
+  PageTypes is a failure.`,
 
   draft: `STAGE: Drafter
 You are writing the page body. Open with the IMPLICATION under the
