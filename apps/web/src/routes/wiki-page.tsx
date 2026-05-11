@@ -4,10 +4,11 @@ import { AppShell } from '../components/app-shell.tsx';
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
 import { WikiPageView } from '../components/wiki-page/wiki-page.tsx';
+import { WikiTreeSidebar } from '../components/wiki/wiki-tree-sidebar.tsx';
 import { orpc } from '../lib/orpc.ts';
 
 export function WikiPageRoute() {
-  const { pageId = '' } = useParams();
+  const { wikiId = '', pageId = '' } = useParams();
   const page = useQuery({
     ...orpc.wiki.getPage.queryOptions({ input: { id: pageId } }),
     enabled: !!pageId,
@@ -16,27 +17,38 @@ export function WikiPageRoute() {
   if (page.isPending) {
     return (
       <AppShell>
-        <main className="mx-auto max-w-6xl px-6 py-12">
-          <LoadingState rows={6} />
-        </main>
+        <div className="flex">
+          <WikiTreeSidebar wikiId={wikiId} />
+          <main className="min-w-0 flex-1 px-6 py-12">
+            <LoadingState rows={6} />
+          </main>
+        </div>
       </AppShell>
     );
   }
   if (page.isError || !page.data) {
     return (
       <AppShell>
-        <main className="mx-auto max-w-6xl px-6 py-12">
-          <ErrorState
-            message={(page.error as Error | null)?.message ?? 'Failed to load page.'}
-            onRetry={() => page.refetch()}
-          />
-        </main>
+        <div className="flex">
+          <WikiTreeSidebar wikiId={wikiId} />
+          <main className="min-w-0 flex-1 px-6 py-12">
+            <ErrorState
+              message={(page.error as Error | null)?.message ?? 'Failed to load page.'}
+              onRetry={() => page.refetch()}
+            />
+          </main>
+        </div>
       </AppShell>
     );
   }
   return (
     <AppShell trail={[{ label: page.data.title }]}>
-      <WikiPageView page={page.data} />
+      <div className="flex">
+        <WikiTreeSidebar wikiId={wikiId} />
+        <div className="min-w-0 flex-1">
+          <WikiPageView page={page.data} />
+        </div>
+      </div>
     </AppShell>
   );
 }
