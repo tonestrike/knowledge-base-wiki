@@ -53,7 +53,7 @@ export function AppShell({ children, trail, wikiId: wikiIdOverride }: AppShellPr
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border/60 bg-background/80 backdrop-blur-sm supports-backdrop-filter:bg-background/60">
+      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur-sm supports-backdrop-filter:bg-background/70">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-3">
           <Link
             to="/"

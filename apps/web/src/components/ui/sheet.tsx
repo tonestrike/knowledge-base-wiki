@@ -58,7 +58,7 @@ export const SheetContent = forwardRef<
     <SheetOverlay />
     <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
       {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2">
+      <SheetPrimitive.Close className="absolute right-3 top-3 z-50 rounded-md border border-border/40 bg-background/80 p-1.5 text-muted-foreground backdrop-blur transition-colors hover:border-border hover:bg-card hover:text-foreground focus:outline-hidden focus:ring-2 focus:ring-accent">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </SheetPrimitive.Close>
