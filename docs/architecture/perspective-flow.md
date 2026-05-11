@@ -8,17 +8,17 @@ during the compile, with file:line references.
 
 ```mermaid
 flowchart TD
-    UX["User's textarea<br/>(ingest.tsx)"] --> Contract["StartCompileInput.perspective<br/>(contracts/wiki/compile.ts)"]
-    Contract --> Handler["startCompile handler<br/>(wiki/interface/index.ts)"]
-    Handler --> Client["createCfCompileRunDispatcher<br/>(wiki/infrastructure/cf-compile-run-dispatcher.ts)"]
-    Client -->|POST /start| DO["CompileRunDO.fetch<br/>(wiki/infrastructure/durable_objects/compile-run-do.ts)"]
-    DO --> Run["compileFolder({ perspective })<br/>(wiki/application/compile-folder.ts)"]
+    UX["User's textarea (ingest.tsx)"] --> Contract["StartCompileInput.perspective (contracts/wiki/compile.ts)"]
+    Contract --> Handler["startCompile handler (wiki/interface/index.ts)"]
+    Handler --> Client["createCfCompileRunDispatcher (wiki/infrastructure)"]
+    Client -->|"POST /start"| DO["CompileRunDO.fetch (durable_objects/compile-run-do.ts)"]
+    DO --> Run["compileFolder with perspective (wiki/application/compile-folder.ts)"]
 
-    Run --> Stage1["inferSchema<br/>{ stage: 'schema' }"]
-    Run --> Stage2["planCompile<br/>{ stage: 'plan' }"]
-    Run --> Stage3["researchSource (per source)<br/>{ stage: 'research' }"]
-    Run --> Stage4["draftPage (per bucket)<br/>{ stage: 'draft' }"]
-    Run --> Stage5["narrateIndexes<br/>{ stage: 'narrate' }"]
+    Run --> Stage1["inferSchema — stage: schema"]
+    Run --> Stage2["planCompile — stage: plan"]
+    Run --> Stage3["researchSource per source — stage: research"]
+    Run --> Stage4["draftPage per bucket — stage: draft"]
+    Run --> Stage5["narrateIndexes — stage: narrate"]
 
     Stage1 --> Helper
     Stage2 --> Helper
@@ -26,10 +26,10 @@ flowchart TD
     Stage4 --> Helper
     Stage5 --> Helper
 
-    Helper["withPerspective(SYSTEM, perspective, { stage })<br/>(wiki/application/perspective-preamble.ts)"] --> Prompt["LLM gets:<br/>HARD-CONSTRAINT preamble<br/>+ universal rules<br/>+ stage-specific clause<br/>+ user-message reminder"]
+    Helper["withPerspective SYSTEM perspective stage (wiki/application/perspective-preamble.ts)"] --> Prompt["LLM gets: HARD-CONSTRAINT preamble, universal rules, stage clause, user-message reminder"]
 
-    Prompt --> Output["Model output<br/>(PageTypes / findings / page bodies / narration)"]
-    Output --> Persist["wikis.perspective stored in D1<br/>(wiki/infrastructure/d1-wiki-repo.ts<br/>+ migrations/002_perspective.sql)"]
+    Prompt --> Output["Model output: PageTypes, findings, page bodies, narration"]
+    Output --> Persist["wikis.perspective stored in D1 (d1-wiki-repo.ts + migrations/002_perspective.sql)"]
 
     classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
     classDef stage fill:#2a1f3d,stroke:#a878d8,color:#fff;
@@ -43,19 +43,19 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Q["User question<br/>chat.ask"] --> Turn["runChatTurn<br/>(chat/application/run-chat-turn.ts)"]
-    Turn --> Meta["wikiReader.getWikiMeta(wikiId)<br/>returns { perspective, pageTypes, folderName }"]
-    Meta --> Agent["Agentic researcher<br/>(agentic-researcher.ts)"]
-    Meta --> Synth["Synthesizer<br/>(ai-sdk-synthesizer.ts)"]
+    Q["User question via chat.ask"] --> Turn["runChatTurn (chat/application/run-chat-turn.ts)"]
+    Turn --> Meta["wikiReader.getWikiMeta returns perspective, pageTypes, folderName"]
+    Meta --> Agent["Agentic researcher (agentic-researcher.ts)"]
+    Meta --> Synth["Synthesizer (ai-sdk-synthesizer.ts)"]
 
-    Agent --> AgentSys["System prompt now includes<br/>'Wiki taxonomy' block:<br/>– PageType list<br/>– perspective (first line)"]
-    AgentSys --> Tools["Agent uses:<br/>listPagesByType / searchWiki /<br/>searchSources / readWikiPage"]
+    Agent --> AgentSys["System prompt now includes Wiki taxonomy block: PageType list + perspective first line"]
+    AgentSys --> Tools["Agent uses listPagesByType / searchWiki / searchSources / readWikiPage"]
 
-    Tools --> Findings["Pages → findings<br/>(quoteText = full page body)"]
+    Tools --> Findings["Pages become findings with full page body in quoteText"]
 
     Findings --> Synth
-    Synth --> Ctx["User message prepended with<br/>&lt;wiki-context&gt; block:<br/>– perspective<br/>– section names"]
-    Ctx --> Answer["AnswerEvent stream<br/>(prose + citations + artifacts)"]
+    Synth --> Ctx["User message prepended with wiki-context block: perspective + section names"]
+    Ctx --> Answer["AnswerEvent stream: prose, citations, artifacts"]
 
     classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
     classDef ctx fill:#3d2a1f,stroke:#d89878,color:#fff;

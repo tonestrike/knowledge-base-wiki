@@ -23,27 +23,27 @@ ingest time. Cheap questions, deeper answers.
 
 ```mermaid
 flowchart LR
-    User((User)) --> Web["apps/web<br/>(React + Vite)"]
-    Web -->|oRPC over HTTP| API["apps/api<br/>(Hono on Workers)"]
+    User((User)) --> Web["apps/web (React + Vite)"]
+    Web -->|"oRPC over HTTP"| API["apps/api (Hono on Workers)"]
 
-    API --> Ingestion[@domain/ingestion]
-    API --> Wiki[@domain/wiki]
-    API --> Chat[@domain/chat]
-    API --> Verification[@domain/verification]
+    API --> Ingestion["@domain/ingestion"]
+    API --> Wiki["@domain/wiki"]
+    API --> Chat["@domain/chat"]
+    API --> Verification["@domain/verification"]
 
-    Ingestion -->|Drive walk + extract| R2[(R2: sources/&lt;id&gt;/text)]
-    Ingestion --> D1S[(D1: sources)]
+    Ingestion -->|"Drive walk + extract"| R2[("R2 sources")]
+    Ingestion --> D1S[("D1 sources")]
 
-    Wiki -->|compile pipeline| CompileDO["CompileRunDO<br/>(per-run state)"]
-    CompileDO --> OpenRouter["OpenRouter →<br/>Sonnet 4.6 / Haiku 4.5"]
-    CompileDO --> R2W[(R2: wiki_pages/&lt;id&gt;.md)]
-    CompileDO --> D1W[(D1: wikis, wiki_pages,<br/>claims, citations, backlinks)]
+    Wiki -->|"compile pipeline"| CompileDO["CompileRunDO (per-run state)"]
+    CompileDO --> OpenRouter["OpenRouter — Sonnet 4.6 / Haiku 4.5"]
+    CompileDO --> R2W[("R2 wiki_pages")]
+    CompileDO --> D1W[("D1 wikis + pages + citations")]
 
-    Chat -->|per-turn| ChatDO["ChatTurnDO<br/>(per-turn tape)"]
+    Chat -->|"per-turn"| ChatDO["ChatTurnDO (per-turn tape)"]
     ChatDO --> OpenRouter
     ChatDO --> D1W
     ChatDO --> R2W
-    ChatDO --> R2[(...)]
+    ChatDO --> R2
 
     classDef edge fill:#1a2332,stroke:#4a90e2,color:#fff;
     classDef ctx fill:#2a1f3d,stroke:#a878d8,color:#fff;
@@ -288,31 +288,32 @@ When a user asks a question, four layers cooperate:
 sequenceDiagram
     autonumber
     actor User
-    participant Web as apps/web<br/>chat-dock + chat-transport
-    participant API as apps/api<br/>chat.ask / chat.streamAnswer
-    participant DO as ChatTurnDO
-    participant Runner as runChatTurn
-    participant Agent as AgenticResearcher<br/>(4 tools)
-    participant Synth as AiSdkSynthesizer<br/>(8 artifact tools)
-    participant LLM as OpenRouter →<br/>Sonnet 4.6
+    participant Web as "apps/web chat-dock"
+    participant API as "apps/api oRPC"
+    participant DO as "ChatTurnDO"
+    participant Runner as "runChatTurn"
+    participant Agent as "AgenticResearcher (4 tools)"
+    participant Synth as "AiSdkSynthesizer (artifact tools)"
+    participant LLM as "OpenRouter / Sonnet 4.6"
 
     User->>Web: types question
     Web->>API: POST chat.ask
     API->>DO: POST /start
     DO-->>API: 202 (turnId)
-    API-->>Web: { turnId }
+    API-->>Web: turnId
     Web->>API: POST chat.streamAnswer
     API->>DO: GET /subscribe (SSE)
 
     DO->>Runner: runChatTurn(args, emit)
-    Runner->>Agent: research({ wikiId, question })
+    Runner->>Agent: research(wikiId, question)
     Agent->>LLM: streamText with 4 tools
-    LLM-->>Agent: tool calls (listPagesByType, searchWiki, readWikiPage, searchSources)
+    LLM-->>Agent: tool calls
+    Note over Agent,LLM: listPagesByType / searchWiki /<br/>readWikiPage / searchSources
     Agent-->>Runner: pages + findings
-    Runner->>Synth: stream({ findings, wikiContext })
+    Runner->>Synth: stream(findings, wikiContext)
     Synth->>LLM: streamText with artifact tools
-    LLM-->>Synth: prose + [[cite:UUID]] + tool calls
-    Synth-->>Runner: AnswerProseDelta / AnswerThinking / AnswerSegment events
+    LLM-->>Synth: prose + cite markers + tool calls
+    Synth-->>Runner: AnswerProseDelta / AnswerThinking / AnswerSegment
     Runner->>DO: emit (verified + sequenced)
     DO-->>API: SSE frames
     API-->>Web: AnswerEvent stream
