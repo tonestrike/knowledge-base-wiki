@@ -394,17 +394,19 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
       provider: { order: ['anthropic'], allow_fallbacks: false },
     }) as LanguageModel;
-    // Agentic researcher: a tool-loop on the same Sonnet model that
-    // iterates search → drill → re-search before handing pages to the
-    // synthesizer. Replaces the previous one-shot `streamObject`-based
-    // researcher; the user explicitly asked for an agent that "really
-    // tries hard" to find information.
+    // Researcher runs on Haiku 4.5 — picking which pages to drill into is
+    // a routing decision, not prose composition. Haiku is ~3× faster than
+    // Sonnet on tool-call loops; the synth stays on Sonnet for prose
+    // quality.
+    const haiku = openrouter.chat('anthropic/claude-haiku-4.5', {
+      provider: { order: ['anthropic'], allow_fallbacks: false },
+    }) as LanguageModel;
     researcher = createAgenticResearcher({
-      model: sonnet,
+      model: haiku,
       wikiReader,
-      modelName: 'anthropic/claude-sonnet-4.6',
+      modelName: 'anthropic/claude-haiku-4.5',
     });
-    researcherName = 'agent-loop · anthropic/claude-sonnet-4.6';
+    researcherName = 'agent-loop · anthropic/claude-haiku-4.5';
     synthesizer = createAiSdkSynthesizer({
       model: sonnet,
       modelName: 'anthropic/claude-sonnet-4.6',

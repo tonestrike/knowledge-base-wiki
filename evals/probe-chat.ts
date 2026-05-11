@@ -99,6 +99,8 @@ const consumeFrame = (frame: string): boolean => {
     console.log(
       `[${t}s] WikiPageRetrieved: "${e.title}" (${e.pageType ?? '-'}) · ${e.citationCount} cites`,
     );
+  } else if (e.kind === 'AnswerThinking') {
+    console.log(`[${t}s] AnswerThinking: ${e.message}`);
   } else if (
     e.kind === 'ResearchStarted' ||
     e.kind === 'ResearchCompleted' ||

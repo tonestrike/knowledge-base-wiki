@@ -223,6 +223,15 @@ export async function* synthesizeAnswer(
         continue;
       }
 
+      if (evt.kind === 'thinking') {
+        yield {
+          kind: 'AnswerThinking',
+          turnId: input.turnId,
+          message: evt.message,
+        };
+        continue;
+      }
+
       const raw = evt.segment;
       let answerSeg: AnswerSegment | null;
       if (raw.kind === 'prose') {

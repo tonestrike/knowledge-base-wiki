@@ -136,7 +136,13 @@ export type RawAnswerSegment =
 
 export type SynthesizerEvent =
   | { kind: 'segment'; index: number; segment: RawAnswerSegment }
-  | { kind: 'proseDelta'; segmentIndex: number; textDelta: string };
+  | { kind: 'proseDelta'; segmentIndex: number; textDelta: string }
+  // Live train-of-thought. The adapter emits these from the model's
+  // `tool-input-start` / `tool-input-delta` / `tool-input-end` parts so
+  // the UI can show "Drafting ComparisonTable…", "Adding columns: model,
+  // training data, …", "Polishing…" while the silent tool-input bytes
+  // accumulate. The use-case forwards them as `AnswerThinking` events.
+  | { kind: 'thinking'; message: string };
 
 export interface Synthesizer {
   /**

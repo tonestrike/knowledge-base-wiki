@@ -51,6 +51,16 @@ export const SynthesisStarted = z.object({
   model: z.string().min(1),
 });
 
+// Live train-of-thought from the Synthesizer: surfaces the partial JSON
+// streaming inside an Artifact tool call (column names, row labels, …) so
+// the user sees progress during the otherwise-silent ~15-25s the model
+// spends generating tool inputs. Throttled adapter-side.
+export const AnswerThinking = z.object({
+  kind: z.literal('AnswerThinking'),
+  turnId: TurnId,
+  message: z.string().min(1),
+});
+
 export const AnswerSegmentEmitted = z.object({
   kind: z.literal('AnswerSegment'),
   turnId: TurnId,
@@ -83,6 +93,7 @@ export const AnswerEvent = z.discriminatedUnion('kind', [
   ResearchProgress,
   ResearchCompleted,
   SynthesisStarted,
+  AnswerThinking,
   AnswerSegmentEmitted,
   AnswerProseDelta,
   AnswerFailed,

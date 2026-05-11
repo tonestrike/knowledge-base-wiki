@@ -240,12 +240,6 @@ const startReasoning = (state: TranslationState, phase: string): Chunk[] => {
   return [{ type: 'reasoning-start', id: reasonId(phase) }];
 };
 
-const endReasoning = (state: TranslationState, phase: string): Chunk[] => {
-  if (!state.reasoningStarted.has(phase) || state.reasoningEnded.has(phase)) return [];
-  state.reasoningEnded.add(phase);
-  return [{ type: 'reasoning-end', id: reasonId(phase) }];
-};
-
 const ensureTextStart = (state: TranslationState, segmentIndex: number): Chunk[] => {
   if (state.textStarted.has(segmentIndex)) return [];
   state.textStarted.add(segmentIndex);
@@ -332,33 +326,40 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
       ];
     }
 
+    case 'AnswerThinking': {
+      // Live train-of-thought from the synth — surfaces partial tool-input
+      // JSON the model is generating (column names, row labels, …). One
+      // line per event so the reasoning bubble reads like a list. The
+      // bubble stays open through the whole turn; AnswerFinished closes it
+      // so the duration captures the entire think.
+      return [
+        ...startReasoning(state, 'thinking'),
+        { type: 'reasoning-delta', id: reasonId('thinking'), delta: `${e.message}\n` },
+      ];
+    }
+
     case 'AnswerProseDelta': {
       const start = ensureTextStart(state, e.segmentIndex);
       state.proseSeen.set(
         e.segmentIndex,
         (state.proseSeen.get(e.segmentIndex) ?? '') + e.textDelta,
       );
-      return [
-        ...endReasoning(state, 'thinking'),
-        ...start,
-        { type: 'text-delta', id: segId(e.segmentIndex), delta: e.textDelta },
-      ];
+      return [...start, { type: 'text-delta', id: segId(e.segmentIndex), delta: e.textDelta }];
     }
 
     case 'AnswerSegment': {
       const seg = e.segment;
-      // Any answer segment (prose, citation, or artifact) means the
-      // model is now producing user-visible output — close the
-      // thinking bubble if it's still open. (AnswerProseDelta already
-      // closes it for streaming prose, but a citation or artifact may
-      // be the very first user-facing thing the model emits.)
-      const closeThinking = endReasoning(state, 'thinking');
+      // The reasoning bubble intentionally stays open through prose +
+      // citation + artifact segments — its duration is supposed to capture
+      // the WHOLE think, including the synth's tool-input narration. The
+      // bubble closes only on AnswerFinished / AnswerFailed via
+      // closeOpenParts.
       if (seg.kind === 'prose') {
         // If no deltas were emitted for this index (e.g. legacy synthesizer
         // path that doesn't stream), synthesise one delta carrying the
         // whole text so the rendered part still has content.
         const seen = state.proseSeen.get(e.index) ?? '';
-        const out: Chunk[] = [...closeThinking, ...ensureTextStart(state, e.index)];
+        const out: Chunk[] = [...ensureTextStart(state, e.index)];
         if (seen.length === 0) {
           out.push({ type: 'text-delta', id: segId(e.index), delta: seg.text });
           state.proseSeen.set(e.index, seg.text);
@@ -367,18 +368,12 @@ const translate = (e: AnswerEvent, state: TranslationState): Chunk[] => {
         return out;
       }
       if (seg.kind === 'citation') {
-        return [
-          ...closeThinking,
-          { type: 'data-citation', id: `cit-${seg.citation.id}`, data: seg.citation },
-        ];
+        return [{ type: 'data-citation', id: `cit-${seg.citation.id}`, data: seg.citation }];
       }
       // artifact — carry the full Artifact (kind+props+citations) so the
       // renderer can show citation chips alongside the artifact body
       // without cross-part lookups.
-      return [
-        ...closeThinking,
-        { type: 'data-artifact', id: `art-${e.index}`, data: seg.artifact },
-      ];
+      return [{ type: 'data-artifact', id: `art-${e.index}`, data: seg.artifact }];
     }
 
     case 'AnswerFailed': {

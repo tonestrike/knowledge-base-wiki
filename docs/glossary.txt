@@ -58,6 +58,7 @@ wikipage
 conceptpage
 answerpage
 answersegment
+answerthinking
 citationchip
 compileevent
 compilerun

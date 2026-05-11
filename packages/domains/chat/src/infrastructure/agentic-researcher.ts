@@ -58,12 +58,13 @@ export interface AgenticResearcherOptions {
   systemPrompt?: string;
   /** Per-`searchWiki` candidate limit. Defaults to 6. */
   searchLimit?: number;
-  /** Maximum tool-loop steps before forcing termination. Defaults to 8 —
-   *  end-to-end probes showed the model thrashing on dead-end synonym
-   *  searches once the obvious pages have been surfaced. 8 covers a
-   *  multi-query opener + a couple of drill-downs + the wrap-up; the
-   *  per-query dedup signal already short-circuits the most common
-   *  waste pattern (the model retrying the same phrasing). */
+  /** Maximum tool-loop steps before forcing termination. Defaults to 5 —
+   *  Haiku 4.5 covers a multi-query opener + a couple of drill-downs +
+   *  the wrap-up well inside that budget, and the per-query dedup signal
+   *  short-circuits the model's worst waste pattern (retrying the same
+   *  phrasing). Tighter than the Sonnet-era 8-step budget on purpose:
+   *  Haiku is faster per step, so cutting steps compounds the latency
+   *  win without hurting recall on the demo wikis. */
   maxSteps?: number;
   /** Per-call wall-clock timeout. Defaults to 90s. */
   timeoutMs?: number;
@@ -173,7 +174,7 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         model: opts.model,
         tools,
         toolChoice: 'auto',
-        stopWhen: stepCountIs(opts.maxSteps ?? 8),
+        stopWhen: stepCountIs(opts.maxSteps ?? 5),
         system: opts.systemPrompt ?? SYSTEM,
         prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. Start with searchWiki.`,
         temperature: 0.2,

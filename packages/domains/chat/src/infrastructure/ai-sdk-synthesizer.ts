@@ -240,6 +240,61 @@ const newState = (): SegmentState => ({
   pending: '',
 });
 
+// Top-level JSON key — quoted, followed by colon. We scan the accumulated
+// tool-input buffer for newly-seen keys so we can narrate `Adding columns:
+// model, training data` as the model emits them.
+const TOP_LEVEL_KEY = /"([A-Za-z_][A-Za-z0-9_]*)"\s*:/g;
+
+const friendlyToolLabel = (name: string): string => {
+  // Insert spaces between camelCase humps so `ComparisonTable` → "comparison
+  // table" reads naturally inside the reasoning bubble.
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+};
+
+/**
+ * Buffered tool-input state. We accumulate every delta for a given toolCallId,
+ * scan for top-level keys we haven't seen yet, and try to extract a short
+ * preview of each (column names for ComparisonTable, event labels for
+ * Timeline, etc.) so the reasoning bubble narrates what's being drafted.
+ *
+ * The throttle clamps emission to one thinking event per `THROTTLE_MS` per
+ * tool call — without it a chatty model can drown the reasoning bubble in
+ * per-character updates.
+ */
+interface ToolInputBuffer {
+  toolName: string;
+  raw: string;
+  seenKeys: Set<string>;
+  lastEmitAt: number;
+}
+
+const THROTTLE_MS = 400;
+
+// Pull a short comma-joined preview of the *current* value at `key`. We can't
+// rely on the JSON being complete, so we use a forgiving scan: find the key,
+// walk forward, and collect the first few quoted strings inside the value
+// until we hit the next top-level key or the buffer ends.
+const previewKey = (raw: string, key: string): string | null => {
+  const anchor = raw.indexOf(`"${key}"`);
+  if (anchor < 0) return null;
+  const after = raw.slice(anchor + key.length + 2);
+  const colon = after.indexOf(':');
+  if (colon < 0) return null;
+  const tail = after.slice(colon + 1);
+  // Stop scanning at the next top-level key so we don't bleed into siblings.
+  // `lookahead` is approximate (a nested object containing `"x":` would
+  // truncate early) but for previews of column / event lists this is fine.
+  const nextKey = tail.search(/[,}]\s*"[A-Za-z_][A-Za-z0-9_]*"\s*:/);
+  const slice = nextKey >= 0 ? tail.slice(0, nextKey) : tail;
+  const strings = [...slice.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+    .map((m) => (m[1] ?? '').trim())
+    .filter((s) => s.length > 0)
+    .slice(0, 4);
+  if (strings.length === 0) return null;
+  const joined = strings.join(', ');
+  return joined.length > 80 ? `${joined.slice(0, 77)}…` : joined;
+};
+
 /**
  * Close the currently-open prose run (if any) by emitting a settled `segment`
  * with `kind: 'prose'`. After this, `proseIndex` is null and a fresh prose
@@ -416,6 +471,7 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
     const deadline = Date.now() + timeoutMs;
     const state = newState();
     let segmentsEmitted = 0;
+    const toolInputBuffers = new Map<string, ToolInputBuffer>();
 
     try {
       const iterator = result.fullStream[Symbol.asyncIterator]();
@@ -438,6 +494,54 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
         if (part.type === 'text-delta' && typeof part.text === 'string') {
           state.pending += part.text;
           yield* drainPending(state, false);
+          continue;
+        }
+        if (part.type === 'tool-input-start') {
+          const toolName = String(part.toolName ?? '');
+          if (!ARTIFACT_TOOL_NAMES.has(toolName)) continue;
+          const id = String(part.id ?? part.toolCallId ?? toolName);
+          toolInputBuffers.set(id, {
+            toolName,
+            raw: '',
+            seenKeys: new Set(),
+            lastEmitAt: 0,
+          });
+          yield { kind: 'thinking', message: `Drafting ${friendlyToolLabel(toolName)}…` };
+          continue;
+        }
+        if (part.type === 'tool-input-delta') {
+          const id = String(part.id ?? part.toolCallId ?? '');
+          const buf = toolInputBuffers.get(id);
+          if (!buf) continue;
+          const delta = typeof part.delta === 'string' ? part.delta : '';
+          if (delta.length === 0) continue;
+          buf.raw += delta;
+          const now = Date.now();
+          if (now - buf.lastEmitAt < THROTTLE_MS) continue;
+          // Find any top-level key we haven't narrated yet. `citationIds`
+          // is plumbing noise — the user doesn't want to read uuid prefixes.
+          let newKey: string | null = null;
+          for (const m of buf.raw.matchAll(TOP_LEVEL_KEY)) {
+            const key = m[1];
+            if (!key || key === 'citationIds' || buf.seenKeys.has(key)) continue;
+            buf.seenKeys.add(key);
+            newKey = key;
+          }
+          if (!newKey) continue;
+          const preview = previewKey(buf.raw, newKey);
+          buf.lastEmitAt = now;
+          yield {
+            kind: 'thinking',
+            message: preview ? `Adding ${newKey}: ${preview}` : `Adding ${newKey}…`,
+          };
+          continue;
+        }
+        if (part.type === 'tool-input-end') {
+          const id = String(part.id ?? part.toolCallId ?? '');
+          const buf = toolInputBuffers.get(id);
+          if (!buf) continue;
+          toolInputBuffers.delete(id);
+          yield { kind: 'thinking', message: `Polishing ${friendlyToolLabel(buf.toolName)}…` };
           continue;
         }
         if (part.type === 'tool-call') {
@@ -467,8 +571,8 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
           };
           segmentsEmitted += 1;
         }
-        // Other part kinds (start/finish/tool-input-*/reasoning/etc.) are
-        // not used by the domain port; ignore them.
+        // Other part kinds (start/finish/reasoning/etc.) are not used by
+        // the domain port; ignore them.
       }
       // End-of-stream: flush any pending text and close the open prose run.
       yield* drainPending(state, true);
