@@ -78,16 +78,7 @@ ok "bun $BUN_VERSION"
 
 # 2) Node.js (wrangler dev requires real Node, not bun)
 step "Verify Node.js >= 22"
-# `bun run setup` injects bun's own `node` shim into PATH (look for the
-# `/private/tmp/bun-node-…` prefix). The shim only handles bun-internal
-# call patterns and errors on `--version`, so `command -v node` returns a
-# false positive. Treat that case as "no node" so we fall through to the
-# nvm-source path below.
-node_path="$(command -v node 2>/dev/null || true)"
-case "$node_path" in
-  */bun-node-*/node|"") node_path="" ;;
-esac
-if [[ -z "$node_path" ]]; then
+if ! command -v node >/dev/null; then
   # Lazy-loaded nvm setups (the default in this repo's owner's zshrc) only
   # expose `node` after the shell function fires. Source nvm.sh once so the
   # rest of the script and bun-spawned children see the active version.
@@ -98,16 +89,11 @@ if [[ -z "$node_path" ]]; then
       nvm use >/dev/null 2>&1 || true
     fi
   fi
-  # Re-resolve after the nvm dance.
-  node_path="$(command -v node 2>/dev/null || true)"
-  case "$node_path" in
-    */bun-node-*/node|"") node_path="" ;;
-  esac
 fi
-[[ -n "$node_path" ]] || fail "node not found on PATH. Install Node.js >= 22 (e.g. \`nvm install 22 && nvm use 22\`)."
-NODE_VERSION="$("$node_path" --version | sed 's/^v//')"
+command -v node >/dev/null || fail "node not found on PATH. Install Node.js >= 22 (e.g. \`nvm install 22 && nvm use 22\`)."
+NODE_VERSION="$(node --version | sed 's/^v//')"
 version_at_least "$NODE_VERSION" "22.0.0" || fail "node $NODE_VERSION is too old; need >= 22 (wrangler ProxyWorker IPC breaks under bun-as-node)"
-ok "node $NODE_VERSION ($node_path)"
+ok "node $NODE_VERSION"
 
 # 3) deps
 step "bun install"
