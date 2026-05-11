@@ -9,7 +9,7 @@
     "postinstall": "bunx --bun rulesync generate && bunx simple-git-hooks",
     "setup": "./scripts/setup",
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "./scripts/dev",
     "check": "bun run lint && bun run spell && bun run typecheck && bun run test",
     "fix": "biome check --write .",
     "lint": "biome check .",

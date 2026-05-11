@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# scripts/dev — turbo-run dev with Infisical preflight.
+#
+# Run via `bun run dev` (or `bun dev`, which Bun aliases to the same script).
+#
+# Why this wrapper exists:
+#   - Each app's dev script wraps in `with-secrets`, which requires the
+#     INFISICAL_CLIENT_ID_TENEX + INFISICAL_CLIENT_SECRET_TENEX vars in
+#     the current shell.
+#   - turbo runs both apps in parallel; missing creds surfaces as two
+#     identical errors interleaved with the turbo TUI, which buries the
+#     fix.
+#   - Many users export the creds in ~/.zshrc but invoke `bun dev` from
+#     a non-interactive subshell that didn't source it. We lift the
+#     export out of common rc files so the warm path "just works".
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Default candidate rc files (most-specific first; SETUP_SHELL_RC wins).
+RC_CANDIDATES=()
+[[ -n "${SETUP_SHELL_RC:-}" ]] && RC_CANDIDATES+=("$SETUP_SHELL_RC")
+RC_CANDIDATES+=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+
+# Pull `export VAR=...` from $rc and eval into the current shell. Returns
+# 0 if a matching line was found.
+lift_export() {
+  local rc="$1" var="$2" line
+  [[ -f "$rc" ]] || return 1
+  line=$(grep -E "^export ${var}=" "$rc" | tail -n 1 || true)
+  [[ -z "$line" ]] && return 1
+  eval "$line"
+  return 0
+}
+
+# Try each candidate rc until one supplies the missing var. Tracks where
+# it found things so the failure message can name what it tried.
+declare -a SOURCED_FROM=()
+for var in INFISICAL_CLIENT_ID_TENEX INFISICAL_CLIENT_SECRET_TENEX; do
+  if [[ -n "${!var:-}" ]]; then continue; fi
+  for rc in "${RC_CANDIDATES[@]}"; do
+    if lift_export "$rc" "$var"; then
+      SOURCED_FROM+=("$var ← $rc")
+      break
+    fi
+  done
+done
+
+missing=()
+for var in INFISICAL_CLIENT_ID_TENEX INFISICAL_CLIENT_SECRET_TENEX; do
+  [[ -z "${!var:-}" ]] && missing+=("$var")
+  export "$var" 2>/dev/null || true
+done
+
+if (( ${#missing[@]} > 0 )); then
+  printf '\n[dev] Missing Infisical credentials in shell + rc files:\n'
+  printf '        %s\n' "${missing[@]}"
+  printf '\n[dev] Running `bun run setup` to prompt for just the missing var(s).\n'
+  printf '      Setup is idempotent and will skip any var already in your rc.\n\n'
+  if ! "$REPO_ROOT/scripts/setup"; then
+    printf '\n[dev] Setup did not complete. Re-run when ready:\n'
+    printf '        bun run setup && bun run dev\n\n' >&2
+    exit 1
+  fi
+  # After setup wrote new exports to the rc, lift them into THIS shell so
+  # we can run dev immediately without the user opening a new terminal.
+  for var in "${missing[@]}"; do
+    for rc in "${RC_CANDIDATES[@]}"; do
+      if lift_export "$rc" "$var"; then
+        SOURCED_FROM+=("$var ← $rc (post-setup)")
+        break
+      fi
+    done
+    if [[ -z "${!var:-}" ]]; then
+      printf '[dev] %s still missing after setup — aborting.\n' "$var" >&2
+      exit 1
+    fi
+    export "$var"
+  done
+fi
+
+if (( ${#SOURCED_FROM[@]} > 0 )); then
+  printf '[dev] lifted from rc:\n'
+  printf '      %s\n' "${SOURCED_FROM[@]}"
+fi
+
+cd "$REPO_ROOT"
+exec bun x turbo run dev
