@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# apps/api/scripts/deploy — provision auxiliary bindings and deploy.
+#
+# Cloudflare's wrangler deploy doesn't auto-provision Vectorize indexes,
+# only the bindings the deployed Worker references. This script makes the
+# provisioning explicit so a fresh account can deploy in one shot.
+#
+# Steps:
+#   1. Best-effort create the `tenex-sources` Vectorize index. Stream O
+#      ships a semantic-search fallback for the chat agent's
+#      `searchSources` tool, backed by 1536-dim cosine embeddings from
+#      OpenAI's `text-embedding-3-small`. The index name is referenced
+#      by `wrangler.toml` (binding = VECTORIZE). `|| true` tolerates
+#      "already exists" so reruns stay idempotent.
+#   2. Run the SPA build + wrangler deploy --env=prod (the existing
+#      `bun --filter @app/api run deploy` chain).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+
+cd "$APP_ROOT"
+
+printf '[api/deploy] ensuring Vectorize index tenex-sources exists\n'
+bunx wrangler vectorize create tenex-sources \
+  --dimensions=1536 \
+  --metric=cosine \
+  || true
+
+printf '[api/deploy] building SPA\n'
+(cd "$REPO_ROOT" && bun --filter @app/web run build)
+
+printf '[api/deploy] wrangler deploy --env=prod\n'
+exec bunx wrangler deploy --env=prod

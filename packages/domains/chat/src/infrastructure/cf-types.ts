@@ -12,4 +12,8 @@ export type {
   DurableObjectStub,
   R2Body,
   R2Bucket,
+  VectorizeIndex,
+  VectorizeMatch,
+  VectorizeQueryResult,
+  VectorizeVector,
 } from '@package/shared-kernel';

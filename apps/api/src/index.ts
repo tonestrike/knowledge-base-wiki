@@ -19,6 +19,7 @@ import type { UserId } from '@package/contracts/shared';
 import {
   InMemoryEventBus,
   type Tracer,
+  type VectorizeIndex,
   newId,
   resolveTracer,
   systemClock,
@@ -81,6 +82,12 @@ type Env = WikiBindings & {
   LANGFUSE_SECRET_KEY?: string;
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   OTEL_EXPORTER_OTLP_HEADERS?: string;
+  // Vectorize binding for the chat `searchSources` semantic-search
+  // fallback (Stream O). Optional — when the binding or the OpenAI
+  // embedding key is missing, chat falls back to D1 token overlap with
+  // zero behavior change.
+  VECTORIZE?: VectorizeIndex;
+  OPENAI_EMBEDDING_API_KEY?: string;
 };
 
 // Hono per-request variables. The session middleware writes `userId` once at
@@ -282,6 +289,13 @@ const ensureChatContext = (env: Env, tracer: Tracer) => {
       db: env.DB,
       storage: env.STORAGE,
       openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
+      // Stream O — semantic-search fallback for `WikiReader.searchSources`.
+      // Both must be present to activate; missing either leaves chat on
+      // the original D1 token-overlap path.
+      ...(env.VECTORIZE ? { vectorize: env.VECTORIZE } : {}),
+      ...(env.OPENAI_EMBEDDING_API_KEY
+        ? { openAiEmbeddingApiKey: env.OPENAI_EMBEDDING_API_KEY }
+        : {}),
     },
     tracer,
     // When bound, use the Durable Object dispatcher so chat.ask and

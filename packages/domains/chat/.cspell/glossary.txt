@@ -51,3 +51,14 @@ errorid
 agentically
 logprobs
 inlines
+vectorize
+embedding
+embedder
+embedders
+cosine
+openai
+upsert
+upserts
+chunkstart
+chunkend
+topk

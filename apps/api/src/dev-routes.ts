@@ -1,9 +1,16 @@
+import { createOpenAiEmbedder, createVectorWikiReader } from '@domain/chat';
+import type { VectorizeIndex } from '@package/shared-kernel';
 import type { Hono } from 'hono';
 
 interface DevEnv {
   ENVIRONMENT?: string;
   DB: D1Database;
   STORAGE: R2Bucket;
+  // Optional bindings used by the Stream-O reindex endpoint. Missing
+  // either → the route returns 503 with a clear message instead of
+  // bombing on undefined.
+  VECTORIZE?: VectorizeIndex;
+  OPENAI_EMBEDDING_API_KEY?: string;
 }
 
 /**
@@ -106,6 +113,111 @@ export const mountDevRoutes = (app: Hono<any>): void => {
           ? 'Some citations reference sources without extracted text — recompile those folders.'
           : undefined,
     });
+  });
+
+  /**
+   * Dev-only one-shot to populate the Vectorize index. Walks every
+   * source cited by any page in the given wiki (or all wikis if the
+   * `wikiId` query param is absent), pulls the extracted text from R2,
+   * chunks it into 1000-char windows with 200-char overlap, embeds each
+   * chunk via OpenAI, and upserts into `tenex-sources`. Idempotent —
+   * chunk ids are deterministic (`<sourceId>::<chunkStart>`), so a
+   * rerun just overwrites in place. Compilation itself does NOT block
+   * on this; the operator runs the endpoint once after a compile (or
+   * once at deploy-time for the seed wikis).
+   *
+   * Stream O ships this as a dev endpoint rather than wiring into
+   * `compileFolder` because the wiki context is a separate bounded
+   * context — embedding lives in chat — and the alternative (a domain
+   * event handler) would have been more surface than the demo needs.
+   */
+  app.post('/__dev/reindex-sources', async (c) => {
+    const env = (c.env ?? {}) as DevEnv;
+    const blocked = devOnly(env);
+    if (blocked) return blocked;
+    if (!env.DB || !env.STORAGE) return c.json({ error: 'D1/R2 bindings missing' }, 500);
+    if (!env.VECTORIZE) return c.json({ error: 'VECTORIZE binding not configured' }, 503);
+    if (!env.OPENAI_EMBEDDING_API_KEY)
+      return c.json({ error: 'OPENAI_EMBEDDING_API_KEY not configured' }, 503);
+
+    const wikiIdParam = c.req.query('wikiId');
+    const reader = createVectorWikiReader({
+      db: env.DB,
+      storage: env.STORAGE,
+      vectorize: env.VECTORIZE,
+      embedder: createOpenAiEmbedder({ apiKey: env.OPENAI_EMBEDDING_API_KEY }),
+      // The inner reader isn't exercised by `indexSource`; supply a
+      // minimal no-op shape so the wrapper stays constructable without
+      // wiring the full D1 reader here.
+      inner: {
+        async searchPages() {
+          return [];
+        },
+        async listSamplePages() {
+          return [];
+        },
+        async getPage() {
+          return null;
+        },
+        async searchSources() {
+          return [];
+        },
+        async listPagesByType() {
+          return [];
+        },
+        async getWikiMeta() {
+          return null;
+        },
+      },
+    });
+
+    const query = wikiIdParam
+      ? env.DB.prepare(
+          `SELECT DISTINCT cit.source_id AS source_id, cit.content_hash AS content_hash, p.wiki_id AS wiki_id
+             FROM citations cit
+             JOIN claims cl ON cl.id = cit.claim_id
+             JOIN wiki_pages p ON p.id = cl.wiki_page_id
+            WHERE p.wiki_id = ?`,
+        ).bind(wikiIdParam)
+      : env.DB.prepare(
+          `SELECT DISTINCT cit.source_id AS source_id, cit.content_hash AS content_hash, p.wiki_id AS wiki_id
+             FROM citations cit
+             JOIN claims cl ON cl.id = cit.claim_id
+             JOIN wiki_pages p ON p.id = cl.wiki_page_id`,
+        );
+    const rows = await query.all<{ source_id: string; content_hash: string; wiki_id: string }>();
+
+    let indexed = 0;
+    let chunks = 0;
+    let skipped = 0;
+    const errors: Array<{ sourceId: string; message: string }> = [];
+    for (const r of rows.results) {
+      const obj = await env.STORAGE.get(`sources/${r.source_id}/text`);
+      const text = obj ? await obj.text() : null;
+      if (!text) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const out = await reader.indexSource({
+          // biome-ignore lint/suspicious/noExplicitAny: D1 rows are untyped at this seam
+          wikiId: r.wiki_id as any,
+          // biome-ignore lint/suspicious/noExplicitAny: same
+          sourceId: r.source_id as any,
+          // biome-ignore lint/suspicious/noExplicitAny: same
+          contentHash: r.content_hash as any,
+          text,
+        });
+        indexed += 1;
+        chunks += out.chunks;
+      } catch (err) {
+        errors.push({
+          sourceId: r.source_id,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return c.json({ scanned: rows.results.length, indexed, chunks, skipped, errors });
   });
 
   // Dev-only seed endpoint. Bypasses Drive entirely by accepting pre-extracted
