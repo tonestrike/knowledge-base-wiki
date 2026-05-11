@@ -17,6 +17,15 @@
 # The Worker refuses to start in non-test environments without this set.
 OAUTH_TOKEN_KEY_BASE64=
 
+# HMAC-SHA256 key used to sign the `tenex_sid` session cookie that pins a
+# browser to a UserId for 14 days after Drive sign-in. Distinct from
+# OAUTH_TOKEN_KEY_BASE64 (different algorithm, different concern: this one
+# never touches Drive tokens). Generate a fresh one with:
+#   openssl rand -base64 32
+# The Worker refuses to start in non-test environments without this set —
+# missing key would silently de-auth every request.
+SESSION_SIGNING_KEY=
+
 # Google OAuth client for Drive ingestion.
 # Create one at https://console.cloud.google.com → APIs & Services → Credentials:
 #   1. New OAuth client ID → Web application.

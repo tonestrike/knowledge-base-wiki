@@ -10,7 +10,7 @@ const fakeDeps = (): IngestionDeps => {
     UserId,
     { refreshToken: string; accessToken: string; expiresAt: string }
   >();
-  const stateStore = new Map<string, { createdAt: string }>();
+  const stateStore = new Map<string, { createdAt: string; returnTo?: string }>();
   return {
     drive: {
       startAuth: async () => ({
@@ -43,7 +43,10 @@ const fakeDeps = (): IngestionDeps => {
     },
     oauthState: {
       set: async (s, v) => {
-        stateStore.set(s, { createdAt: v.createdAt });
+        stateStore.set(s, {
+          createdAt: v.createdAt,
+          ...(v.returnTo !== undefined ? { returnTo: v.returnTo } : {}),
+        });
       },
       consume: async (s) => {
         const v = stateStore.get(s);
@@ -96,5 +99,37 @@ describe('completeDriveAuth', () => {
     await expect(completeDriveAuth(deps, { code: 'c', state: 'state-xyz' })).rejects.toThrow(
       /state/,
     );
+  });
+
+  it('echoes returnTo from the stored OAuth state so the api can redirect the browser', async () => {
+    const deps = fakeDeps();
+    await deps.oauthState.set('state-xyz', {
+      createdAt: '2026-05-09T12:00:00.000Z',
+      returnTo: 'https://web.example/?drive=connected',
+    });
+    const out = await completeDriveAuth(deps, { code: 'c', state: 'state-xyz' });
+    expect(out.returnTo).toBe('https://web.example/?drive=connected');
+  });
+
+  it('omits returnTo when the stored OAuth state never had one', async () => {
+    const deps = fakeDeps();
+    await deps.oauthState.set('state-xyz', {
+      createdAt: '2026-05-09T12:00:00.000Z',
+    });
+    const out = await completeDriveAuth(deps, { code: 'c', state: 'state-xyz' });
+    expect(out.returnTo).toBeUndefined();
+  });
+
+  it('returns a UserId the api can use to mint a signed session cookie', async () => {
+    const deps = fakeDeps();
+    await deps.oauthState.set('state-xyz', {
+      createdAt: '2026-05-09T12:00:00.000Z',
+    });
+    const out = await completeDriveAuth(deps, { code: 'c', state: 'state-xyz' });
+    // The api signs (userId, expiresAt) into the `tenex_sid` cookie at the
+    // end of the OAuth callback. The use-case's only contribution to that
+    // is a verified, persisted-tokens UserId; downstream session signing
+    // is the api shell's responsibility (see `apps/api/src/session.ts`).
+    expect(out.userId).toBe(userId('99999999-2222-4333-8444-555555555555'));
   });
 });

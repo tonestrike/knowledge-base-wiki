@@ -25,7 +25,32 @@ export const DriveAuthCallbackInput = z.object({
 export const DriveAuthCallbackOutput = z.object({
   userId: UserId,
   scopes: z.array(z.string()),
+  /**
+   * Absolute URL the api wants the caller to redirect to after the OAuth
+   * exchange resolves. Captured from the `authStart` request's `returnTo`
+   * and echoed through the OAuth state so the SPA at a different origin
+   * (dev) or same origin (prod) lands on its home page. The Hono GET
+   * handler in `apps/api/src/index.ts` validates this against an allowlist
+   * before honouring it.
+   */
+  returnTo: z.string().url().optional(),
 });
+
+/**
+ * Wire-shape of the signed session cookie payload. Encoded as JSON,
+ * base64url-wrapped, and HMAC-signed by the api before being written to a
+ * `tenex_sid` cookie at the end of the Drive OAuth callback. Defined in
+ * the contract for documentation parity — the SPA never reads the cookie
+ * directly (it's `HttpOnly`), but the typed shape pins what the api
+ * commits to as the session contract.
+ */
+export const SessionCookiePayload = z.object({
+  /** UserId the signed-in browser is acting as. */
+  userId: UserId,
+  /** Unix epoch milliseconds at which the cookie stops being valid. */
+  expiresAt: z.number().int().positive(),
+});
+export type SessionCookiePayload = z.infer<typeof SessionCookiePayload>;
 
 export const DriveFolder = z.object({
   driveFolderId: z.string().min(1),
