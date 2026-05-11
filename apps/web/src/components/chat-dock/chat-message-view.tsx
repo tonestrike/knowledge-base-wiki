@@ -58,6 +58,15 @@ export function ChatMessageView({
   const reasoningText = reasoningParts.map((p) => p.text).join('\n\n');
   const lastPart = message.parts.at(-1);
   const isReasoningStreaming = isLastMessage && isStreaming && lastPart?.type === 'reasoning';
+  // True when the model finished reasoning but hasn't produced any
+  // user-visible answer part yet — i.e. the silent gap between the
+  // closed "Thought for Ns" bubble and the first prose / citation /
+  // artifact. Used to render a pulsing "Composing answer…" indicator
+  // so the user sees the chat is still doing something.
+  const hasAnswerPart = message.parts.some(
+    (p) => p.type === 'text' || p.type === 'data-citation' || p.type === 'data-artifact',
+  );
+  const isComposingGap = isLastMessage && isStreaming && reasoningText.length > 0 && !hasAnswerPart;
 
   return (
     <Message from="assistant">
@@ -68,6 +77,7 @@ export function ChatMessageView({
             <ReasoningContent>{reasoningText}</ReasoningContent>
           </Reasoning>
         ) : null}
+        {isComposingGap ? <ComposingPulse /> : null}
         {message.parts.map((part, i) => {
           const key = `a-${message.id}-${i}`;
           if (part.type === 'text') {
@@ -91,5 +101,33 @@ export function ChatMessageView({
         })}
       </MessageContent>
     </Message>
+  );
+}
+
+/**
+ * Renders during the gap between the closed reasoning bubble and the
+ * first answer chunk — the (often 5-30s) window while the synth model
+ * is composing tool calls / artifacts but hasn't emitted any
+ * user-visible parts yet. Three pulsing dots + a phrase, accent-tinted,
+ * matches the rest of the dock typography.
+ */
+function ComposingPulse() {
+  return (
+    <div className="my-2 flex items-center gap-2 text-muted-foreground">
+      <span className="flex gap-1" aria-hidden>
+        <span className="size-1.5 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-accent/60" />
+        <span
+          className="size-1.5 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-accent/60"
+          style={{ animationDelay: '160ms' }}
+        />
+        <span
+          className="size-1.5 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-accent/60"
+          style={{ animationDelay: '320ms' }}
+        />
+      </span>
+      <span className="font-mono text-xs uppercase tracking-[0.2em] text-accent/70">
+        Composing answer
+      </span>
+    </div>
   );
 }

@@ -143,11 +143,21 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
   useEffect(() => {
     if (transition !== 'flash' || !wikiId) return;
     const t = window.setTimeout(() => {
+      // Hold the overlay visually but switch state to 'navigate' so the
+      // background layer is fully opaque BEFORE we change route. The
+      // route swap unmounts this component, so AnimatePresence can't
+      // play an exit — anything still visible at the moment of nav
+      // becomes a hard cut. Going fully opaque just before nav avoids
+      // the "white edge sliding away" flicker the user noticed.
       setTransition('navigate');
-      nav(`/wiki/${wikiId}`, { state: { compileRunId } });
+      window.setTimeout(() => {
+        // No state seed on nav — see the comment above; this keeps the
+        // wiki page from re-mounting the just-finished theater.
+        nav(`/wiki/${wikiId}`);
+      }, 220);
     }, 900);
     return () => window.clearTimeout(t);
-  }, [transition, wikiId, nav, compileRunId]);
+  }, [transition, wikiId, nav]);
 
   return (
     <>
@@ -176,7 +186,7 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
               className="absolute inset-0 bg-background"
               initial={{ opacity: 0 }}
               animate={{ opacity: transition === 'navigate' ? 1 : 0 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
+              transition={{ duration: 0.22, ease: 'easeInOut' }}
             />
           </motion.div>
         ) : null}
@@ -230,7 +240,7 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
             stage itself decides how much vertical room it needs, so the
             page is compact while reading/schema (just the orb) and only
             grows during drafting when there's actual content to show. */}
-          <div className="relative flex flex-col items-center justify-start">
+          <div className="relative flex flex-col items-center justify-start pt-8 lg:pt-20">
             <AnimatePresence mode="wait">
               {phase === 'starting' || phase === 'reading' || phase === 'schema' ? (
                 <CoreOrb
