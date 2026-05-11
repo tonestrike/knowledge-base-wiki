@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/app-shell.tsx';
@@ -35,31 +34,20 @@ export function CompileRoute() {
     refetchInterval: (q) => (q.state.data?.wikiId ? false : 1000),
   });
 
+  // Don't auto-redirect once wikiId arrives — the cinematic finale (with
+  // thesis preview + "Open your wiki" CTA inside CompileTheater) does the
+  // hand-off. Auto-redirect would yank the user away mid-animation. The
+  // CompileFinished branch in CompileTheater renders the navigate button.
   useEffect(() => {
-    const wikiId = run.data?.wikiId;
-    if (!wikiId) return;
-    nav(`/wiki/${wikiId}`, { replace: true, state: { compileRunId } });
-  }, [run.data?.wikiId, compileRunId, nav]);
+    // Intentionally empty — left as a hook so the dev-time React state
+    // doesn't strand the run id when we revisit this route.
+    void run;
+    void nav;
+  }, [run, nav]);
 
   return (
     <AppShell>
-      <main className="mx-auto max-w-7xl space-y-8 px-6 py-10">
-        <motion.header
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="space-y-2"
-        >
-          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">
-            Compile in progress
-          </p>
-          <h1 className="font-serif text-4xl tracking-tight">Building your wiki…</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Reading sources, inferring a schema, drafting pages, and resolving the link graph.
-            You'll be taken to the wiki the moment its first pages land — usually 30–60s.
-          </p>
-        </motion.header>
-
+      <main className="mx-auto max-w-7xl px-4 py-6">
         {run.isError ? (
           <ErrorState
             message={`Couldn't subscribe to compile ${compileRunId.slice(0, 8)}: ${
@@ -68,7 +56,6 @@ export function CompileRoute() {
             onRetry={() => run.refetch()}
           />
         ) : null}
-
         <CompileTheater compileRunId={compileRunId} />
       </main>
     </AppShell>
