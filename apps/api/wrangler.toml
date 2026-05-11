@@ -72,6 +72,14 @@ name = "tenex-api"
 
 [env.prod.vars]
 ENVIRONMENT = "production"
+# Google OAuth callback URL the api advertises to Google. Must match an
+# entry in the OAuth client's "Authorized redirect URIs" list in Google
+# Cloud Console. Non-secret — the same value is visible to anyone who
+# starts the OAuth flow — so it lives here, not in Worker secrets.
+GOOGLE_OAUTH_REDIRECT = "https://tenex-api.tonyvantur.workers.dev/rpc/ingestion/authCallback"
+# Comma-separated list of origins the OAuth callback can 302 back to.
+# Protects against open-redirect from a tampered `returnTo`.
+WEB_APP_ORIGINS = "https://tenex-api.tonyvantur.workers.dev"
 
 [env.prod.observability]
 enabled = true

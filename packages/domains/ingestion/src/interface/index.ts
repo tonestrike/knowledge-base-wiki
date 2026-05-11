@@ -41,7 +41,24 @@ export const ingestionRouter = {
 
   authCallback: os.authCallback.handler(({ context, input }) => completeDriveAuth(context, input)),
 
-  listFolders: os.listFolders.handler(({ context, input }) => listDriveFolders(context, input)),
+  listFolders: os.listFolders.handler(async ({ context, input }) => {
+    try {
+      return await listDriveFolders(context, input);
+    } catch (err) {
+      // Catch the "No Drive tokens" / OAuthTokenUnreadable family and
+      // map to a typed UNAUTHORIZED so the frontend's
+      // `isDriveAuthError` heuristic flips and the picker shows the
+      // "Sign in to Drive" CTA instead of a generic 500. Anything
+      // else propagates as a real server error.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/No Drive tokens|OAuthTokenUnreadable|drive_unauthorized|401/i.test(msg)) {
+        throw new ORPCError('UNAUTHORIZED', {
+          message: 'No Drive tokens — sign in to Drive first.',
+        });
+      }
+      throw err;
+    }
+  }),
 
   registerFolder: os.registerFolder.handler(({ context, input }) => {
     if (!context.currentUserId) {
