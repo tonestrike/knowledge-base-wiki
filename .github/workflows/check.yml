@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: check-${{ github.ref }}
@@ -54,6 +55,11 @@ jobs:
     name: playwright (live deploy smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The smoke runs against the live Workers deploy. On pull_request the
+    # PR's code isn't deployed yet, so we'd be testing stale state — run only
+    # on push-to-main (post-merge) and on manual dispatch (post-deploy
+    # verification). PRs gate on the unit/typecheck/lint job above.
+    if: github.event_name != 'pull_request'
 
     steps:
       - uses: actions/checkout@v4
