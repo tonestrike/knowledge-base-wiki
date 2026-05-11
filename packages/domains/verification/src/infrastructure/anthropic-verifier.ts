@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { type Tracer, noOpTracer, previewText } from '@package/shared-kernel';
+import { type Tracer, noOpTracer, startLlmCallSpan } from '@package/shared-kernel';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { AnthropicVerifier } from '../application/ports.ts';
@@ -118,18 +118,17 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
         .join('\n');
       const userPrompt = `Claim:\n${claim.claimText}\n\nCited slices:\n${slicesXml}`;
 
-      const span = tracer.startSpan('llm.call', {
-        'gen_ai.system': 'openrouter',
-        'gen_ai.request.model': modelId,
-        'gen_ai.operation.name': 'verifier.audit',
-        provider: 'openrouter',
+      const call = startLlmCallSpan(tracer, {
+        system: 'openrouter',
         model: modelId,
-        'verifier.claim_id': claim.id,
-        'verifier.citation_count': citedSlices.length,
-        'prompt.preview': previewText(userPrompt) ?? '',
-        'system.preview': previewText(SYSTEM_PROMPT) ?? '',
+        operation: 'verifier.audit',
+        prompt: userPrompt,
+        systemPrompt: SYSTEM_PROMPT,
+        extra: {
+          'verifier.claim_id': claim.id,
+          'verifier.citation_count': citedSlices.length,
+        },
       });
-      const callStart = Date.now();
       let lastError: unknown;
       try {
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -144,20 +143,18 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
               temperature,
               maxOutputTokens: maxTokens,
             });
-            span.setAttributes({
-              'gen_ai.usage.input_tokens': usage?.inputTokens ?? 0,
-              'gen_ai.usage.output_tokens': usage?.outputTokens ?? 0,
-              'gen_ai.attempts': attempt,
-              'verifier.verdict': object.verdict,
-              'completion.preview': previewText(JSON.stringify(object)) ?? '',
-              latency_ms: Date.now() - callStart,
+            call.recordSuccess({
+              inputTokens: usage?.inputTokens ?? 0,
+              outputTokens: usage?.outputTokens ?? 0,
+              attempts: attempt,
+              completion: JSON.stringify(object),
+              extra: { 'verifier.verdict': object.verdict },
             });
-            span.setStatus('ok');
             return object;
           } catch (err) {
             lastError = err;
             if (attempt === maxAttempts || !isRetryable(err)) {
-              span.recordException(err);
+              call.span.recordException(err);
               throw err;
             }
             // Exponential backoff: 500ms, 1000ms, 2000ms, ...
@@ -167,10 +164,10 @@ export const createAnthropicVerifier = (opts: AnthropicVerifierOptions): Anthrop
         }
         // Unreachable — the loop either returns or throws — but TS demands a
         // statement here.
-        span.recordException(lastError);
+        call.span.recordException(lastError);
         throw lastError;
       } finally {
-        span.end();
+        call.span.end();
       }
     },
   };

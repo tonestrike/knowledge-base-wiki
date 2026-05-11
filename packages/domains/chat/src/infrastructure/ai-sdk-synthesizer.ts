@@ -1,4 +1,4 @@
-import { type Tracer, noOpTracer, previewText } from '@package/shared-kernel';
+import { type Tracer, noOpTracer, startLlmCallSpan } from '@package/shared-kernel';
 import { type LanguageModel, streamText, tool } from 'ai';
 import { z } from 'zod';
 import type { Synthesizer, SynthesizerEvent, SynthesizerInput } from '../application/ports.ts';
@@ -507,19 +507,16 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
 
     // One span covers the entire streaming generation. Token counts come in
     // at end-of-stream via the AI SDK's `usage` promise; we attach them
-    // before `span.end()` in the finally block.
+    // before `call.span.end()` in the finally block.
     const tracer = opts.tracer ?? noOpTracer;
-    const span = tracer.startSpan('llm.call', {
-      'gen_ai.system': 'openrouter',
-      'gen_ai.request.model': opts.modelName ?? 'unknown',
-      'gen_ai.operation.name': 'synthesizer.stream',
-      provider: 'openrouter',
+    const call = startLlmCallSpan(tracer, {
+      system: 'openrouter',
       model: opts.modelName ?? 'unknown',
-      'chat.findings_count': input.findings.length,
-      'prompt.preview': previewText(input.question) ?? '',
-      'system.preview': previewText(opts.systemPrompt ?? SYSTEM_PROMPT) ?? '',
+      operation: 'synthesizer.stream',
+      prompt: input.question,
+      systemPrompt: opts.systemPrompt ?? SYSTEM_PROMPT,
+      extra: { 'chat.findings_count': input.findings.length },
     });
-    const callStart = Date.now();
 
     // Build the messages array. Prior turns are threaded in as
     // user/assistant pairs so pronouns and topic continuations in the
@@ -565,8 +562,8 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
       result = buildResult();
     } catch (err) {
       clearTimeout(timer);
-      span.recordException(err);
-      span.end();
+      call.span.recordException(err);
+      call.span.end();
       const id = errorId();
       console.error('[chat.ai-sdk-synthesizer] streamText construction failed', {
         errorId: id,
@@ -687,7 +684,7 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
       yield* drainPending(state, true);
       yield* closeProse(state);
     } catch (err) {
-      span.recordException(err);
+      call.span.recordException(err);
       const id = errorId();
       console.error('[chat.ai-sdk-synthesizer] fullStream threw', {
         errorId: id,
@@ -700,24 +697,23 @@ export const createAiSdkSynthesizer = (opts: AiSdkSynthesizerOptions): Synthesiz
     } finally {
       clearTimeout(timer);
       // The AI SDK exposes a `usage` Promise that resolves at end-of-stream.
-      // We've either drained the stream successfully or hit a thrown error;
-      // in either case fetch usage best-effort and attach to the span.
-      // If the stream errored before usage was emitted, the Promise rejects;
-      // catch and skip.
+      // Best-effort fetch (the Promise rejects when the stream errored before
+      // usage was emitted); record success either way with whatever we got.
+      let inputTokens = 0;
+      let outputTokens = 0;
       try {
         const usage = await result.usage;
-        span.setAttributes({
-          'gen_ai.usage.input_tokens': usage?.inputTokens ?? 0,
-          'gen_ai.usage.output_tokens': usage?.outputTokens ?? 0,
-        });
+        inputTokens = usage?.inputTokens ?? 0;
+        outputTokens = usage?.outputTokens ?? 0;
       } catch {
         /* usage unavailable — common on error paths */
       }
-      span.setAttributes({
-        'chat.segments_emitted': segmentsEmitted,
-        latency_ms: Date.now() - callStart,
+      call.recordSuccess({
+        inputTokens,
+        outputTokens,
+        extra: { 'chat.segments_emitted': segmentsEmitted },
       });
-      span.end();
+      call.span.end();
     }
   },
 });
