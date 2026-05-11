@@ -1,5 +1,6 @@
 import type { AnswerEvent } from '@package/contracts/chat';
 import type { ConversationId, TurnId, WikiId } from '@package/contracts/shared';
+import { noOpTracer, previewText } from '@package/shared-kernel';
 import { Turn } from '../domain/turn.ts';
 import type { ChatRuntimeDeps } from './ports.ts';
 import { researchQuestion } from './research-question.ts';
@@ -84,6 +85,16 @@ export async function runChatTurn(
   args: RunChatTurnArgs,
   emit: (e: AnswerEvent) => Promise<void> | void,
 ): Promise<void> {
+  const tracer = deps.tracer ?? noOpTracer;
+  const turnSpan = tracer.startSpan('chat.turn', {
+    'chat.conversation_id': args.conversationId,
+    'chat.turn_id': args.turnId,
+    'chat.wiki_id': args.wikiId,
+    'chat.user_message_length': args.question.length,
+    'chat.user_message_preview': previewText(args.question) ?? '',
+    'chat.model': deps.synthesizerName ?? 'anthropic/claude-sonnet-4.6',
+  });
+  let turnStatus: 'ok' | 'error' = 'ok';
   try {
     await emit({ kind: 'AnswerStarted', turnId: args.turnId });
     await emit({
@@ -243,6 +254,8 @@ export async function runChatTurn(
       }
     }
   } catch (err) {
+    turnStatus = 'error';
+    turnSpan.recordException(err);
     const id = errorId();
     console.error('[chat.run-turn] run failed', {
       errorId: id,
@@ -258,5 +271,8 @@ export async function runChatTurn(
         err instanceof Error ? err.message : String(err)
       }`,
     });
+  } finally {
+    if (turnStatus === 'ok') turnSpan.setStatus('ok');
+    turnSpan.end();
   }
 }

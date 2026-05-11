@@ -1,6 +1,6 @@
 import type { LintRunId } from '@package/contracts/shared';
 import type { LintEvent } from '@package/contracts/verification';
-import type { EventBus } from '@package/shared-kernel';
+import type { EventBus, Tracer } from '@package/shared-kernel';
 import { lintWiki } from '../application/lint-wiki.ts';
 import type {
   AnthropicVerifier,
@@ -39,6 +39,8 @@ export const createInMemoryLintRunDispatcher = (deps: {
   newId: () => string;
   now: () => Date;
   concurrency?: number;
+  /** Optional tracer threaded through to `lintWiki` for `lint.run` spans. */
+  tracer?: Tracer;
 }): LintRunDispatcher => {
   interface Tape {
     events: LintEvent[];

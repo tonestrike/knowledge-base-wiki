@@ -16,7 +16,13 @@ import { subscribeWikiEvents } from '@domain/wiki/interface';
 import { onError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import type { UserId } from '@package/contracts/shared';
-import { InMemoryEventBus, newId, systemClock } from '@package/shared-kernel';
+import {
+  InMemoryEventBus,
+  type Tracer,
+  newId,
+  resolveTracer,
+  systemClock,
+} from '@package/shared-kernel';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { buildChatContext } from './build-chat-context.ts';
@@ -64,6 +70,17 @@ type Env = WikiBindings & {
   WEB_APP_ORIGINS?: string;
   OAUTH_TOKEN_KEY_BASE64: string;
   SESSION_SIGNING_KEY?: string;
+  // Observability — all optional. `resolveTracer` falls back to a console
+  // exporter when none are set, so dev keeps showing one JSON-line-per-span
+  // in wrangler tail without any config. Setting the Langfuse trio derives
+  // the OTLP endpoint + Basic-auth header automatically; a bare OTEL
+  // endpoint works the same way with whatever headers
+  // `OTEL_EXPORTER_OTLP_HEADERS` carries.
+  LANGFUSE_HOST?: string;
+  LANGFUSE_PUBLIC_KEY?: string;
+  LANGFUSE_SECRET_KEY?: string;
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_EXPORTER_OTLP_HEADERS?: string;
 };
 
 // Hono per-request variables. The session middleware writes `userId` once at
@@ -83,6 +100,19 @@ const resolveSessionSigningKey = (env: Env): string | undefined => {
       'Generate a fresh key with: openssl rand -base64 32',
   );
 };
+
+/**
+ * Construct the per-request tracer. Composition rule of thumb (see
+ * `@package/shared-kernel/observability`): Langfuse env vars win over generic
+ * OTLP, OTLP wins over console, console is the default. `ctx.waitUntil` keeps
+ * the export fetch alive past response flush; without it the OTLP exporter
+ * fires-and-forgets (still OK locally, lossy under prod scaling).
+ */
+const buildTracer = (env: Env, waitUntil: ((p: Promise<unknown>) => void) | undefined): Tracer =>
+  resolveTracer(env, {
+    serviceName: env.ENVIRONMENT === 'production' ? 'tenex-api' : `tenex-api-${env.ENVIRONMENT}`,
+    ...(waitUntil ? { waitUntil } : {}),
+  });
 
 /**
  * Build the ingestion context for a specific resolved UserId.
@@ -233,8 +263,18 @@ const bootstrapSubscriptions = (env: Partial<WikiBindings>) => {
 // Single-instance chat context, built lazily on first request and cached for
 // subsequent ones. The dispatcher's in-memory tape lives on this instance —
 // rebuilding it per request would lose in-flight chat conversations.
+//
+// Tracer note: the chat singleton bakes in the tracer it first sees because
+// the Researcher / Synthesizer adapters store it at construction time. In
+// practice the env doesn't change between requests on a single Worker
+// instance, so the resolved tracer is stable. The `waitUntil` it captures
+// comes from the *first* request — subsequent requests' spans still fire,
+// but their OTLP export uses the original execution context's keepalive
+// (or fire-and-forget if the first request didn't expose one). This is
+// adequate for prod observability; per-span request scoping would require
+// a tracer factory at the adapter layer.
 let chatContextSingleton: ReturnType<typeof buildChatContext> | null = null;
-const ensureChatContext = (env: Env) => {
+const ensureChatContext = (env: Env, tracer: Tracer) => {
   if (chatContextSingleton) return chatContextSingleton;
   chatContextSingleton = buildChatContext({
     eventBus: getSharedEventBus(),
@@ -243,6 +283,7 @@ const ensureChatContext = (env: Env) => {
       storage: env.STORAGE,
       openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
     },
+    tracer,
     // When bound, use the Durable Object dispatcher so chat.ask and
     // chat.streamAnswer survive landing on different Worker isolates.
     ...((env as unknown as { CHAT_TURN?: DurableObjectNamespace }).CHAT_TURN
@@ -273,15 +314,18 @@ app.use('/rpc/*', async (c, next) => {
 
   bootstrapSubscriptions(env);
   // `c.executionCtx` is a getter that throws outside a Workers runtime
-  // (e.g. `bun:test`); guard rather than relying on optional chaining.
+  // (e.g. `bun:test`). Guard the access so this middleware doesn't 500 the
+  // test path; we just lose the OTLP keepalive there (the export becomes
+  // fire-and-forget — fine locally).
   let waitUntil: ((p: Promise<unknown>) => void) | undefined;
   try {
-    const exec = c.executionCtx;
-    waitUntil = exec.waitUntil.bind(exec);
+    const ec = c.executionCtx;
+    if (ec?.waitUntil) waitUntil = (p: Promise<unknown>) => ec.waitUntil(p);
   } catch {
     waitUntil = undefined;
   }
-  const flat = buildFlatContext(env, userId, slug, waitUntil);
+  const tracer = buildTracer(env, waitUntil);
+  const flat = buildFlatContext(env, userId, slug, waitUntil, tracer);
 
   const { matched, response } = await handler.handle(c.req.raw, {
     prefix: '/rpc',
@@ -344,20 +388,25 @@ const parseRpcPath = (rawUrl: string): { slug: string; procedure: string } => {
  * spread lets the last writer silently win, so we pick precedence by router
  * slug; the chat slice additionally needs `waitUntil` injected so its
  * fire-and-forget research loop (SF-CHAT-11) survives the response flush.
+ *
+ * `tracer` is threaded into every domain-builder so spans emitted from the
+ * use-cases share a root parent across the whole request.
  */
 const buildFlatContext = (
   env: Env,
   userId: UserId | null,
   slug: string,
   waitUntil: ((p: Promise<unknown>) => void) | undefined,
+  tracer: Tracer,
 ): Record<string, unknown> => {
   const ingestion = buildIngestionContext(env, userId);
-  const wiki = buildWikiContext(env, systemClock);
-  const chatContext = ensureChatContext(env);
+  const wiki = buildWikiContext(env, systemClock, tracer);
+  const chatContext = ensureChatContext(env, tracer);
   const verification = buildVerificationContext(
     env as unknown as Parameters<typeof buildVerificationContext>[0],
     getSharedEventBus(),
     systemClock,
+    tracer,
   );
   const flat: Record<string, unknown> = {
     ...wiki,

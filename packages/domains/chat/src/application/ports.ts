@@ -14,7 +14,7 @@ import type {
   WikiId,
   WikiPageId,
 } from '@package/contracts/shared';
-import type { EventBus } from '@package/shared-kernel';
+import type { EventBus, Tracer } from '@package/shared-kernel';
 import type { Conversation } from '../domain/conversation.ts';
 import type { Turn } from '../domain/turn.ts';
 
@@ -353,6 +353,8 @@ export interface ChatRuntimeDeps {
   turns: TurnRepository;
   eventBus: EventBus;
   now: () => Date;
+  /** Observability port. Optional — `noOpTracer` is the safe default. */
+  tracer?: Tracer;
 }
 
 /** Combined deps used at the oRPC handler boundary; kept for compatibility

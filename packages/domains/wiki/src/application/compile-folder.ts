@@ -81,6 +81,7 @@ import {
   wikiId as parseWikiId,
   wikiPageId as parseWikiPageId,
 } from '@package/contracts/shared';
+import { noOpTracer } from '@package/shared-kernel';
 import { CompileRun, type CompileRun as TCompileRun } from '../domain/compile-run.ts';
 import { type ConceptPage, type IndexPage, WikiPage } from '../domain/wiki-page.ts';
 import { Wiki } from '../domain/wiki.ts';
@@ -156,11 +157,25 @@ export async function compileFolder(
   });
   await deps.runs.insert(run);
 
+  // Top-level span for the entire compile. Source-count + final total-page
+  // count attach as the orchestration progresses; on failure the catch block
+  // below records the exception.
+  const tracer = deps.tracer ?? noOpTracer;
+  const compileSpan = tracer.startSpan('compile.run', {
+    'compile.run_id': input.compileRunId,
+    'compile.folder_id': input.folderId,
+    ...(input.perspective ? { 'compile.has_perspective': true } : {}),
+  });
   try {
     const sourceList = await deps.sources.list(input.folderId);
     if (sourceList.length === 0) {
       throw new Error(`Folder ${input.folderId} has no sources to compile`);
     }
+
+    // Attach source-count up front so a CompileFailed mid-flight still has
+    // the size context attached to its span.
+    compileSpan.setAttribute('compile.source_count', sourceList.length);
+    let totalBytes = 0;
 
     await deps.emit({
       kind: 'CompileStarted',
@@ -269,6 +284,8 @@ export async function compileFolder(
       tailTexts.push(r);
     }
     const allTexts = [...headTexts, ...tailTexts];
+    for (const t of allTexts) totalBytes += t.text.length;
+    compileSpan.setAttribute('compile.total_bytes', totalBytes);
     const { tasks } = await planCompile(
       { llm: deps.llm },
       {
@@ -479,88 +496,107 @@ export async function compileFolder(
       // "Alignment Faking in Large Language Models". The Drafter still
       // writes the body + claims; we just override the title field.
       const bucketTitle = findings[0]?.title?.trim() ?? '(untitled)';
-      const draftFindings: ResearchFinding[] = findings.map((f) => ({
-        sourceId: f.sourceId,
-        sourceFilename: f.sourceFilename,
-        sourceText: f.sourceText,
-        sourceContentHash: f.sourceContentHash,
-        evidence: f.evidence,
-        spanStart: f.spanStart,
-        spanEnd: f.spanEnd,
-        title: f.title,
-      }));
-      const draftStart = Date.now();
-      const { draft } = await draftPage(
-        { llm: deps.llm },
-        {
+      const pageSpan = tracer.startSpan('compile.synthesis.page', {
+        'compile.run_id': input.compileRunId,
+        'compile.page_type': pageType,
+        'compile.bucket_title': bucketTitle.slice(0, 200),
+        'compile.findings': findings.length,
+      });
+      try {
+        const draftFindings: ResearchFinding[] = findings.map((f) => ({
+          sourceId: f.sourceId,
+          sourceFilename: f.sourceFilename,
+          sourceText: f.sourceText,
+          sourceContentHash: f.sourceContentHash,
+          evidence: f.evidence,
+          spanStart: f.spanStart,
+          spanEnd: f.spanEnd,
+          title: f.title,
+        }));
+        const draftStart = Date.now();
+        const { draft } = await draftPage(
+          { llm: deps.llm },
+          {
+            pageType,
+            findings: draftFindings,
+            ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
+          },
+        );
+        console.info(
+          `[compile-folder] Drafter done pageType=${pageType} in ${Date.now() - draftStart}ms slug=${draft.slug} title="${draft.title}"`,
+        );
+
+        const sourceTextById = new Map<SourceId, string>(
+          findings.map((f) => [f.sourceId, f.sourceText]),
+        );
+
+        const pid = parseWikiPageId(deps.newId());
+        const claims: Claim[] = await Promise.all(
+          draft.claims.map(async (c, claimIdx) => {
+            const claimUuid = parseClaimId(deps.newId());
+            const citations: Citation[] = await Promise.all(
+              c.citations.map(async (cit) => {
+                const start = cit.spanStart;
+                const end = Math.max(cit.spanEnd, cit.spanStart + 1);
+                const text = sourceTextById.get(cit.sourceId);
+                if (text == null) {
+                  throw new Error(
+                    `citation references sourceId ${cit.sourceId} not present in findings for pageType=${pageType}`,
+                  );
+                }
+                return {
+                  id: parseCitationId(deps.newId()),
+                  label: cit.label,
+                  span: {
+                    sourceId: cit.sourceId,
+                    byteRange: { start, end },
+                    contentHash: await sliceHash(text, start, end),
+                  },
+                };
+              }),
+            );
+            return {
+              id: claimUuid,
+              wikiPageId: pid,
+              paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
+              claimText: c.claimText,
+              citations,
+            };
+          }),
+        );
+
+        const conceptPage = WikiPage.concept({
+          id: pid,
+          wikiId: wid,
           pageType,
-          findings: draftFindings,
-          ...(input.perspective !== undefined ? { perspective: input.perspective } : {}),
-        },
-      );
-      console.info(
-        `[compile-folder] Drafter done pageType=${pageType} in ${Date.now() - draftStart}ms slug=${draft.slug} title="${draft.title}"`,
-      );
+          slug: uniqueSlug(pageType, draft.slug),
+          title: bucketTitle,
+          body: draft.body,
+          claims,
+          updatedAt: deps.now().toISOString(),
+        });
 
-      const sourceTextById = new Map<SourceId, string>(
-        findings.map((f) => [f.sourceId, f.sourceText]),
-      );
-
-      const pid = parseWikiPageId(deps.newId());
-      const claims: Claim[] = await Promise.all(
-        draft.claims.map(async (c, claimIdx) => {
-          const claimUuid = parseClaimId(deps.newId());
-          const citations: Citation[] = await Promise.all(
-            c.citations.map(async (cit) => {
-              const start = cit.spanStart;
-              const end = Math.max(cit.spanEnd, cit.spanStart + 1);
-              const text = sourceTextById.get(cit.sourceId);
-              if (text == null) {
-                throw new Error(
-                  `citation references sourceId ${cit.sourceId} not present in findings for pageType=${pageType}`,
-                );
-              }
-              return {
-                id: parseCitationId(deps.newId()),
-                label: cit.label,
-                span: {
-                  sourceId: cit.sourceId,
-                  byteRange: { start, end },
-                  contentHash: await sliceHash(text, start, end),
-                },
-              };
-            }),
-          );
-          return {
-            id: claimUuid,
-            wikiPageId: pid,
-            paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
-            claimText: c.claimText,
-            citations,
-          };
-        }),
-      );
-
-      const conceptPage = WikiPage.concept({
-        id: pid,
-        wikiId: wid,
-        pageType,
-        slug: uniqueSlug(pageType, draft.slug),
-        title: bucketTitle,
-        body: draft.body,
-        claims,
-        updatedAt: deps.now().toISOString(),
-      });
-
-      await deps.emit({
-        kind: 'PageDrafted',
-        compileRunId: input.compileRunId,
-        pageId: pid,
-        subtype: 'Concept',
-        pageType,
-        title: draft.title,
-      });
-      return conceptPage;
+        await deps.emit({
+          kind: 'PageDrafted',
+          compileRunId: input.compileRunId,
+          pageId: pid,
+          subtype: 'Concept',
+          pageType,
+          title: draft.title,
+        });
+        pageSpan.setAttributes({
+          'compile.page_id': pid,
+          'compile.claims': claims.length,
+          latency_ms: Date.now() - draftStart,
+        });
+        pageSpan.setStatus('ok');
+        return conceptPage;
+      } catch (err) {
+        pageSpan.recordException(err);
+        throw err;
+      } finally {
+        pageSpan.end();
+      }
     });
 
     const drafted = await Promise.allSettled(draftWork);
@@ -775,6 +811,11 @@ export async function compileFolder(
       pageCount: totalPages,
     });
 
+    compileSpan.setAttributes({
+      'compile.wiki_id': wid,
+      'compile.page_count': totalPages,
+    });
+    compileSpan.setStatus('ok');
     return { wikiId: wid };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -786,6 +827,9 @@ export async function compileFolder(
       compileRunId: input.compileRunId,
       message,
     });
+    compileSpan.recordException(err);
     throw err;
+  } finally {
+    compileSpan.end();
   }
 }

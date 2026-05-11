@@ -1,4 +1,5 @@
 import type { WikiPageId } from '@package/contracts/shared';
+import { type Tracer, noOpTracer, previewText, withSpan } from '@package/shared-kernel';
 import { type LanguageModel, stepCountIs, streamText, tool } from 'ai';
 import { z } from 'zod';
 import type {
@@ -157,6 +158,12 @@ export interface AgenticResearcherOptions {
   timeoutMs?: number;
   /** Optional model identifier for log lines. */
   modelName?: string;
+  /**
+   * Optional Tracer. Wraps the agent's streamText loop in an `llm.call`
+   * span and each tool invocation in a `chat.tool.<toolName>` span. Defaults
+   * to `noOpTracer` so test wiring works unchanged.
+   */
+  tracer?: Tracer;
 }
 
 const errorId = (): string => {
@@ -169,6 +176,7 @@ const errorId = (): string => {
 
 export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researcher => ({
   async research(input: ResearcherInput): Promise<ResearcherOutput> {
+    const tracer = opts.tracer ?? noOpTracer;
     // `visited` is the canonical working set the loop builds up. Each
     // tool's `execute` callback adds pages via `noteVisit` below; at
     // the end of the run we return [...visited.values()] as the
@@ -228,44 +236,47 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         inputSchema: z.object({
           query: z.string().describe('Free-text search query — the user phrasing or a refinement.'),
         }),
-        execute: async ({ query }) => {
-          const normalized = query.trim().toLowerCase();
-          if (queriedTerms.has(normalized)) {
-            // Hard-fail-noisily on duplicates so the model gets a clear
-            // signal not to repeat. Wastes one step but unblocks the
-            // model from looping on the same query indefinitely.
+        execute: ({ query }) =>
+          withSpan(tracer, 'chat.tool.searchWiki', { 'chat.query': query }, async (span) => {
+            const normalized = query.trim().toLowerCase();
+            if (queriedTerms.has(normalized)) {
+              // Hard-fail-noisily on duplicates so the model gets a clear
+              // signal not to repeat. Wastes one step but unblocks the
+              // model from looping on the same query indefinitely.
+              span.setAttribute('chat.duplicate', true);
+              return {
+                error:
+                  'You already ran this exact query. Try a different phrasing, a synonym, or stop searching and finalize.',
+                previousHits: 0,
+              };
+            }
+            queriedTerms.add(normalized);
+            const beforeCount = visited.size;
+            const hits = await opts.wikiReader.searchPages({
+              wikiId: input.wikiId,
+              query,
+              limit: searchLimit,
+            });
+            for (const p of hits) noteVisit(p);
+            const newPages = visited.size - beforeCount;
+            span.setAttributes({ 'chat.hits': hits.length, 'chat.new_pages': newPages });
             return {
-              error:
-                'You already ran this exact query. Try a different phrasing, a synonym, or stop searching and finalize.',
-              previousHits: 0,
+              hits: hits.map((p) => ({
+                pageId: p.id,
+                title: p.title,
+                pageType: p.pageType ?? null,
+                snippet: p.body.slice(0, 280),
+                citationCount: p.citations.length,
+              })),
+              newPages,
+              note:
+                hits.length === 0
+                  ? 'No hits. The wiki may not cover this exact topic — try a broader or related term, or finalize with what you have.'
+                  : newPages === 0
+                    ? "All hits were already in your working set. Don't repeat searches that surface the same pages."
+                    : undefined,
             };
-          }
-          queriedTerms.add(normalized);
-          const beforeCount = visited.size;
-          const hits = await opts.wikiReader.searchPages({
-            wikiId: input.wikiId,
-            query,
-            limit: searchLimit,
-          });
-          for (const p of hits) noteVisit(p);
-          const newPages = visited.size - beforeCount;
-          return {
-            hits: hits.map((p) => ({
-              pageId: p.id,
-              title: p.title,
-              pageType: p.pageType ?? null,
-              snippet: p.body.slice(0, 280),
-              citationCount: p.citations.length,
-            })),
-            newPages,
-            note:
-              hits.length === 0
-                ? 'No hits. The wiki may not cover this exact topic — try a broader or related term, or finalize with what you have.'
-                : newPages === 0
-                  ? "All hits were already in your working set. Don't repeat searches that surface the same pages."
-                  : undefined,
-          };
-        },
+          }),
       }),
       readWikiPage: tool({
         description:
@@ -273,18 +284,24 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
         inputSchema: z.object({
           pageId: z.string().describe('The wiki page id from a prior search hit.'),
         }),
-        execute: async ({ pageId }) => {
-          const page = await opts.wikiReader.getPage(pageId as WikiPageId);
-          if (!page) return { error: `page not found: ${pageId}` };
-          noteVisit(page);
-          return {
-            pageId: page.id,
-            title: page.title,
-            pageType: page.pageType ?? null,
-            body: page.body.slice(0, 2000),
-            citationCount: page.citations.length,
-          };
-        },
+        execute: ({ pageId }) =>
+          withSpan(tracer, 'chat.tool.readWikiPage', { 'chat.page_id': pageId }, async (span) => {
+            const page = await opts.wikiReader.getPage(pageId as WikiPageId);
+            if (!page) {
+              span.setAttribute('chat.found', false);
+              return { error: `page not found: ${pageId}` };
+            }
+            span.setAttribute('chat.found', true);
+            span.setAttribute('chat.page_type', page.pageType ?? '');
+            noteVisit(page);
+            return {
+              pageId: page.id,
+              title: page.title,
+              pageType: page.pageType ?? null,
+              body: page.body.slice(0, 2000),
+              citationCount: page.citations.length,
+            };
+          }),
       }),
       listPagesByType: tool({
         description:
@@ -294,46 +311,55 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
             .string()
             .describe('Exact PageType name from the Wiki taxonomy block (case-sensitive).'),
         }),
-        execute: async ({ pageType }) => {
-          const normalized = pageType.trim();
-          if (typedListed.has(normalized)) {
-            return {
-              error: `You already listed pages for "${normalized}". Move on to readWikiPage on the ones you haven't read, or try a different PageType.`,
-            };
-          }
-          typedListed.add(normalized);
-          // Guard: warn if the agent asked for a pageType the wiki
-          // doesn't have. The wikiReader will return [] anyway, but
-          // a noisy error helps the model pick a different one quickly.
-          if (meta && !meta.pageTypes.some((pt) => pt.name === normalized)) {
-            return {
-              error: `Unknown PageType "${normalized}". The wiki's PageTypes are: ${meta.pageTypes.map((pt) => pt.name).join(', ')}.`,
-            };
-          }
-          const beforeCount = visited.size;
-          const hits = await opts.wikiReader.listPagesByType({
-            wikiId: input.wikiId,
-            pageType: normalized,
-            limit: TYPE_LIST_LIMIT,
-          });
-          for (const p of hits) noteVisit(p);
-          const newPages = visited.size - beforeCount;
-          return {
-            pageType: normalized,
-            count: hits.length,
-            pages: hits.map((p) => ({
-              pageId: p.id,
-              title: p.title,
-              snippet: p.body.slice(0, 200),
-              citationCount: p.citations.length,
-            })),
-            newPages,
-            note:
-              hits.length === 0
-                ? `No Concept pages in section "${normalized}". The taxonomy lists this PageType but no pages were compiled into it.`
-                : 'Use readWikiPage on the most relevant entries to bring full bodies + citations into the answer.',
-          };
-        },
+        execute: ({ pageType }) =>
+          withSpan(
+            tracer,
+            'chat.tool.listPagesByType',
+            { 'chat.page_type': pageType },
+            async (span) => {
+              const normalized = pageType.trim();
+              if (typedListed.has(normalized)) {
+                span.setAttribute('chat.duplicate', true);
+                return {
+                  error: `You already listed pages for "${normalized}". Move on to readWikiPage on the ones you haven't read, or try a different PageType.`,
+                };
+              }
+              typedListed.add(normalized);
+              // Guard: warn if the agent asked for a pageType the wiki
+              // doesn't have. The wikiReader will return [] anyway, but
+              // a noisy error helps the model pick a different one quickly.
+              if (meta && !meta.pageTypes.some((pt) => pt.name === normalized)) {
+                span.setAttribute('chat.unknown_page_type', true);
+                return {
+                  error: `Unknown PageType "${normalized}". The wiki's PageTypes are: ${meta.pageTypes.map((pt) => pt.name).join(', ')}.`,
+                };
+              }
+              const beforeCount = visited.size;
+              const hits = await opts.wikiReader.listPagesByType({
+                wikiId: input.wikiId,
+                pageType: normalized,
+                limit: TYPE_LIST_LIMIT,
+              });
+              for (const p of hits) noteVisit(p);
+              const newPages = visited.size - beforeCount;
+              span.setAttributes({ 'chat.hits': hits.length, 'chat.new_pages': newPages });
+              return {
+                pageType: normalized,
+                count: hits.length,
+                pages: hits.map((p) => ({
+                  pageId: p.id,
+                  title: p.title,
+                  snippet: p.body.slice(0, 200),
+                  citationCount: p.citations.length,
+                })),
+                newPages,
+                note:
+                  hits.length === 0
+                    ? `No Concept pages in section "${normalized}". The taxonomy lists this PageType but no pages were compiled into it.`
+                    : 'Use readWikiPage on the most relevant entries to bring full bodies + citations into the answer.',
+              };
+            },
+          ),
       }),
       searchSources: tool({
         description:
@@ -345,36 +371,39 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
               'Keywords to find in the underlying source documents (verbatim phrasing OK).',
             ),
         }),
-        execute: async ({ query }) => {
-          const normalized = query.trim().toLowerCase();
-          if (sourcesQueriedTerms.has(normalized)) {
+        execute: ({ query }) =>
+          withSpan(tracer, 'chat.tool.searchSources', { 'chat.query': query }, async (span) => {
+            const normalized = query.trim().toLowerCase();
+            if (sourcesQueriedTerms.has(normalized)) {
+              span.setAttribute('chat.duplicate', true);
+              return {
+                error:
+                  'You already ran this exact source-search query. Try a different phrasing or stop searching and finalize.',
+              };
+            }
+            sourcesQueriedTerms.add(normalized);
+            const hits = await opts.wikiReader.searchSources({
+              wikiId: input.wikiId,
+              query,
+              limit: SOURCE_SEARCH_LIMIT,
+            });
+            span.setAttribute('chat.hits', hits.length);
             return {
-              error:
-                'You already ran this exact source-search query. Try a different phrasing or stop searching and finalize.',
-            };
-          }
-          sourcesQueriedTerms.add(normalized);
-          const hits = await opts.wikiReader.searchSources({
-            wikiId: input.wikiId,
-            query,
-            limit: SOURCE_SEARCH_LIMIT,
-          });
-          return {
-            hits: hits.map((h) => ({
-              sourceId: h.sourceId,
-              excerpt: h.excerpt,
-              citingPages: h.citingPages.map((p) => ({
-                pageId: p.pageId,
-                title: p.title,
-                pageType: p.pageType ?? null,
+              hits: hits.map((h) => ({
+                sourceId: h.sourceId,
+                excerpt: h.excerpt,
+                citingPages: h.citingPages.map((p) => ({
+                  pageId: p.pageId,
+                  title: p.title,
+                  pageType: p.pageType ?? null,
+                })),
               })),
-            })),
-            note:
-              hits.length === 0
-                ? 'No source matched. Either the wiki truly does not cover this, or try different keywords.'
-                : 'Drill into the citingPages with readWikiPage to bring those pages into the answer.',
-          };
-        },
+              note:
+                hits.length === 0
+                  ? 'No source matched. Either the wiki truly does not cover this, or try different keywords.'
+                  : 'Drill into the citingPages with readWikiPage to bring those pages into the answer.',
+            };
+          }),
       }),
     };
 
@@ -382,25 +411,42 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
     const timeoutMs = opts.timeoutMs ?? 90_000;
     const timer = setTimeout(() => ac.abort(), timeoutMs);
 
+    // Span over the whole agent loop. Token usage + final visited-page
+    // count attach in the finally block.
+    const llmSpan = tracer.startSpan('llm.call', {
+      'gen_ai.system': 'openrouter',
+      'gen_ai.request.model': opts.modelName ?? 'unknown',
+      'gen_ai.operation.name': 'researcher.loop',
+      provider: 'openrouter',
+      model: opts.modelName ?? 'unknown',
+      'chat.wiki_id': input.wikiId,
+      'prompt.preview': previewText(input.question) ?? '',
+    });
+    const callStart = Date.now();
+    // Inline the streamText() call so TS infers the fully-parameterized
+    // result type (with our tool set baked in) — see the synth adapter
+    // for the same reason this is inline-assigned.
+    const result = streamText({
+      model: opts.model,
+      tools,
+      toolChoice: 'auto',
+      stopWhen: stepCountIs(opts.maxSteps ?? 8),
+      system: buildSystem(meta, opts.systemPrompt),
+      prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. If the question maps to one of the PageTypes in the Wiki taxonomy block, call listPagesByType FIRST. Otherwise start with searchWiki.`,
+      temperature: 0.2,
+      maxOutputTokens: 1500,
+      maxRetries: 1,
+      abortSignal: ac.signal,
+    });
     try {
-      const result = streamText({
-        model: opts.model,
-        tools,
-        toolChoice: 'auto',
-        stopWhen: stepCountIs(opts.maxSteps ?? 8),
-        system: buildSystem(meta, opts.systemPrompt),
-        prompt: `Question: ${input.question}\n\nGather the wiki pages that best answer this. If the question maps to one of the PageTypes in the Wiki taxonomy block, call listPagesByType FIRST. Otherwise start with searchWiki.`,
-        temperature: 0.2,
-        maxOutputTokens: 1500,
-        maxRetries: 1,
-        abortSignal: ac.signal,
-      });
       // Drain the stream — tool .execute callbacks accumulate `visited` as a
       // side effect. We don't need the model's user-facing text.
       for await (const _part of result.fullStream) {
         // intentionally consumed for side effects
       }
+      llmSpan.setStatus('ok');
     } catch (err) {
+      llmSpan.recordException(err);
       const id = errorId();
       console.error('[chat.agentic-researcher] loop failed', {
         errorId: id,
@@ -418,6 +464,20 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       // worse than a partial result.
     } finally {
       clearTimeout(timer);
+      try {
+        const usage = await result.usage;
+        llmSpan.setAttributes({
+          'gen_ai.usage.input_tokens': usage?.inputTokens ?? 0,
+          'gen_ai.usage.output_tokens': usage?.outputTokens ?? 0,
+        });
+      } catch {
+        /* usage unavailable */
+      }
+      llmSpan.setAttributes({
+        'chat.visited_pages': visited.size,
+        latency_ms: Date.now() - callStart,
+      });
+      llmSpan.end();
     }
 
     const pages = [...visited.values()];

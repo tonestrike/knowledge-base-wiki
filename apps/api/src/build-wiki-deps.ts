@@ -13,7 +13,12 @@ import {
 import type { WikiContext } from '@domain/wiki/interface';
 import type { GapAnalyzer } from '@domain/wiki/ports';
 import type { CompileEvent } from '@package/contracts/wiki';
-import { type EventBus, InMemoryEventBus } from '@package/shared-kernel';
+import {
+  type EventBus,
+  InMemoryEventBus,
+  type Tracer,
+  resolveTracer,
+} from '@package/shared-kernel';
 
 /**
  * D1-backed wiki gap analyzer. Four queries:
@@ -122,6 +127,12 @@ export interface WikiBindings extends Record<string, unknown> {
   STORAGE: R2Bucket;
   COMPILE_RUN: DurableObjectNamespace;
   OPEN_ROUTER_API_KEY: string;
+  // Observability — all optional; see `resolveTracer`.
+  LANGFUSE_HOST?: string;
+  LANGFUSE_PUBLIC_KEY?: string;
+  LANGFUSE_SECRET_KEY?: string;
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_EXPORTER_OTLP_HEADERS?: string;
 }
 
 let cachedBus: EventBus | undefined;
@@ -147,11 +158,12 @@ const requireBinding = <T>(name: string, value: T | undefined): T => {
   return value;
 };
 
-const baseDeps = (env: Partial<WikiBindings>) => {
+const baseDeps = (env: Partial<WikiBindings>, tracer?: Tracer) => {
   const llm = createLlmClient({
     apiKey: env.OPEN_ROUTER_API_KEY ?? '',
     appName: 'tenex',
     appUrl: 'https://tenex.dev',
+    ...(tracer ? { tracer } : {}),
   });
   const wikiPageStorage = env.STORAGE ? createR2WikiPageStorage(env.STORAGE) : undefined;
   const wikis = env.DB
@@ -184,19 +196,29 @@ const baseDeps = (env: Partial<WikiBindings>) => {
 export const buildWikiContext = (
   env: Partial<WikiBindings>,
   clock: WikiContext['clock'],
+  tracer?: Tracer,
 ): WikiContext => ({
-  ...baseDeps(env),
+  ...baseDeps(env, tracer),
   clock,
   newId: () => crypto.randomUUID(),
   now: () => new Date(),
+  ...(tracer ? { tracer } : {}),
 });
 
 export const buildCompileRuntimeDeps = (
   env: WikiBindings,
   emit: (e: CompileEvent) => Promise<void>,
-) => ({
-  ...baseDeps(env),
-  newId: () => crypto.randomUUID(),
-  now: () => new Date(),
-  emit,
-});
+  tracer?: Tracer,
+) => {
+  // CompileRunDO calls this without a tracer (DO entrypoint has no access
+  // to the Worker's per-request tracer). Resolve one from the DO's own env
+  // bindings so the compile-folder orchestrator still ships spans.
+  const effective = tracer ?? resolveTracer(env);
+  return {
+    ...baseDeps(env, effective),
+    newId: () => crypto.randomUUID(),
+    now: () => new Date(),
+    emit,
+    tracer: effective,
+  };
+};

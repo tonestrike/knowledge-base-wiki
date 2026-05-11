@@ -7,7 +7,7 @@ import {
   createR2SourceTextReader,
 } from '@domain/verification/infrastructure';
 import type { VerificationContext } from '@domain/verification/interface';
-import type { EventBus } from '@package/shared-kernel';
+import type { EventBus, Tracer } from '@package/shared-kernel';
 import { newId } from '@package/shared-kernel';
 
 export interface VerificationBindings {
@@ -20,9 +20,11 @@ export const buildVerificationContext = (
   env: VerificationBindings,
   eventBus: EventBus,
   clock: { now(): Date },
+  tracer?: Tracer,
 ): VerificationContext => {
   const verifier = createAnthropicVerifier({
     apiKey: env.OPEN_ROUTER_API_KEY ?? '',
+    ...(tracer ? { tracer } : {}),
   });
   const claims = createDirectD1ClaimReader(env.DB);
   const sourceText = createR2SourceTextReader(env.STORAGE);
@@ -38,6 +40,7 @@ export const buildVerificationContext = (
     newId,
     now: () => clock.now(),
     concurrency: 4,
+    ...(tracer ? { tracer } : {}),
   });
 
   return {
@@ -51,5 +54,6 @@ export const buildVerificationContext = (
     eventBus,
     newId,
     now: () => clock.now(),
+    ...(tracer ? { tracer } : {}),
   } as VerificationContext;
 };

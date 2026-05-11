@@ -222,13 +222,23 @@ The architecture deliberately makes ingestion an extension point:
 
 The choice was: prove the wiki concept end-to-end on one well-understood format, rather than spread engineering thin across many formats with a thinner wiki on top.
 
-### We logged prompts inline; we did not wire a prompt-management plane
+### Observability via OTel; Langfuse-ready
 
-Every prompt in this codebase lives as a string literal next to the use-case that issues it — `packages/domains/verification/src/infrastructure/anthropic-verifier.ts`, `packages/domains/chat/src/infrastructure/ai-sdk-synthesizer.ts`, `packages/domains/chat/src/application/agentic-researcher.ts`. That's deliberate for a take-home: the prompt is part of the code review, not hidden behind a service.
+Every LanguageModel call and top-level use-case (`compile.run`, `compile.synthesis.page`, `chat.turn`, `chat.tool.{searchWiki,searchSources,readWikiPage,listPagesByType}`, `lint.run`, and per-call `llm.call` spans) emits an OpenTelemetry span. Attributes follow OTel's GenAI semantic conventions — `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` — so any GenAI-aware backend picks up cost and token attribution automatically. Prompts and completions are truncated to 500 chars in the span; full text would be too noisy at this granularity.
 
-**Given more time we would wire Langfuse** for prompt versioning, A/B comparisons, and trace spans that stitch a single user action across the compile, chat, and lint loops. The natural seam is already in place: every model call goes through the `LanguageModel` port (the Vercel AI SDK's `LanguageModelV1`). Wrapping that port with a traced adapter that emits to Langfuse's OTLP ingest gives us prompt history, latency/cost per call, and tool-loop spans for free — no per-call instrumentation, no edits to use-cases.
+Default in dev: `ConsoleTracer` writes one structured JSON line per finished span to stdout. Run `bun run dev` and watch wrangler logs — every span is visible without any external setup.
 
-So the abstraction is already there; we chose not to spend the integration budget. The work is "add one adapter, swap the binding in the composition root, point `OTEL_EXPORTER_OTLP_ENDPOINT` at Langfuse" — well-shaped, but not what the reviewer is here to evaluate.
+Switch to Langfuse with three env vars in `apps/api/.dev.vars`:
+
+```
+LANGFUSE_HOST=https://cloud.langfuse.com
+LANGFUSE_PUBLIC_KEY=pk-lf-…
+LANGFUSE_SECRET_KEY=sk-lf-…
+```
+
+The OTLP/HTTP exporter (in `packages/shared-kernel/src/observability/otlp-http-exporter.ts`) derives `${LANGFUSE_HOST}/api/public/otel/v1/traces` and an `Authorization: Basic base64(pk:sk)` header automatically. No code change, no SDK bundle in the Worker — the exporter speaks the OTLP/HTTP-JSON wire format directly against Workers' `fetch`. Generic OTLP backends work the same way via `OTEL_EXPORTER_OTLP_ENDPOINT` + `OTEL_EXPORTER_OTLP_HEADERS` (Honeycomb, Grafana Cloud, Tempo, etc.).
+
+What we deliberately did NOT do: a prompt-management plane (versioning, A/B variants), an evals dashboard wired into CI. The `LanguageModel` port is the seam those would plug into — we chose observability because it answers "is the system behaving in prod?" today rather than "are prompts improving over weeks?" That's the right ordering for a system this early.
 
 ## Evals
 

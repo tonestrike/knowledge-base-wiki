@@ -19,7 +19,7 @@ import {
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import type { Conversation as ConvWire, Turn as TurnWire } from '@package/contracts/chat';
 import { userId } from '@package/contracts/shared';
-import { type EventBus, InMemoryEventBus, systemClock } from '@package/shared-kernel';
+import { type EventBus, InMemoryEventBus, type Tracer, systemClock } from '@package/shared-kernel';
 import type { LanguageModel } from 'ai';
 
 /**
@@ -164,6 +164,12 @@ export interface BuildChatContextOptions {
    * one only works when both requests hit the same isolate.
    */
   chatTurnNamespace?: DurableObjectNamespace;
+  /**
+   * Optional Tracer. The Researcher / Synthesizer adapters take a tracer
+   * directly so each LLM call wraps in an `llm.call` span. Defaults to no-op
+   * for unit tests and any caller that doesn't care about traces.
+   */
+  tracer?: Tracer;
 }
 
 export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContext => {
@@ -230,11 +236,13 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
       model: sonnet,
       wikiReader,
       modelName: 'anthropic/claude-sonnet-4.6',
+      ...(opts.tracer ? { tracer: opts.tracer } : {}),
     });
     researcherName = 'agent-loop · anthropic/claude-sonnet-4.6';
     synthesizer = createAiSdkSynthesizer({
       model: sonnet,
       modelName: 'anthropic/claude-sonnet-4.6',
+      ...(opts.tracer ? { tracer: opts.tracer } : {}),
     });
     synthesizerName = 'anthropic/claude-sonnet-4.6';
   } else {
