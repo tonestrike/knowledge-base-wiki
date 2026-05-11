@@ -393,7 +393,7 @@ const main = async () => {
       process.exit(2);
     }
     // listWikis returns newest-first; pick that one.
-    wikiId = list.items[0]!.id;
+    wikiId = list.items[0]?.id as WikiId;
     console.error(
       `[evals] Auto-selected newest wiki: ${wikiId} (folder ${list.items[0]?.folderId})`,
     );

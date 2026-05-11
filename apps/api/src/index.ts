@@ -446,6 +446,83 @@ app.get('/__source/:id/outline.json', (c) =>
   serveSourceArtifact(c.env as Env, c.req.param('id'), 'outline.json'),
 );
 
+/**
+ * Dev-only one-shot: re-stamp every citation row's `content_hash` with the
+ * sha256 of the actual `[byteRangeStart, byteRangeEnd]` slice of the
+ * referenced source text. Heals wikis compiled before commit b727140
+ * ("hash citation slice (not whole source)") — those citations carry the
+ * whole-source hash, so chat's SourceHashVerifier tripwires every claim.
+ *
+ * Idempotent: a citation already carrying the correct slice hash is
+ * untouched. Returns a JSON summary of how many were updated, how many
+ * were already correct, and how many had unresolvable sources (so an
+ * operator can decide whether a recompile is still needed).
+ */
+app.post('/__dev/rehash-citations', async (c) => {
+  const env = (c.env ?? {}) as Env;
+  if (!env.DB || !env.STORAGE) return c.json({ error: 'D1/R2 bindings missing' }, 500);
+
+  const sha256Hex = async (s: string): Promise<string> => {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const rows = await env.DB.prepare(
+    'SELECT id, source_id, byte_range_start, byte_range_end, content_hash FROM citations',
+  ).all<{
+    id: string;
+    source_id: string;
+    byte_range_start: number;
+    byte_range_end: number;
+    content_hash: string;
+  }>();
+
+  const sourceTextCache = new Map<string, string | null>();
+  let updated = 0;
+  let alreadyCorrect = 0;
+  let missingSource = 0;
+  let outOfRange = 0;
+
+  for (const r of rows.results) {
+    let text = sourceTextCache.get(r.source_id);
+    if (text === undefined) {
+      const obj = await env.STORAGE.get(`sources/${r.source_id}/text`);
+      text = obj ? await obj.text() : null;
+      sourceTextCache.set(r.source_id, text);
+    }
+    if (!text) {
+      missingSource += 1;
+      continue;
+    }
+    if (r.byte_range_end > text.length) {
+      outOfRange += 1;
+      continue;
+    }
+    const slice = text.slice(r.byte_range_start, r.byte_range_end);
+    const expected = `sha256:${await sha256Hex(slice)}`;
+    if (r.content_hash === expected) {
+      alreadyCorrect += 1;
+      continue;
+    }
+    await env.DB.prepare('UPDATE citations SET content_hash = ? WHERE id = ?')
+      .bind(expected, r.id)
+      .run();
+    updated += 1;
+  }
+
+  return c.json({
+    scanned: rows.results.length,
+    updated,
+    alreadyCorrect,
+    missingSource,
+    outOfRange,
+    note:
+      missingSource > 0
+        ? 'Some citations reference sources without extracted text — recompile those folders.'
+        : undefined,
+  });
+});
+
 // Dev-only seed endpoint. Bypasses Drive entirely by accepting pre-extracted
 // PDF fixtures and writing them straight into D1 + R2 via the Worker
 // bindings. Used for local demo / agent-browser testing — never exposed in
