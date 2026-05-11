@@ -7,6 +7,7 @@ import { CompileTheater } from '../components/compile-theater/compile-theater.ts
 import { ErrorState } from '../components/states/error.tsx';
 import { LoadingState } from '../components/states/loading.tsx';
 import { Button } from '../components/ui/button.tsx';
+import { DeleteWikiButton } from '../components/wiki/delete-wiki-button.tsx';
 import { isBackendNotImplemented, useLiveMode } from '../lib/live-mode.tsx';
 import { orpc } from '../lib/orpc.ts';
 
@@ -119,13 +120,20 @@ export function WikiRoute() {
                 : ''}
             </p>
           </div>
-          <Button
-            variant={pageCount === 0 ? 'accent' : 'outline'}
-            onClick={startCompile}
-            disabled={start.isPending}
-          >
-            {start.isPending ? 'Starting…' : pageCount === 0 ? 'Compile this folder' : 'Recompile'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={pageCount === 0 ? 'accent' : 'outline'}
+              onClick={startCompile}
+              disabled={start.isPending}
+            >
+              {start.isPending
+                ? 'Starting…'
+                : pageCount === 0
+                  ? 'Compile this folder'
+                  : 'Recompile'}
+            </Button>
+            <DeleteWikiButton wikiId={wikiId} folderName={folder.data?.name ?? 'this wiki'} />
+          </div>
         </motion.header>
 
         {start.isError ? (

@@ -2,6 +2,7 @@ import { ORPCError, implement } from '@orpc/server';
 import { compileRunId as parseCompileRunId } from '@package/contracts/shared';
 import { wikiContract } from '@package/contracts/wiki';
 import type { Clock } from '@package/shared-kernel';
+import { deleteWiki } from '../application/delete-wiki.ts';
 import { getCompileRun } from '../application/get-compile-run.ts';
 import { getGaps } from '../application/get-gaps.ts';
 import { getPage } from '../application/get-page.ts';
@@ -72,6 +73,7 @@ export const wikiRouter = {
       yield e;
     }
   }),
+  deleteWiki: os.deleteWiki.handler(({ context, input }) => deleteWiki(context, input)),
 };
 
 export { subscribeWikiEvents } from './cross-context-subscriptions.ts';

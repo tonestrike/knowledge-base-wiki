@@ -77,6 +77,7 @@ const baseDeps = (): WikiDeps => {
         backlinks: [],
         updatedAt: '2026-05-09T12:00:00.000Z',
       }),
+      deleteBodies: async () => undefined,
     },
     runs: {
       insert: async () => undefined,

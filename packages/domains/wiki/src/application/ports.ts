@@ -74,6 +74,14 @@ export interface WikiRepository {
 export interface WikiPageRepository {
   insertMany(pages: WikiPage[]): Promise<void>;
   findById(id: WikiPageId): Promise<WikiPage | null>;
+  /**
+   * Delete page-body objects from blob storage for these ids. Used after
+   * `WikiRepository.cascadeDelete` to clean up the R2 side (D1 cascade
+   * removes the rows; this removes the markdown bodies). Individual
+   * misses (already-gone keys) MUST NOT throw — implementations should
+   * `Promise.allSettled` internally.
+   */
+  deleteBodies(pageIds: ReadonlyArray<WikiPageId>): Promise<void>;
   list(args: {
     wikiId: WikiId;
     subtype?: 'Concept' | 'Summary' | 'Answer' | 'Index';

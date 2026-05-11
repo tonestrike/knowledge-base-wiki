@@ -173,6 +173,14 @@ export const createD1WikiPageRepository = (
     }
   },
 
+  async deleteBodies(pageIds) {
+    // R2 only. D1 rows are removed by WikiRepository.cascadeDelete in the
+    // same use-case. Per-id misses (already-gone keys) must not throw —
+    // delete-wiki is idempotent and an extra retry shouldn't error.
+    if (pageIds.length === 0) return;
+    await Promise.allSettled(pageIds.map((id) => storage.delete(id)));
+  },
+
   async findById(id) {
     try {
       const r = await db.prepare('SELECT * FROM wiki_pages WHERE id = ?').bind(id).first<PageRow>();

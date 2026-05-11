@@ -140,6 +140,7 @@ const fakeRuntime = (): {
       findById: async () => null,
       list: async () => ({ items: [] }),
       toWire: () => ({}) as never,
+      deleteBodies: async () => undefined,
     },
     runs: {
       insert: async () => {
