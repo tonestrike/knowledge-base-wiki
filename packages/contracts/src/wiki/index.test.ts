@@ -6,6 +6,7 @@ import { demoSchema, mockCompileEventStream, mockWiki, mockWikiPage } from './mo
 describe('wiki contract', () => {
   it('exposes the union of wiki+page+compile procedures', () => {
     expect(Object.keys(wikiContract).sort()).toEqual([
+      'deleteWiki',
       'gaps',
       'getCompileRun',
       'getPage',

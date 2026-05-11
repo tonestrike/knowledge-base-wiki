@@ -60,6 +60,15 @@ export interface WikiRepository {
     nextCursor?: string;
   }>;
   toWire(w: Wiki): WikiWire;
+  /**
+   * Cascade-delete this wiki and every row that hangs off it: citations
+   * → claims → backlinks → wiki_pages → wikis. Returns the page ids the
+   * caller should remove from R2 (this port doesn't own page bodies —
+   * `WikiPageBodyStorage` does). Idempotent: deleting a wiki that no
+   * longer exists returns `{ deletedPageIds: [] }` instead of erroring,
+   * so a stale UI tab can't crash on a stale id.
+   */
+  cascadeDelete(wikiId: WikiId): Promise<{ deletedPageIds: WikiPageId[] }>;
 }
 
 export interface WikiPageRepository {

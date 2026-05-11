@@ -62,6 +62,12 @@ export const GapsOutput = z.object({
 });
 export type GapsOutput = z.infer<typeof GapsOutput>;
 
+export const DeleteWikiInput = z.object({ id: WikiId });
+export const DeleteWikiOutput = z.object({
+  deletedPageCount: z.number().int().nonnegative(),
+});
+export type DeleteWikiOutput = z.infer<typeof DeleteWikiOutput>;
+
 export const wikisContract = {
   getWiki: oc.route({ method: 'GET', path: '/wikis/{id}' }).input(GetWikiInput).output(Wiki),
   getSchema: oc
@@ -76,4 +82,11 @@ export const wikisContract = {
   // claims with no citations, schema PageTypes with no pages, sources
   // never cited, etc. Cheap D1 queries; runs on demand.
   gaps: oc.route({ method: 'GET', path: '/wikis/{id}/gaps' }).input(GapsInput).output(GapsOutput),
+  // Cascade-delete a wiki + all its pages, claims, citations, backlinks,
+  // and R2 page bodies. Idempotent: deleting a wiki that doesn't exist
+  // returns `{ deletedPageCount: 0 }` instead of erroring.
+  deleteWiki: oc
+    .route({ method: 'POST', path: '/wikis/{id}/delete' })
+    .input(DeleteWikiInput)
+    .output(DeleteWikiOutput),
 };

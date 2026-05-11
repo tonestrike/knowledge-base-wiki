@@ -1,9 +1,11 @@
 import {
   type FolderId,
   type WikiId,
+  type WikiPageId,
   WikiSchema,
   folderId as parseFolderId,
   wikiId as parseWikiId,
+  wikiPageId as parseWikiPageId,
 } from '@package/contracts/shared';
 import type { Wiki as WikiWire } from '@package/contracts/wiki';
 import type { WikiRepository } from '../application/ports.ts';
@@ -117,5 +119,44 @@ export const createD1WikiRepository = (db: D1Database): WikiRepository => ({
       lastCompiledAt: w.lastCompiledAt,
       pageCount: w.pageCount,
     };
+  },
+  async cascadeDelete(wikiId: WikiId): Promise<{ deletedPageIds: WikiPageId[] }> {
+    try {
+      // Snapshot the page ids first so the caller can clean up R2.
+      const pageRows = await db
+        .prepare('SELECT id FROM wiki_pages WHERE wiki_id = ?')
+        .bind(wikiId)
+        .all<{ id: string }>();
+      const deletedPageIds = pageRows.results.map((r) => parseWikiPageId(r.id));
+      // Cascade delete in dependency order. We don't have FK ON DELETE
+      // CASCADE in the schema, so each leaf table is cleared explicitly
+      // before its parent. Run as a D1 batch so we get one round trip
+      // and atomic semantics — if any statement fails the whole tree
+      // rolls back and the next call can retry cleanly.
+      await db.batch([
+        db
+          .prepare(
+            'DELETE FROM citations WHERE claim_id IN (SELECT id FROM claims WHERE wiki_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id = ?))',
+          )
+          .bind(wikiId),
+        db
+          .prepare(
+            'DELETE FROM claims WHERE wiki_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id = ?)',
+          )
+          .bind(wikiId),
+        db
+          .prepare(
+            'DELETE FROM backlinks WHERE from_page_id IN (SELECT id FROM wiki_pages WHERE wiki_id = ?)',
+          )
+          .bind(wikiId),
+        db.prepare('DELETE FROM wiki_pages WHERE wiki_id = ?').bind(wikiId),
+        db.prepare('DELETE FROM wikis WHERE id = ?').bind(wikiId),
+      ]);
+      return { deletedPageIds };
+    } catch (err) {
+      throw new Error(
+        `[d1.wikis.cascadeDelete id=${wikiId}] ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   },
 });
