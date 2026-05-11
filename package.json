@@ -25,7 +25,8 @@
     "rulesync:watch": "bunx --bun rulesync watch",
     "rulesync:install": "bunx --bun rulesync install",
     "rulesync:install:frozen": "bunx --bun rulesync install --frozen",
-    "evals": "bun run evals/run-evals.ts"
+    "evals": "bun run evals/run-evals.ts",
+    "evals:citation-roundtrip": "bun run evals/citation-roundtrip.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

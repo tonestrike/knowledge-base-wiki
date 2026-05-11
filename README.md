@@ -233,6 +233,7 @@ A span-citation accuracy harness against the anthropic-papers case set lives in 
 What's covered:
 
 - **Span-citation accuracy** — case set in `evals/anthropic-papers-cases.ts`: questions paired with expected source spans across the Constitutional AI / many-shot jailbreaks / alignment-faking bundle.
+- **Citation roundtrip** — `bun run evals:citation-roundtrip` proves every citation's `contentHash` matches the live source bytes (hash invariant check against the deployed api).
 
 ## AI tooling
 
