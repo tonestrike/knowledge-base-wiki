@@ -58,6 +58,7 @@ const baseDeps = (): WikiDeps => {
         updatedAt: '2026-05-09T12:00:00.000Z',
         pageCount: 0,
       }),
+      cascadeDelete: async () => ({ deletedPageIds: [] }),
     },
     pages: {
       insertMany: async () => undefined,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { compileRunId, folderId, sourceId } from '@package/contracts/shared';
 import { InMemoryEventBus } from '@package/shared-kernel';
+import type { ConceptPage, IndexPage } from '../domain/wiki-page.ts';
 import { compileFolder } from './compile-folder.ts';
 import type { CompileRuntimeDeps } from './ports.ts';
 
@@ -12,11 +13,25 @@ const fakeRuntime = (): {
   deps: CompileRuntimeDeps;
   bus: InMemoryEventBus;
   emitted: Array<{ kind: string }>;
-  inserted: { wikis: number; runs: number; runUpdates: number; pageBatches: number; pages: number };
+  inserted: {
+    wikis: number;
+    runs: number;
+    runUpdates: number;
+    pageBatches: number;
+    pages: number;
+    pageRecords: Array<ConceptPage | IndexPage>;
+  };
 } => {
   const bus = new InMemoryEventBus();
   const emitted: Array<{ kind: string }> = [];
-  const inserted = { wikis: 0, runs: 0, runUpdates: 0, pageBatches: 0, pages: 0 };
+  const inserted = {
+    wikis: 0,
+    runs: 0,
+    runUpdates: 0,
+    pageBatches: 0,
+    pages: 0,
+    pageRecords: [] as Array<ConceptPage | IndexPage>,
+  };
 
   let idCursor = 0;
   const sequentialId = () => `eeeeeeee-1111-4222-8333-${String(idCursor++).padStart(12, '0')}`;
@@ -110,11 +125,17 @@ const fakeRuntime = (): {
       findByFolderId: async () => null,
       list: async () => ({ items: [] }),
       toWire: () => ({}) as never,
+      cascadeDelete: async () => ({ deletedPageIds: [] }),
     },
     pages: {
       insertMany: async (ps) => {
         inserted.pageBatches++;
         inserted.pages += ps.length;
+        for (const p of ps) {
+          if (p.subtype === 'Concept' || p.subtype === 'Index') {
+            inserted.pageRecords.push(p);
+          }
+        }
       },
       findById: async () => null,
       list: async () => ({ items: [] }),
@@ -212,6 +233,34 @@ describe('compileFolder', () => {
     expect(firstThoughtIdx).toBeGreaterThanOrEqual(0);
     expect(firstThoughtIdx).toBeLessThan(schemaIdx);
     expect(lastThoughtIdx).toBeLessThan(finishedIdx);
+  });
+
+  it('stamps each Citation with the slice hash, not the whole-source hash', async () => {
+    const { deps, inserted } = fakeRuntime();
+    await compileFolder(deps, { compileRunId: RUN, folderId: FOLDER });
+
+    // Find a Concept page (has claims) among the inserted records.
+    const concept = inserted.pageRecords.find(
+      (p): p is ConceptPage => p.subtype === 'Concept' && p.claims.length > 0,
+    );
+    expect(concept).toBeDefined();
+    const citation = concept?.claims[0]?.citations[0];
+    expect(citation).toBeDefined();
+    if (!citation) throw new Error('unreachable: asserted above');
+
+    // Re-hash the slice the way chat's SourceHashVerifier does and compare.
+    const fullText = 'approved.';
+    const { start, end } = citation.span.byteRange;
+    const slice = fullText.slice(start, end);
+    const ab = new ArrayBuffer(slice.length);
+    new Uint8Array(ab).set(new TextEncoder().encode(slice));
+    const buf = await globalThis.crypto.subtle.digest('SHA-256', ab);
+    const hex = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+    const expected = `sha256:${hex}`;
+
+    expect(citation.span.contentHash as string).toBe(expected);
+    // And it must NOT be the whole-source hash the fake reader returned.
+    expect(citation.span.contentHash as string).not.toBe('sha256:abcdef0123456789');
   });
 
   it('marks the run failed and re-throws when sources are empty', async () => {

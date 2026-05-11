@@ -47,6 +47,23 @@ const ensureContentHash = (raw: string): ContentHash => {
   );
 };
 
+// Citations carry the hash of the *slice* their byteRange covers, not the
+// whole-source hash — chat's SourceHashVerifier re-hashes `text.slice(start,
+// end)` and compares. Storing the source's whole-file hash here would make
+// every citation tripwire at chat time. Web Crypto is portable across Bun
+// (tests) and workerd (prod).
+const sliceHash = async (text: string, start: number, end: number): Promise<ContentHash> => {
+  const slice = text.slice(start, end);
+  const bytes = new TextEncoder().encode(slice);
+  // Copy into a fresh ArrayBuffer; Bun's strict types reject a bare
+  // Uint8Array<ArrayBufferLike> for `crypto.subtle.digest`.
+  const ab = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(ab).set(bytes);
+  const buf = await globalThis.crypto.subtle.digest('SHA-256', ab);
+  const hex = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hex}` as ContentHash;
+};
+
 export async function compileFolder(
   deps: CompileRuntimeDeps,
   input: { compileRunId: CompileRunId; folderId: FolderId },
@@ -274,26 +291,52 @@ export async function compileFolder(
           `[compile-folder] Drafter done pageType=${pt.name} in ${Date.now() - draftStart}ms slug=${draft.slug}`,
         );
 
+        // Map sourceId → full extracted text so each citation can hash its
+        // own slice (chat's verifier compares the slice hash, not the
+        // whole-source hash). Findings in this PageType bucket carry the
+        // text alongside the contentHash from the Researcher pass above.
+        const sourceTextById = new Map<SourceId, string>(
+          findings.map((f) => [f.sourceId, f.sourceText]),
+        );
+
         const pid = parseWikiPageId(deps.newId());
-        const claims: Claim[] = draft.claims.map((c, claimIdx) => {
-          const claimUuid = parseClaimId(deps.newId());
-          const citations: Citation[] = c.citations.map((cit, _citIdx) => ({
-            id: parseCitationId(deps.newId()),
-            label: cit.label,
-            span: {
-              sourceId: cit.sourceId,
-              byteRange: { start: cit.spanStart, end: Math.max(cit.spanEnd, cit.spanStart + 1) },
-              contentHash: cit.sourceContentHash,
-            },
-          }));
-          return {
-            id: claimUuid,
-            wikiPageId: pid,
-            paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
-            claimText: c.claimText,
-            citations,
-          };
-        });
+        const claims: Claim[] = await Promise.all(
+          draft.claims.map(async (c, claimIdx) => {
+            const claimUuid = parseClaimId(deps.newId());
+            const citations: Citation[] = await Promise.all(
+              c.citations.map(async (cit) => {
+                const start = cit.spanStart;
+                const end = Math.max(cit.spanEnd, cit.spanStart + 1);
+                const text = sourceTextById.get(cit.sourceId);
+                if (text == null) {
+                  // Drafter snaps citations back to known findings, so this
+                  // is structurally unreachable — but fail loud instead of
+                  // silently storing a fake hash that the verifier will
+                  // reject downstream.
+                  throw new Error(
+                    `citation references sourceId ${cit.sourceId} not present in findings for pageType=${pt.name}`,
+                  );
+                }
+                return {
+                  id: parseCitationId(deps.newId()),
+                  label: cit.label,
+                  span: {
+                    sourceId: cit.sourceId,
+                    byteRange: { start, end },
+                    contentHash: await sliceHash(text, start, end),
+                  },
+                };
+              }),
+            );
+            return {
+              id: claimUuid,
+              wikiPageId: pid,
+              paragraphId: c.paragraphId || `p-${claimIdx + 1}`,
+              claimText: c.claimText,
+              citations,
+            };
+          }),
+        );
 
         const conceptPage = WikiPage.concept({
           id: pid,
@@ -369,10 +412,13 @@ export async function compileFolder(
     run = CompileRun.advance(run, 'indexing', deps.now().toISOString());
     await deps.runs.update(run);
 
+    const pageTypeDescriptions: Record<string, string> = {};
+    for (const pt of schema.pageTypes) pageTypeDescriptions[pt.name] = pt.description;
     const { indexPages } = buildIndexes({
       wikiId: wid,
       pages: conceptsWithLinks,
       pageTypes: schema.pageTypes.map((p) => p.name),
+      pageTypeDescriptions,
       newId: deps.newId,
       now: deps.now,
     });
