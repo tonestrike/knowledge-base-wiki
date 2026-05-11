@@ -49,8 +49,15 @@ export interface EventStreamConfig<T> {
   body?: unknown;
 }
 
-const DEFAULT_MAX_RECONNECTS = 3;
-const RECONNECT_BASE_MS = 1000;
+// Long compiles (5+ min) survive multiple wrangler hot-reloads only when
+// the consumer reconnects aggressively. 3 retries × 1-2-4s backoff = ~7s
+// of patience — way too tight. Bumped to 12 attempts; each successful
+// frame resets the counter, so the budget really only matters during a
+// sustained network outage. The Durable Object replays the tape on every
+// reconnect so the UI catches up automatically.
+const DEFAULT_MAX_RECONNECTS = 12;
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_BACKOFF_MS = 16_000;
 
 interface KindCarrier {
   kind?: unknown;
@@ -140,6 +147,11 @@ export function useEventStream<T>(
     const failedKinds = config.failedKinds ?? [];
     const finishedKinds = config.finishedKinds ?? [];
     let terminalSeen = false;
+    // Shared with the reconnect loop so a successful frame can drop the
+    // attempt counter back to zero. Without this, a long stream that
+    // reconnects 12 times during its lifetime exhausts the budget even
+    // if each segment between reconnects delivered hundreds of events.
+    const attemptRef = { value: 0 };
 
     const runOnce = async (): Promise<'terminal' | 'premature' | 'http-error'> => {
       const init: RequestInit = { signal: ac.signal };
@@ -197,6 +209,10 @@ export function useEventStream<T>(
               return 'terminal';
             }
             setEvents((prev) => [...prev, parsed]);
+            // A successful frame proves the stream is alive; reset the
+            // reconnect budget so a later wrangler reload still has 12
+            // attempts even if we already burned several earlier.
+            attemptRef.value = 0;
             if (kind && finishedKinds.includes(kind)) {
               terminalSeen = true;
               setDone(true);
@@ -211,14 +227,15 @@ export function useEventStream<T>(
 
     (async () => {
       try {
-        let attempt = 0;
         // Loop with backoff on premature close. Stop on terminal/http-error
-        // or when the budget is exhausted.
+        // or when the budget is exhausted. `attemptRef.value` resets to 0
+        // on every successful event frame (see runOnce), so the budget
+        // really only applies to a *sustained* outage.
         while (true) {
           const outcome = await runOnce();
           if (outcome === 'terminal' || outcome === 'http-error') return;
           // outcome === 'premature'
-          if (attempt >= maxReconnects) {
+          if (attemptRef.value >= maxReconnects) {
             // No `failedKinds`/`finishedKinds` configured (or none seen) ⇒
             // wrapper opts into "EOF == done" semantics. Only surface a
             // connection-lost error when the wrapper declared terminal
@@ -231,8 +248,12 @@ export function useEventStream<T>(
             }
             return;
           }
-          await sleep(RECONNECT_BASE_MS * 2 ** attempt, ac.signal);
-          attempt += 1;
+          const backoff = Math.min(
+            RECONNECT_BASE_MS * 2 ** attemptRef.value,
+            RECONNECT_MAX_BACKOFF_MS,
+          );
+          await sleep(backoff, ac.signal);
+          attemptRef.value += 1;
         }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setError(String(e));
