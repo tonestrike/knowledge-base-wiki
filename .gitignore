@@ -51,6 +51,12 @@ yarn-error.log*
 .eslintcache
 .cspellcache
 
+# playwright
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
 # ai-tool runtime (machine-local plugin caches)
 .claude/plugins/cache/
 .claude/worktrees/
