@@ -153,7 +153,7 @@ export async function compileFolder(
       );
     }
     const wid = parseWikiId(deps.newId());
-    const wiki = Wiki.create({
+    let wiki = Wiki.create({
       id: wid,
       folderId: input.folderId,
       schema,
@@ -366,6 +366,13 @@ export async function compileFolder(
     // bounded. allSettled so one bad draft can't tank the whole compile.
     const draftWork = dispatchQueue.map(async (bucket) => {
       const { pageType, findings } = bucket;
+      // The bucket's canonical title — its first finding's title — is what
+      // determined this bucket's identity during the (pageType, title)
+      // grouping step. Use it as the page title verbatim so distinct
+      // buckets don't all end up with the Drafter's same generic
+      // "Alignment Faking in Large Language Models". The Drafter still
+      // writes the body + claims; we just override the title field.
+      const bucketTitle = findings[0]?.title?.trim() ?? '(untitled)';
       const draftFindings: ResearchFinding[] = findings.map((f) => ({
         sourceId: f.sourceId,
         sourceFilename: f.sourceFilename,
@@ -426,7 +433,7 @@ export async function compileFolder(
         wikiId: wid,
         pageType,
         slug: uniqueSlug(pageType, draft.slug),
-        title: draft.title,
+        title: bucketTitle,
         body: draft.body,
         claims,
         updatedAt: deps.now().toISOString(),
@@ -538,21 +545,24 @@ export async function compileFolder(
 
     // Stamp the thesis + glossary onto the wiki record so they can render
     // at the top of the overview page. Best-effort: skip the update if
-    // narration failed.
+    // narration failed. We MUST reassign the in-memory `wiki` variable
+    // too — the final `Wiki.recordCompile(wiki, …)` step at the end of
+    // this function spreads `wiki.schema` into the persisted record. If
+    // we only update D1, the recordCompile step writes the stale
+    // pre-narrator schema right back over our thesis+glossary.
     if (narrative) {
       const enrichedSchema = {
         ...wiki.schema,
         ...(narrative.thesis ? { thesis: narrative.thesis } : {}),
         ...(narrative.glossary.length > 0 ? { glossary: narrative.glossary } : {}),
       };
-      await deps.wikis.update(
-        Wiki.create({
-          id: wiki.id,
-          folderId: wiki.folderId,
-          schema: enrichedSchema,
-          createdAt: wiki.createdAt,
-        }),
-      );
+      wiki = Wiki.create({
+        id: wiki.id,
+        folderId: wiki.folderId,
+        schema: enrichedSchema,
+        createdAt: wiki.createdAt,
+      });
+      await deps.wikis.update(wiki);
     }
 
     const pageTypeDescriptions: Record<string, string> = {};
