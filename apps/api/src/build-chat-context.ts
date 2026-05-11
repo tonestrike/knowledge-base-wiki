@@ -204,14 +204,17 @@ export const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiR
   };
 
   const hydrate = async (row: PageRow): Promise<WikiPageSummary> => {
-    // Bodies live at R2 key = page id. Both the canonical wiki writer
-    // (`d1-wiki-page-repo.insertMany` → `storage.put(p.id, p.body)`) and
-    // the dev seed endpoint write at this key, and the `body_r2_key`
-    // column is kept consistent with it. Reading at `row.id` here matches
-    // both writers; a previous version of this reader hit `row.body_r2_key`
-    // expecting `wiki_pages/<id>.md`, which silently returned null bodies
-    // because no writer ever used that prefix.
-    const obj = await storage.get(row.id);
+    // Bodies live at R2 key `wiki_pages/<id>.md`. The canonical writer
+    // is `createR2WikiPageStorage(bucket).put(id, body)` (in
+    // packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts),
+    // which prefixes with `wiki_pages/` and suffixes `.md`. An earlier
+    // version of this reader hit the bare `row.id` and silently got
+    // null bodies — the chat then surfaced only source-excerpt
+    // fragments (via `expandWithSourceEvidence` below) and the synth
+    // reported "findings are empty fragments". The `body_r2_key` column
+    // in D1 stores the same key but we hardcode the prefix here to
+    // match the writer's contract directly.
+    const obj = await storage.get(`wiki_pages/${row.id}.md`);
     const body = obj ? await obj.text() : '';
     const citations = await loadCitations(row.id);
     return {
