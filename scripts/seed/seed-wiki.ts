@@ -118,7 +118,32 @@ const main = async () => {
     return found;
   };
 
-  const pages = [
+  type SeedPageInput = {
+    id: string;
+    subtype: 'Concept' | 'Summary' | 'Answer' | 'Index';
+    pageType: string | null;
+    slug: string;
+    title: string;
+    body: string;
+    sourceId: string | null;
+    question: string | null;
+    indexEntriesJson: string | null;
+    claims: Array<{
+      id: string;
+      paragraphId: string;
+      claimText: string;
+      citations: Array<{
+        id: string;
+        sourceId: string;
+        contentHash: string;
+        byteRangeStart: number;
+        byteRangeEnd: number;
+        label: string;
+      }>;
+    }>;
+  };
+
+  const pages: SeedPageInput[] = [
     {
       id: randomUUID(),
       subtype: 'Concept' as const,
@@ -221,24 +246,36 @@ const main = async () => {
         },
       ],
     },
-    {
-      id: randomUUID(),
-      subtype: 'Index' as const,
-      pageType: 'KeyPerson',
-      slug: 'index-keyperson',
-      title: 'Index: Key People',
-      body: '',
-      sourceId: null,
-      question: null,
-      indexEntriesJson: JSON.stringify([
-        { title: 'Charlie Munger', slug: 'charlie-munger', count: 4 },
-        { title: 'Pete Liegl', slug: 'pete-liegl', count: 3 },
-        { title: 'Greg Abel', slug: 'greg-abel', count: 2 },
-        { title: 'Todd Combs', slug: 'todd-combs', count: 1 },
-      ]),
-      claims: [],
-    },
   ];
+
+  // Build the KeyPerson IndexPage deterministically from the seeded Concept
+  // pages above. We reference real pageIds (so the markdown links route to
+  // valid pages) and pull each entry's first-claim text as its teaser so the
+  // index reads like a real wiki TOC. The intro paragraph echoes the
+  // PageType description from the schema.
+  const keyPersonPages = pages.filter((p) => p.subtype === 'Concept' && p.pageType === 'KeyPerson');
+  const keyPersonDescription = PAGE_TYPES.find((pt) => pt.name === 'KeyPerson')?.description ?? '';
+  const indexEntries = keyPersonPages.map((p) => ({
+    pageId: p.id,
+    title: p.title,
+    summary: p.claims[0]?.claimText ?? `${p.title} page`,
+  }));
+  const indexIntro = `${keyPersonDescription}\n\nThis index lists every KeyPerson in the wiki.`;
+  const indexBody = `${indexIntro}\n\n${indexEntries
+    .map((e) => `- [${e.title}](/${e.pageId}) — ${e.summary}`)
+    .join('\n')}`;
+  pages.push({
+    id: randomUUID(),
+    subtype: 'Index' as const,
+    pageType: 'KeyPerson',
+    slug: 'index-keyperson',
+    title: 'KeyPersons',
+    body: indexBody,
+    sourceId: null,
+    question: null,
+    indexEntriesJson: JSON.stringify(indexEntries),
+    claims: [],
+  });
 
   const payload = {
     wikiId: WIKI_ID,

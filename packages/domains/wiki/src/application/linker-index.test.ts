@@ -71,4 +71,91 @@ describe('buildIndexes', () => {
     const decisionIndex = out.indexPages.find((ip) => ip.pageType === 'Decision');
     expect(decisionIndex?.entries).toHaveLength(2);
   });
+
+  it('produces a body with the PageType description and per-entry teasers from the first claim', () => {
+    const withClaim = (
+      id: string,
+      pageType: string,
+      title: string,
+      claimText: string,
+    ): ConceptPage =>
+      WikiPage.concept({
+        id: wikiPageId(id),
+        wikiId: WID,
+        pageType,
+        slug: title.toLowerCase().replaceAll(' ', '-'),
+        title,
+        body: 'irrelevant',
+        claims: [
+          {
+            id: '11111111-1111-4111-8111-111111111111' as unknown as ConceptPage['claims'][number]['id'],
+            wikiPageId: wikiPageId(id),
+            paragraphId: 'p-1',
+            claimText,
+            citations: [],
+          },
+        ],
+        updatedAt: '2026-05-09T12:00:00.000Z',
+      });
+
+    const pages = [
+      withClaim(
+        'dddddddd-1111-4222-8333-444444444410',
+        'Decision',
+        'Approve EMEA',
+        'EMEA expansion approved at the Q3 board meeting after the CFO pushed back twice.',
+      ),
+      withClaim(
+        'dddddddd-1111-4222-8333-444444444411',
+        'Decision',
+        'Hire CFO',
+        'Hired Jane Doe as CFO effective January 2025.',
+      ),
+    ];
+    let cursor = 0;
+    const out = buildIndexes({
+      wikiId: WID,
+      pages,
+      pageTypes: ['Decision'],
+      pageTypeDescriptions: {
+        Decision: 'A choice made by the leadership team with cited rationale.',
+      },
+      newId: () => `dddddddd-1111-4222-8333-666666666${String(cursor++).padStart(3, '0')}`,
+      now: () => new Date('2026-05-09T12:00:00.000Z'),
+    });
+    expect(out.indexPages).toHaveLength(1);
+    const ip = out.indexPages[0];
+    expect(ip?.body).toContain('A choice made by the leadership team');
+    expect(ip?.body).toContain('This index lists every Decision');
+    expect(ip?.body).toContain('Approve EMEA');
+    expect(ip?.body).toContain('EMEA expansion approved');
+    expect(ip?.body).toContain('Hire CFO');
+    expect(ip?.body).toContain('Hired Jane Doe');
+    expect(ip?.entries[0]?.summary).toContain('EMEA expansion');
+  });
+
+  it('caps the assembled body at ~3000 chars', () => {
+    const long = 'x'.repeat(5000);
+    const pages = [
+      WikiPage.concept({
+        id: wikiPageId('dddddddd-1111-4222-8333-444444444420'),
+        wikiId: WID,
+        pageType: 'Decision',
+        slug: 'd',
+        title: 'D',
+        body: 'b',
+        claims: [],
+        updatedAt: '2026-05-09T12:00:00.000Z',
+      }),
+    ];
+    const out = buildIndexes({
+      wikiId: WID,
+      pages,
+      pageTypes: ['Decision'],
+      pageTypeDescriptions: { Decision: long },
+      newId: () => 'dddddddd-1111-4222-8333-666666666999',
+      now: () => new Date('2026-05-09T12:00:00.000Z'),
+    });
+    expect(out.indexPages[0]?.body.length).toBeLessThanOrEqual(3001);
+  });
 });

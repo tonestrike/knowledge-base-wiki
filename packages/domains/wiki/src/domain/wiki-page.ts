@@ -133,12 +133,18 @@ export const WikiPage = {
   index(
     props: FactoryArgs<IndexPage, 'subtype' | 'citations' | 'claims' | 'body' | 'backlinks'> & {
       backlinks?: Backlink[];
+      // Optional plain-text intro paragraph(s) prepended above the entry list.
+      // Used by the IndexBuilder to explain what the PageType covers so the
+      // index reads like a wiki table-of-contents instead of a bare link list.
+      intro?: string;
     },
   ): IndexPage {
     if (props.entries.length === 0) throw new Error('IndexPage requires at least one entry');
-    const body = props.entries
+    const list = props.entries
       .map((e) => `- [${e.title}](/${e.pageId})${e.summary ? ` — ${e.summary}` : ''}`)
       .join('\n');
+    const body =
+      props.intro && props.intro.trim().length > 0 ? `${props.intro.trim()}\n\n${list}` : list;
     return Object.freeze({
       id: props.id,
       wikiId: props.wikiId,
