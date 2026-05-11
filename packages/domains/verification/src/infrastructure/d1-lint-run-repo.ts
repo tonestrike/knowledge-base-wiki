@@ -1,20 +1,9 @@
 import { type LintRunId, type WikiId, lintRunId, wikiId } from '@package/contracts/shared';
 import type { LintRun as LintRunWire } from '@package/contracts/verification';
+import type { D1Database } from '@package/shared-kernel';
 import { z } from 'zod';
 import type { LintRunRepository } from '../application/ports.ts';
 import { LintRun, type LintRun as LintRunDomain, type LintRunStatus } from '../domain/lint-run.ts';
-
-// Minimal D1 binding shape — apps/api injects `env.DB`. Defined locally to
-// keep the framework dependency out of the repo file's interface contract.
-export interface D1Database {
-  prepare(query: string): D1PreparedStatement;
-}
-export interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  first<T = unknown>(): Promise<T | null>;
-  all<T = unknown>(): Promise<{ results: T[] }>;
-  run(): Promise<{ success: boolean }>;
-}
 
 interface LintRunRow {
   id: string;
@@ -200,4 +189,8 @@ export const createD1LintRunRepository = (db: D1Database): LintRunRepository => 
 // Coerce-from-row for use by sibling repos.
 export const lintRunFromRow = fromRow;
 export const lintRunToWire = toWire;
+// Re-export the shared-kernel D1Database type so sibling adapters that
+// historically imported it from this file keep working without a direct
+// shared-kernel dependency.
+export type { D1Database } from '@package/shared-kernel';
 export type { LintRunRow, WikiId };
