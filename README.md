@@ -61,6 +61,8 @@ Open <http://localhost:5173>.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Same client's secret. | Same screen. |
 | `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models. | <https://openrouter.ai/keys> |
 
+Optional: set `OPENAI_EMBEDDING_API_KEY` and bind a Cloudflare Vectorize index (`VECTORIZE`, see `apps/api/wrangler.toml`) to switch `chat.searchSources` from token-overlap to `text-embedding-3-small` semantic search. Without these the chat agent falls back to the existing D1 token-overlap path — zero behavior change. After a fresh compile, `POST /__dev/reindex-sources` upserts the new sources into the index (idempotent — deterministic chunk ids); the deploy script (`apps/api/scripts/deploy`) auto-provisions the index if it doesn't exist.
+
 Add `http://localhost:8787/rpc/ingestion/authCallback` to your Google OAuth client's authorized redirect URIs.
 
 ## Architecture
@@ -94,6 +96,7 @@ graph LR
     D1[(D1)]
     R2[(R2)]
     KV[(KV)]
+    Vectorize[(Vectorize)]
     CompileRunDO[CompileRunDO]
     ChatTurnDO[ChatTurnDO]
   end
@@ -106,6 +109,7 @@ graph LR
   Wiki --> CompileRunDO
   Chat --> D1
   Chat --> R2
+  Chat --> Vectorize
   Chat --> ChatTurnDO
   Verification --> D1
   Verification --> R2
@@ -114,11 +118,13 @@ graph LR
   subgraph External["External"]
     Drive["Google Drive API"]
     OpenRouter["OpenRouter → Anthropic"]
+    OpenAIEmb["OpenAI text-embedding-3-small"]
   end
 
   Ingestion --> Drive
   Wiki --> OpenRouter
   Chat --> OpenRouter
+  Chat --> OpenAIEmb
   Verification --> OpenRouter
 ```
 
