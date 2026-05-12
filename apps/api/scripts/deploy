@@ -32,7 +32,7 @@ bunx wrangler vectorize create tenex-sources \
   || true
 
 printf '[api/deploy] building SPA\n'
-(cd "$REPO_ROOT" && bun --filter @app/web run build)
+(cd "$REPO_ROOT" && bun run --filter @app/web build)
 
 printf '[api/deploy] wrangler deploy --env=prod\n'
 exec bunx wrangler deploy --env=prod

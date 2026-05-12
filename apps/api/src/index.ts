@@ -17,7 +17,7 @@ import { OAuthTokenUnreadable } from '@domain/ingestion/ports';
 import { subscribeWikiEvents } from '@domain/wiki/interface';
 import { onError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
-import type { UserId } from '@package/contracts/shared';
+import { type UserId, userId as parseUserId } from '@package/contracts/shared';
 import {
   InMemoryEventBus,
   type Tracer,
@@ -51,6 +51,7 @@ import { userIdFromDriveEmail } from './user-id-from-email.ts';
 // keeps the landing page non-empty in incognito. Hard-coded for the
 // single-tenant demo; multi-tenant would lift this to per-org config.
 const FEATURED_WIKI_ID = 'cb0b020d-50ab-41cb-91d9-09a5dda547b2';
+const FEATURED_DEMO_USER_ID = parseUserId('99999999-2222-4333-8444-555555555555');
 
 // Drive OAuth credentials accept both `GOOGLE_OAUTH_*` and bare `GOOGLE_*`
 // names; see `googleOAuthConfig` in `oauth-helpers.ts`. `WEB_APP_ORIGINS` is
@@ -323,8 +324,13 @@ app.use('/rpc/*', async (c, next) => {
   const env = (c.env ?? { ENVIRONMENT: 'test' }) as Env;
   const userId = c.var.userId;
   const { slug, procedure } = parseRpcPath(c.req.raw.url);
+  const demoChatUserId =
+    !userId && slug === 'chat' && procedure === 'open' && (await isFeaturedWikiOpen(c.req.raw))
+      ? FEATURED_DEMO_USER_ID
+      : null;
+  const effectiveUserId = userId ?? demoChatUserId;
 
-  if (!userId && slug === 'chat' && procedure === 'open') {
+  if (!effectiveUserId && slug === 'chat' && procedure === 'open') {
     return c.json(
       { defined: false, code: 'UNAUTHORIZED', message: 'Sign in to start a conversation.' },
       401,
@@ -344,7 +350,7 @@ app.use('/rpc/*', async (c, next) => {
     waitUntil = undefined;
   }
   const tracer = buildTracer(env, waitUntil);
-  const flat = buildFlatContext(env, userId, slug, waitUntil, tracer);
+  const flat = buildFlatContext(env, effectiveUserId, slug, waitUntil, tracer);
 
   const { matched, response } = await handler.handle(c.req.raw, {
     prefix: '/rpc',
@@ -398,6 +404,16 @@ export default app;
 const parseRpcPath = (rawUrl: string): { slug: string; procedure: string } => {
   const segments = new URL(rawUrl).pathname.split('/');
   return { slug: segments[2] ?? '', procedure: segments[3] ?? '' };
+};
+
+const isFeaturedWikiOpen = async (request: Request): Promise<boolean> => {
+  if (request.method !== 'POST') return false;
+  try {
+    const body = (await request.clone().json()) as { json?: { wikiId?: unknown } };
+    return body.json?.wikiId === FEATURED_WIKI_ID;
+  } catch {
+    return false;
+  }
 };
 
 /**

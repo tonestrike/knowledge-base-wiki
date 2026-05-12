@@ -81,15 +81,13 @@ export function RootRoute() {
         />
 
         {isSessioned ? (
-          <>
-            <CompiledWikisGrid
-              wikis={otherWikis}
-              isPending={wikis.isPending}
-              error={wikis.isError ? (wikis.error as Error) : null}
-            />
-            <ConnectDriveCard />
-          </>
+          <CompiledWikisGrid
+            wikis={otherWikis}
+            isPending={wikis.isPending}
+            error={wikis.isError ? (wikis.error as Error) : null}
+          />
         ) : null}
+        <ConnectDriveCard />
       </main>
     </AppShell>
   );

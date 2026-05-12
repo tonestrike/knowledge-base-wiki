@@ -30,20 +30,20 @@ const TYPE_LIST_LIMIT = 12;
  *     name). The agent's first tool when the user's question maps to
  *     one of the wiki's PageType names. Beats keyword-guessing.
  *
- *   - `searchWiki({ query })` — token-overlap search over page title +
- *     body. Used for keyword-shaped queries or as a follow-up after
- *     listPagesByType.
+ *   - `searchWiki({ query })` — semantic page search in production when
+ *     Vectorize is bound, with D1 token-overlap fallback. Used for
+ *     keyword-shaped queries or as a follow-up after listPagesByType.
  *
  *   - `readWikiPage({ pageId })` — fetch a single page's full body +
  *     citation list. The agent calls this on the 2-4 most promising
  *     hits from list/search calls to confirm they actually answer.
  *
- *   - `searchSources({ query })` — token-overlap search over the raw
- *     source documents (extracted PDF text, markdown). Returns the
- *     wiki pages that cite each matching source. Used when page-level
- *     search misses content the user's phrasing should plausibly hit
- *     — the compiled pages may use different vocabulary than the
- *     source documents.
+ *   - `searchSources({ query })` — semantic source-chunk search in
+ *     production when Vectorize is bound, with D1/R2 token-overlap
+ *     fallback. Returns the wiki pages that cite each matching source.
+ *     Used when page-level search misses content the user's phrasing
+ *     should plausibly hit — the compiled pages may use different
+ *     vocabulary than the source documents.
  *
  * ## Wiki-taxonomy injection
  *
@@ -73,11 +73,14 @@ const TYPE_LIST_LIMIT = 12;
 const SYSTEM_BASE = `You are Researcher. Your job is to find AS MANY relevant wiki pages as possible so that another agent can compose a thorough, well-cited answer. You have four tools — use them all when appropriate.
 
 Tools:
-- \`searchWiki\` — token-overlap search across page titles + bodies.
+- \`searchWiki\` — semantic search across compiled wiki pages in production
+  when Vectorize is bound; falls back to token-overlap search across page
+  titles + bodies.
 - \`readWikiPage\` — fetch a page's full body + citations by id.
-- \`searchSources\` — token-overlap search over the raw source documents
-  (PDFs / markdown the wiki was compiled from). Returns the wiki pages
-  that cite each matching source.
+- \`searchSources\` — semantic source-chunk search in production when
+  Vectorize is bound; falls back to token-overlap search over the raw
+  source documents (PDFs / markdown the wiki was compiled from). Returns
+  the wiki pages that cite each matching source.
 - \`listPagesByType\` — enumerate every Concept page of a given PageType
   (i.e. browse a section). Use this when the user's question maps to
   one of the wiki's sections (see "Wiki taxonomy" below).
@@ -232,7 +235,7 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
     const tools = {
       searchWiki: tool({
         description:
-          'Search the compiled wiki for pages whose title or body matches the query. Returns the top hits with id, title, type, and a short snippet so you can decide which to drill into. Index/ToC pages are filtered out — these are the underlying Concept pages.',
+          'Search the compiled wiki for relevant pages. In production this uses semantic Vectorize page search when configured, then falls back to D1 token-overlap search if semantic search is unavailable or empty. Returns hits with id, title, type, and a short snippet so you can decide which to drill into. Index/ToC pages are filtered out — these are the underlying Concept pages.',
         inputSchema: z.object({
           query: z.string().describe('Free-text search query — the user phrasing or a refinement.'),
         }),
@@ -363,7 +366,7 @@ export const createAgenticResearcher = (opts: AgenticResearcherOptions): Researc
       }),
       searchSources: tool({
         description:
-          'Search the raw source text (PDF extracts, markdown) for every Source cited in this wiki. Use this when searchWiki returns thin/off-topic hits — the compiled pages may use different vocabulary than the underlying documents. Each result names the wiki pages that cite that source; call readWikiPage on those to bring real citations into the answer.',
+          'Search raw source text chunks for every Source cited in this wiki. In production this uses semantic Vectorize source-chunk search when configured, then falls back to token-overlap source search if semantic search is unavailable or empty. Use this when searchWiki returns thin/off-topic hits — compiled pages may use different vocabulary than the underlying documents. Each result names the wiki pages that cite that source; call readWikiPage on those to bring real citations into the answer.',
         inputSchema: z.object({
           query: z
             .string()
