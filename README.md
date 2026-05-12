@@ -61,7 +61,7 @@ Open <http://localhost:5173>.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Same client's secret. | Same screen. |
 | `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models. | <https://openrouter.ai/keys> |
 
-Optional: set `OPENAI_EMBEDDING_API_KEY` and bind a Cloudflare Vectorize index (`VECTORIZE`, see `apps/api/wrangler.toml`) to switch `chat.searchSources` from token-overlap to `text-embedding-3-small` semantic search. Without these the chat agent falls back to the existing D1 token-overlap path — zero behavior change. After a fresh compile, `POST /__dev/reindex-sources` upserts the new sources into the index (idempotent — deterministic chunk ids); the deploy script (`apps/api/scripts/deploy`) auto-provisions the index if it doesn't exist.
+Optional: bind a Cloudflare Vectorize index (`VECTORIZE`, see `apps/api/wrangler.toml`; the deploy script auto-provisions one if it doesn't exist) to switch `chat.searchSources` AND `chat.searchWiki` from token-overlap to `openai/text-embedding-3-small` semantic search. Embeddings reuse `OPEN_ROUTER_API_KEY` since OpenRouter proxies OpenAI's embedding endpoint — there's no separate provider to provision. Without the binding the chat agent falls back to the existing D1 token-overlap path — zero behavior change. Indexing fires automatically on every `CompileFinished` event, so a fresh compile populates Vectorize without operator intervention; to backfill a wiki compiled before this landed, POST to `/__admin/reindex-wiki/:wikiId` while signed in (the route requires a valid `tenex_sid` cookie).
 
 Add `http://localhost:8787/rpc/ingestion/authCallback` to your Google OAuth client's authorized redirect URIs.
 
@@ -117,14 +117,12 @@ graph LR
 
   subgraph External["External"]
     Drive["Google Drive API"]
-    OpenRouter["OpenRouter → Anthropic"]
-    OpenAIEmb["OpenAI text-embedding-3-small"]
+    OpenRouter["OpenRouter<br/>Anthropic chat + OpenAI embeddings"]
   end
 
   Ingestion --> Drive
   Wiki --> OpenRouter
   Chat --> OpenRouter
-  Chat --> OpenAIEmb
   Verification --> OpenRouter
 ```
 
@@ -203,15 +201,17 @@ Cloudflare login is one-time and runs interactively: `bunx wrangler login` if yo
 
 We made three deliberate scope choices that are worth calling out so reviewers don't read the gaps as oversight.
 
-### We index typed *perspectives*; embeddings are a source-level fallback
+### We index typed *perspectives*; embeddings live alongside as a transparent fallback
 
 The interesting bet in this take-home is the *wiki*: an LLM-compiled, span-cited, lint-verified knowledge structure over a folder. The retrieval mechanic that powers chat is a secondary concern — once the wiki exists, search-quality improvements stack on top of it cleanly.
 
-The chat agent's research loop today is a tool-using loop over the wiki itself: `searchWiki`, `listPagesByType`, `readWikiPage`, `searchSources`. All four run against D1 + R2 with byte-range citations the synth verifier can re-hash; page-level search and browsing use token-overlap against the typed page schema, which is what makes them deterministic and free.
+The chat agent's research loop today is a tool-using loop over the wiki itself: `searchWiki`, `listPagesByType`, `readWikiPage`, `searchSources`. All four run against D1 + R2 with byte-range citations the synth verifier can re-hash. The typed page schema is what makes browsing (`listPagesByType`, `readWikiPage`) deterministic; the open question is what to do when the user's phrasing doesn't keyword-match the page or source text — `"deceptive AI behavior"` should hit a chunk that talks about *alignment faking* even when no keyword overlaps.
 
-`searchSources` is the one path where token-overlap gives up too much: a phrase like "deceptive AI behavior" should hit a chunk that talks about *alignment faking* even when no keyword overlaps. So we ship a semantic fallback there. When the api's `VECTORIZE` binding and `OPENAI_EMBEDDING_API_KEY` are both configured, `searchSources` becomes: embed the query with `text-embedding-3-small`, run `vectorize.query(topK)` against pre-computed 1000-char source chunks (200-char overlap, cosine, deterministic chunk ids → idempotent reindex), join back to D1 to find the wiki pages that cite each matching source, return as `SourceSearchHit`s. If the embedder throws, the index returns zero hits, or the binding/key isn't configured, we transparently fall through to the existing token-overlap implementation. Zero behavior change on environments without the keys; better recall on environments that have them.
+So we ship a semantic fallback for both search tools. When the api's `VECTORIZE` binding is configured, BOTH `searchSources` and `searchWiki` route through a `VectorWikiReader` adapter that: embeds the query with `openai/text-embedding-3-small` via OpenRouter (one key, reused), runs `vectorize.query(topK)` against the shared `tenex-sources` index, filters by a `kind: 'source' | 'page'` metadata discriminator, and hydrates the matches back into the same `SourceSearchHit` / `WikiPageSummary` shapes the agent already consumes. Source chunks are 1000-char windows with 200-char overlap; wiki pages are embedded whole (they're already a compiled magazine layout, 500-2k chars — chunking would just dilute the vector). Ids are deterministic (`source:<sourceId>:<chunkStart>`, `page:<wikiPageId>`) so re-indexing is idempotent.
 
-What we still haven't done is embed *wiki pages* themselves. The composition root in `apps/api/src/build-chat-context.ts` picks the `WikiReader` implementation; the citation/lint contract (`SourceHashVerifier`) is agnostic to how candidate pages are surfaced. Adding a full vector path for `searchWiki` is the same shape as the source-level fallback we already shipped — it doesn't change the wiki schema, the synthesizer, or the verifier.
+If the embedder throws, the index returns zero matches of the right kind, or the `VECTORIZE` binding isn't configured, the reader transparently falls through to the existing D1 token-overlap implementation. Zero behavior change on environments without the binding; better recall on environments that have it.
+
+Indexing happens automatically: the chat context subscribes to the `CompileFinished` domain event and walks the affected wiki — every page, every cited source — calling `indexWikiPage` / `indexSource` on the reader. Failures are caught and logged so a Vectorize hiccup never blocks a compile. To backfill a wiki that was compiled before this landed (or after a Vectorize index recreate), the operator POSTs to `/__admin/reindex-wiki/:wikiId` with a valid session cookie; the handler walks the wiki and returns a summary of `{ pagesIndexed, sourcesIndexed, errors }`.
 
 ### Ingestion is an extension point — six formats today
 

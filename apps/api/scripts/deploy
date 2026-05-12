@@ -6,11 +6,13 @@
 # provisioning explicit so a fresh account can deploy in one shot.
 #
 # Steps:
-#   1. Best-effort create the `tenex-sources` Vectorize index. Stream O
-#      ships a semantic-search fallback for the chat agent's
-#      `searchSources` tool, backed by 1536-dim cosine embeddings from
-#      OpenAI's `text-embedding-3-small`. The index name is referenced
-#      by `wrangler.toml` (binding = VECTORIZE). `|| true` tolerates
+#   1. Best-effort create the `tenex-sources` Vectorize index. Backs
+#      the chat agent's semantic-search fallback for BOTH `searchSources`
+#      AND `searchWiki`, with 1536-dim cosine embeddings from
+#      `openai/text-embedding-3-small` (reached via OpenRouter's
+#      OpenAI-compatible embeddings endpoint — one `OPEN_ROUTER_API_KEY`
+#      powers everything). The index name is referenced by
+#      `wrangler.toml` (binding = VECTORIZE); `|| true` tolerates
 #      "already exists" so reruns stay idempotent.
 #   2. Run the SPA build + wrangler deploy --env=prod (the existing
 #      `bun --filter @app/api run deploy` chain).
