@@ -26,6 +26,7 @@ import {
 } from '@package/shared-kernel';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { mountAdminRoutes } from './admin-routes.ts';
 import { buildChatContext } from './build-chat-context.ts';
 import { buildVerificationContext } from './build-verification-deps.ts';
 import { type WikiBindings, buildWikiContext, getSharedEventBus } from './build-wiki-deps.ts';
@@ -82,12 +83,12 @@ type Env = WikiBindings & {
   LANGFUSE_SECRET_KEY?: string;
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   OTEL_EXPORTER_OTLP_HEADERS?: string;
-  // Vectorize binding for the chat `searchSources` semantic-search
-  // fallback (Stream O). Optional — when the binding or the OpenAI
-  // embedding key is missing, chat falls back to D1 token overlap with
-  // zero behavior change.
+  // Vectorize binding for the chat semantic-search fallback. Optional —
+  // when the binding is missing, chat falls back to D1 token overlap
+  // with zero behavior change. The embedder reuses `OPEN_ROUTER_API_KEY`
+  // (OpenRouter proxies OpenAI's embeddings endpoint), so no separate
+  // provider key is needed.
   VECTORIZE?: VectorizeIndex;
-  OPENAI_EMBEDDING_API_KEY?: string;
 };
 
 // Hono per-request variables. The session middleware writes `userId` once at
@@ -289,13 +290,13 @@ const ensureChatContext = (env: Env, tracer: Tracer) => {
       db: env.DB,
       storage: env.STORAGE,
       openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
-      // Stream O — semantic-search fallback for `WikiReader.searchSources`.
-      // Both must be present to activate; missing either leaves chat on
-      // the original D1 token-overlap path.
+      // Semantic-search fallback for `WikiReader.searchSources` +
+      // `searchPages`. With the binding present, the chat reader is
+      // wrapped to embed queries via OpenRouter and rank against
+      // pre-embedded source chunks + wiki pages in Vectorize; missing
+      // it leaves chat on the original D1 token-overlap path.
+      // Auto-indexing wires up on the bus inside `buildChatContext`.
       ...(env.VECTORIZE ? { vectorize: env.VECTORIZE } : {}),
-      ...(env.OPENAI_EMBEDDING_API_KEY
-        ? { openAiEmbeddingApiKey: env.OPENAI_EMBEDDING_API_KEY }
-        : {}),
     },
     tracer,
     // When bound, use the Durable Object dispatcher so chat.ask and
@@ -381,6 +382,7 @@ mountSourceArtifacts(app, {
 });
 
 mountDevRoutes(app);
+mountAdminRoutes(app);
 
 export { ChatTurnDO, CompileRunDO } from './durable-objects.ts';
 export default app;

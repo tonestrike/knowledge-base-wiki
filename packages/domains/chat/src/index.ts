@@ -30,16 +30,22 @@ export { createAiSdkSynthesizer } from './infrastructure/ai-sdk-synthesizer.ts';
 export { createOrpcWikiReader } from './infrastructure/orpc-wiki-reader.ts';
 export { createDirectWikiReader } from './infrastructure/d1-wiki-reader.ts';
 export {
-  createOpenAiEmbedder,
+  createOpenRouterEmbedder,
   EmbedderNotConfiguredError,
   type Embedder,
-  type OpenAiEmbedderConfig,
-} from './infrastructure/openai-embedder.ts';
+  type OpenRouterEmbedderConfig,
+} from './infrastructure/openrouter-embedder.ts';
 export {
   createVectorWikiReader,
+  type IndexedPage,
   type VectorWikiReader,
   type VectorWikiReaderDeps,
 } from './infrastructure/vector-wiki-reader.ts';
+export {
+  subscribeIndexing,
+  indexWiki,
+  type IndexingDeps,
+} from './infrastructure/index-on-events.ts';
 export { createCfChatTurnDispatcher } from './infrastructure/cf-chat-turn-dispatcher.ts';
 export { createChatTurnDOClass } from './infrastructure/durable_objects/chat-turn-do.ts';
 export { runChatTurn, type RunChatTurnDeps } from './application/run-chat-turn.ts';

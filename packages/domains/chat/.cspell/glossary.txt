@@ -57,8 +57,10 @@ embedder
 embedders
 cosine
 openai
+openrouter
 upsert
 upserts
 chunkstart
 chunkend
 topk
+wikipageid
