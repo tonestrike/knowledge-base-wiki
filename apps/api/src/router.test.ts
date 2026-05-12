@@ -33,4 +33,24 @@ describe('apps/api router', () => {
     expect(typeof body.json.receivedAt).toBe('string');
     expect(new Date(body.json.receivedAt).toISOString()).toBe(body.json.receivedAt);
   });
+
+  it('keeps anonymous chat blocked for non-featured wikis', async () => {
+    const res = await app.fetch(
+      new Request(`${ORIGIN}/rpc/chat/open`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          json: { wikiId: '22222222-2222-4222-8222-222222222222' },
+          meta: [],
+        }),
+      }),
+      {
+        ENVIRONMENT: 'production',
+        SESSION_SIGNING_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      },
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toBe('Sign in to start a conversation.');
+  });
 });

@@ -30,6 +30,11 @@ interface SequencedEvent {
   event: AnswerEvent;
 }
 
+interface Subscriber {
+  send: (e: SequencedEvent) => void;
+  close: () => void;
+}
+
 // Factory pattern: the DO class is parameterized by a `buildDeps` function
 // so the same class can be wired by `apps/api` with real CF bindings or by
 // tests with stubs. Cloudflare requires a class export; we hand the result
@@ -88,7 +93,7 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
   buildDeps,
 }: ChatTurnDOFactoryArgs<Env>) => {
   return class ChatTurnDO {
-    private subscribers = new Set<(e: SequencedEvent) => void>();
+    private subscribers = new Set<Subscriber>();
 
     constructor(
       private readonly state: DurableObjectState,
@@ -122,40 +127,45 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
       }
 
       if (url.pathname === '/subscribe' && req.method === 'GET') {
-        let send: ((e: SequencedEvent) => void) | null = null;
+        let subscriber: Subscriber | null = null;
         const stream = new ReadableStream<Uint8Array>({
           start: async (controller) => {
             const enc = new TextEncoder();
-            send = (e) => {
-              // Throws when the consumer closed the controller mid-flight.
-              // The run() loop's snapshot iteration catches the throw and
-              // removes `send` from the subscribers Set.
-              controller.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+            subscriber = {
+              send(e) {
+                // Throws when the consumer closed the controller mid-flight.
+                // The run() loop's snapshot iteration catches the throw and
+                // removes this subscriber from the Set.
+                controller.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+              },
+              close() {
+                try {
+                  controller.close();
+                } catch {
+                  // already closed
+                }
+              },
             };
             const tape = (await this.state.storage.get<SequencedEvent[]>(TAPE_KEY)) ?? [];
             for (const e of tape) {
               try {
-                send(e);
+                subscriber.send(e);
               } catch {
                 // Replay aborted — controller is closed.
                 return;
               }
             }
-            this.subscribers.add(send);
+            this.subscribers.add(subscriber);
             // If the run already terminated, close the stream — the tape
             // we just replayed is the full event history.
             const status = await this.state.storage.get<DoStatus>(STATUS_KEY);
             if (status === 'finished' || status === 'failed') {
-              this.subscribers.delete(send);
-              try {
-                controller.close();
-              } catch {
-                // already closed
-              }
+              this.subscribers.delete(subscriber);
+              subscriber.close();
             }
           },
           cancel: () => {
-            if (send) this.subscribers.delete(send);
+            if (subscriber) this.subscribers.delete(subscriber);
           },
         });
         return new Response(stream, {
@@ -202,11 +212,16 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
         const snapshot = [...this.subscribers];
         for (const s of snapshot) {
           try {
-            s(sequenced);
+            s.send(sequenced);
           } catch (sErr) {
             this.subscribers.delete(s);
             console.warn('[ChatTurnDO] subscriber send failed; removed', sErr);
           }
+        }
+        if (event.kind === 'AnswerFinished' || event.kind === 'AnswerFailed') {
+          const terminalSnapshot = [...this.subscribers];
+          this.subscribers.clear();
+          for (const s of terminalSnapshot) s.close();
         }
       };
 
@@ -224,19 +239,22 @@ export const createChatTurnDOClass = <Env extends Record<string, unknown>>({
         // (a bug, or a thrown-not-rejected from emit) we still mark the
         // run as failed so /start can be retried.
         console.error('[ChatTurnDO] runChatTurn threw:', err);
+        try {
+          await emit({
+            kind: 'AnswerFailed',
+            turnId: args.turnId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        } catch {
+          // If emitting the failure itself fails, status still records whether retry is possible.
+        }
         await this.state.storage.put(STATUS_KEY, 'failed' as DoStatus);
       } finally {
         // Close any live subscribers so they don't hang. The tape is
         // durable — a new /subscribe call will replay the full run.
         const snapshot = [...this.subscribers];
         this.subscribers.clear();
-        for (const _s of snapshot) {
-          // No `close()` on our send closure; the SSE controller's
-          // natural lifecycle ends when the response stream is unwound.
-          // The dispatcher client treats a terminal AnswerFinished /
-          // AnswerFailed event as the end-of-iteration signal, so the
-          // empty-subscriber state here is effectively the same.
-        }
+        for (const s of snapshot) s.close();
       }
     }
   };

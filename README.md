@@ -4,6 +4,25 @@ TypeScript monorepo. Bun + Turborepo + Hono on Cloudflare Workers + Vite/React o
 
 The product is a **folder-grounded wiki**: point it at a Google Drive folder, the API ingests every PDF / Google Doc / Sheet / Slide / DOCX / Markdown, the compiler turns the collection into a wiki of typed pages with byte-range citations, a verification pass lints every claim against its cited span, and a chat surface answers questions over the wiki with the same span-verifying loop.
 
+## What to click, what to judge, what I built
+
+- **Click:** <https://tenex-api.tonyvantur.workers.dev/wiki/cb0b020d-50ab-41cb-91d9-09a5dda547b2>, open chat, ask `alignment faking` or `deceptive AI behavior`.
+- **Judge:** whether the app turns a messy Drive folder into a typed, cited, readable wiki with verifier-backed answers, not whether it has every SaaS setting page.
+- **Built:** ingestion, compiler, wiki UI, span citations, verifier/lint loop, chat over pages + source spans, Cloudflare deploy, eval/probe scripts, and Vectorize semantic fallback.
+
+## 90-second reviewer path
+
+1. Open the seeded wiki and skim the left tree: the folder compiled into typed pages (`Risk`, `Opportunity`, `Wedge`, `Trend`, `Pain`), not a flat document list.
+2. Open one page and click a citation chip: each claim points back to a byte range in the extracted source text.
+3. Open chat and ask `deceptive AI behavior`: the answer should retrieve alignment-faking pages even though that phrase is not the page title, then answer with citations.
+4. Open the lint dashboard from a wiki page: the verifier replays claims against cited spans and can surface/apply corrections.
+
+Operational proof is intentionally near the top: deployed Worker, live health endpoint, live seeded wiki, anonymous reviewer chat, Drive sign-in route, Vectorize binding, citation-roundtrip eval, and chat probes are all verified below. You can ignore the Cloudflare-specific plumbing unless you want to evaluate production wiring.
+
+## Why this is not just RAG
+
+Tenex does not chat over loose chunks first. It compiles the folder into a typed wiki with page schemas, claim records, citations, source byte ranges, and verifier state; retrieval then operates over that structured wiki and falls back to source spans when wording diverges. Embeddings improve recall, but the core artifact is the verified wiki.
+
 ## Live demo
 
 ![tenex — Anthropic research wiki](docs/images/wiki-overview.png)
@@ -16,7 +35,47 @@ The app is already deployed to Cloudflare Workers — no setup required to try i
 
 The Worker serves both the SPA (`/*`) and the oRPC api (`/rpc/*`) from the same origin — no CORS, no separate frontend deploy. Health check: <https://tenex-api.tonyvantur.workers.dev/rpc/core/health>.
 
-The homepage is public-by-design: any visitor reads the seeded Anthropic-research wiki without signing in. Google OAuth ingestion is the developer's compile path and stays behind a session — the OAuth client is unverified, so public sign-in isn't supported. To compile your own folder, run the api locally and follow [`docs/operations/local-dev.md`](docs/operations/local-dev.md).
+The homepage is public-by-design: any visitor can read and chat with the seeded Anthropic-research wiki without signing in. Google OAuth ingestion is the operator compile path and stays behind a session; because the OAuth client is unverified, Google may show its unverified-app interstitial before granting Drive read access.
+
+### Product path in screenshots
+
+These are the screens worth judging. They follow the real workflow rather than a marketing mock:
+
+| Step | What to look for |
+|---|---|
+| ![Homepage with featured wiki and Drive import](docs/images/homepage.png) | Public reviewer entry point plus the operator path for connecting Google Drive. |
+| ![Compile theater while the folder becomes a wiki](docs/images/compile-theater.png) | Long-running compile is observable: sources, stages, drafted pages, and live narration are visible while the Durable Object works. |
+| ![Compiled wiki overview](docs/images/wiki-overview.png) | The output is a typed wiki with perspective-shaped sections, not a folder dump or chat transcript. |
+| ![Wiki page with citation chips](docs/images/wiki-page.png) | Claims are written as readable pages and grounded by citation chips that point back to source spans. |
+| ![Chat dock answering from the wiki](docs/images/chat-dock.png) | Chat retrieves wiki pages/source spans, streams the answer, and keeps citations attached. |
+| ![Verifier lint dashboard](docs/images/lint-dashboard.png) | The verifier is a product surface: failures can be inspected and corrected, not just logged. |
+
+## Checked in production
+
+Last live verification: May 12, 2026, against Worker version `d8c1ff6e-339d-4b78-ab3d-8fcffa4b652e`.
+
+| Check | Result |
+|---|---|
+| Health endpoint | `200`, `{"status":"ok"}` from `/rpc/core/health` |
+| Drive OAuth start | `200`, returns a Google authorization URL |
+| Anonymous featured chat | `chat.open` returns a conversation for the seeded wiki |
+| Private-wiki anonymous chat | `401`, still requires sign-in |
+| Chat probe: `alignment faking` | Finished in 53.5s; first token at 35.7s; retrieved alignment-faking Risk/Opportunity/Wedge pages |
+| Chat probe: `deceptive AI behavior` | Finished in 62.9s; first token at 43.4s; retrieved overlapping alignment-faking pages |
+| Homepage operator path | Browser-checked: "Connect a Drive folder", "Sign in to Drive", and "Paste a folder URL instead" are visible |
+| Failed compile route | Browser-checked: `/compile/22232d34-5ca4-49e8-8bc2-f3dd7cc7b763` shows "Compile stopped" and the schema failure message |
+| Citation roundtrip eval | 57/57 cited byte ranges hash to their stored `contentHash` |
+
+## Known failure modes
+
+These are real examples observed during live testing, not theoretical caveats.
+
+| Failure | Example | Current status |
+|---|---|---|
+| Reviewer chat hidden behind auth | Anonymous `chat.open` originally returned `401`, so reviewers could read the featured wiki but not ask it questions. | Fixed for the seeded wiki only; private wikis still require a signed session. |
+| Chat stream timeout | Long Sonnet research gaps triggered `dispatcher timeout: no frame from ChatTurnDO in 60000ms` or `Stream closed before AnswerFinished`. | Fixed by wiring Vectorize into the DO runtime, trimming researcher budget, raising the frame timeout, and reconnecting browser streams to the same turn. |
+| Drive import UI hidden | The homepage only rendered the Drive connector after a valid session probe, so an unsigned operator had no visible sign-in button. | Fixed; the connector is always visible below the featured wiki. |
+| Eval gold-span mismatch | Failure classifier reports many `COMPILE_MISS` cases because several gold spans are short common phrases that do not exactly overlap stored citation ranges. | Known eval-data issue; citation-roundtrip remains the hard invariant. |
 
 ## Code walkthrough — start here
 
@@ -59,7 +118,8 @@ Open <http://localhost:5173>.
 | `OAUTH_TOKEN_KEY_BASE64` | AES-GCM key encrypting Drive refresh tokens at rest in D1. | `openssl rand -base64 32` |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google OAuth web client for Drive ingestion. | Google Cloud Console → APIs & Services → Credentials → New OAuth client ID (Web application). |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Same client's secret. | Same screen. |
-| `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models. | <https://openrouter.ai/keys> |
+| `SESSION_SIGNING_KEY` | Secret key signing the `tenex_sid` session cookie used by Drive/admin routes. | `openssl rand -base64 32` |
+| `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models and embeddings. | <https://openrouter.ai/keys> |
 
 Optional: bind a Cloudflare Vectorize index (`VECTORIZE`, see `apps/api/wrangler.toml`; the deploy script auto-provisions one if it doesn't exist) to switch `chat.searchSources` AND `chat.searchWiki` from token-overlap to `openai/text-embedding-3-small` semantic search. Embeddings reuse `OPEN_ROUTER_API_KEY` since OpenRouter proxies OpenAI's embedding endpoint — there's no separate provider to provision. Without the binding the chat agent falls back to the existing D1 token-overlap path — zero behavior change. Indexing fires automatically on every `CompileFinished` event, so a fresh compile populates Vectorize without operator intervention; to backfill a wiki compiled before this landed, POST to `/__admin/reindex-wiki/:wikiId` while signed in (the route requires a valid `tenex_sid` cookie).
 

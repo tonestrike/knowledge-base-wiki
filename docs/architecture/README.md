@@ -6,8 +6,8 @@ A bird's-eye view of tenex. For the language we use (the words this architecture
 
 For presentations / walkthroughs:
 
+- [`code-tour.md`](./code-tour.md) — **best reviewer entry point.** Starts with screenshots of the live product path, then maps each screen to the exact runtime/code that powers it.
 - [`talk.md`](./talk.md) — **3-minute walk-along.** Each section is one beat of the spoken script paired with the relevant code inlined. Open this in one pane and scroll while you speak.
-- [`code-tour.md`](./code-tour.md) — full end-to-end walkthrough of the system, ordered the way a request flows, with file-level pointers and the interesting bugs we hit along the way. Designed to accompany the `/present` deck.
 - [`perspective-flow.md`](./perspective-flow.md) — diagrams how the user's perspective text reaches every prompt during compile, plus how the chat picks the lens back up at question time.
 
 ## Table of contents
@@ -61,26 +61,24 @@ Browser                  Cloudflare Edge
 ┌────────────┐    HTTPS  ┌─────────────────────────────────┐
 │ apps/web   │  ───────▶ │ apps/api                        │
 │ (Vite SPA) │           │  Hono router                    │
-│            │           │   /rpc/*  ──▶ RPCHandler        │
+│            │           │   /rpc/*  ──▶ oRPC router       │
+│            │           │      ├ core                     │
+│            │           │      ├ ingestion                │
+│            │           │      ├ wiki                     │
+│            │           │      ├ chat                     │
+│            │           │      └ verification             │
 │            │           │              │                  │
 │            │           │              ▼                  │
-│            │           │     oRPC router                 │
-│            │           │      ├ core (domain/core)       │
-│            │           │      └ <future contexts>        │
-│            │           │              │                  │
-│            │           │              ▼                  │
-│            │           │     use-cases (pure)            │
-│            │           │              │                  │
-│            │           │              ▼                  │
-│            │           │     infrastructure              │
-│            │           │      ├ D1 (SQLite at edge)      │
-│            │           │      ├ KV  (key-value)          │
-│            │           │      └ R2  (object storage)     │
+│            │           │     use-cases + adapters        │
+│            │           │      ├ D1 / R2 / KV             │
+│            │           │      ├ Vectorize                │
+│            │           │      ├ CompileRunDO             │
+│            │           │      └ ChatTurnDO               │
 │            │           └─────────────────────────────────┘
 └────────────┘
 ```
 
-`apps/api` is intentionally thin: it composes domain `interface/` routers, supplies request-scoped context (clock, db, auth), and delegates everything else.
+`apps/api` is intentionally thin: it composes domain `interface/` routers, supplies request-scoped context (clock, db, auth), and delegates everything else. Long-running work lives in Durable Objects: `CompileRunDO` for multi-minute wiki compiles and `ChatTurnDO` for per-turn chat tapes. Chat retrieval reads the compiled wiki from D1/R2 and uses Vectorize as a semantic recall layer for both wiki pages and cited source chunks.
 
 ## Why these choices
 
