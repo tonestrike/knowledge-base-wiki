@@ -5,6 +5,7 @@ import {
   type Researcher,
   type Synthesizer,
   type TurnRepository,
+  type VectorWikiReader,
   type WikiReader,
   createAgenticResearcher,
   createAiSdkSynthesizer,
@@ -15,8 +16,9 @@ import {
   createDirectWikiResearcher,
   createInMemoryDispatcher,
   createMemorySourceHashVerifier,
-  createOpenAiEmbedder,
+  createOpenRouterEmbedder,
   createVectorWikiReader,
+  subscribeIndexing,
 } from '@domain/chat';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import type { Conversation as ConvWire, Turn as TurnWire } from '@package/contracts/chat';
@@ -33,20 +35,25 @@ import type { LanguageModel } from 'ai';
  * lookups. Without the api key (e.g. unit tests), the stub adapters keep
  * the context constructable.
  *
- * `searchSources` has a fall-through chain (Stream O):
+ * BOTH `searchSources` AND `searchWiki` (the agent's primary search
+ * tools) have a fall-through chain:
  *
- *   1. When BOTH the `VECTORIZE` binding and `OPENAI_EMBEDDING_API_KEY`
- *      are present, we wrap the D1 reader with a `VectorWikiReader` that
- *      embeds the query, hits the Vectorize index, and maps matches back
- *      to `Source` rows. Every other `WikiReader` method is a passthrough.
+ *   1. When the `VECTORIZE` binding is present and `OPEN_ROUTER_API_KEY`
+ *      is set (one key, since OpenRouter proxies OpenAI's embeddings
+ *      endpoint), we wrap the D1 reader with a `VectorWikiReader` that
+ *      embeds the query and hits the index. Source chunks and full
+ *      wiki pages live side-by-side in the same Vectorize index,
+ *      discriminated by a `kind: 'source' | 'page'` metadata field.
  *   2. If the embedder throws (missing key, rate limit, network) or the
- *      Vectorize query returns zero hits, the wrapper delegates to the
- *      inner reader's existing token-overlap implementation.
- *   3. When either binding is missing, the D1 reader is used directly —
- *      identical behavior to before Stream O shipped.
+ *      Vectorize query returns zero matching records of the right kind,
+ *      the wrapper delegates to the inner reader's existing token-overlap
+ *      implementation. Zero behavior change vs. pre-Stream-O.
+ *   3. When either binding is missing, the D1 reader is used directly.
  *
- * Wiki pages themselves are NOT embedded — the fallback is source-level
- * semantic search only, per scope.
+ * Indexing is event-driven: on every `CompileFinished` domain event we
+ * walk the affected wiki and re-embed its sources + pages best-effort.
+ * See `index-on-events.ts` in the chat package. The subscriber is wired
+ * once per Worker isolate, gated by `indexingBootstrapped`.
  */
 
 type Conv = Parameters<ConversationRepository['insert']>[0];
@@ -174,19 +181,13 @@ export interface BuildChatContextOptions {
     openRouterApiKey?: string;
     /**
      * Optional Cloudflare Vectorize index for the semantic-search
-     * `searchSources` fallback. When present alongside
-     * `openAiEmbeddingApiKey`, the chat context wraps the D1 reader with
-     * a `VectorWikiReader` that embeds the query and ranks chunks via
-     * cosine similarity. Missing either binding → unchanged behavior
-     * (D1 token overlap).
+     * `searchSources` + `searchWiki` fallback. When present alongside
+     * `openRouterApiKey`, the chat context wraps the D1 reader with
+     * a `VectorWikiReader` that embeds the query and ranks records
+     * (source chunks and full wiki pages) via cosine similarity.
+     * Missing this binding → unchanged behavior (D1 token overlap).
      */
     vectorize?: VectorizeIndex;
-    /**
-     * OpenAI API key used by the embeddings adapter. Distinct from
-     * `openRouterApiKey` — only the embedder talks to OpenAI directly;
-     * the Researcher/Synthesizer route through OpenRouter to Anthropic.
-     */
-    openAiEmbeddingApiKey?: string;
   };
   /**
    * Cloudflare Durable Object namespace hosting the per-turn chat run.
@@ -204,6 +205,29 @@ export interface BuildChatContextOptions {
    */
   tracer?: Tracer;
 }
+
+// Singleton flag: `subscribeIndexing` must be called at most once per
+// Worker isolate, otherwise multiple identical handlers race on every
+// CompileFinished event. The chat context is already a singleton (see
+// `ensureChatContext` in apps/api/src/index.ts), but the rebuild path
+// in tests calls buildChatContext repeatedly — track at module scope so
+// the second+ build is a no-op.
+let indexingBootstrapped = false;
+const bootstrapIndexing = (
+  bus: EventBus,
+  deps: { vectorReader: VectorWikiReader; db: D1Database; storage: R2Bucket },
+): void => {
+  if (indexingBootstrapped) return;
+  indexingBootstrapped = true;
+  subscribeIndexing(bus, deps);
+};
+
+/** Test seam: allow tests that build chat contexts multiple times to
+ *  reset the singleton so each test gets a clean subscription. NOT for
+ *  production use. */
+export const __resetChatIndexingForTests = (): void => {
+  indexingBootstrapped = false;
+};
 
 export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContext => {
   // Prefer D1-backed repos so conversations + turns survive wrangler reloads.
@@ -243,24 +267,38 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
   let synthesizerName = 'stub-synthesizer';
 
   if (opts.bindings?.openRouterApiKey) {
-    const { db, storage, openRouterApiKey, vectorize, openAiEmbeddingApiKey } = opts.bindings;
+    const { db, storage, openRouterApiKey, vectorize } = opts.bindings;
     const openrouter = createOpenRouter({ apiKey: openRouterApiKey });
     const baseReader = createDirectWikiReader(db, storage);
-    // Compose-or-fallback: if both the Vectorize binding and an OpenAI
-    // embedding key are present, wrap the base reader so `searchSources`
-    // first tries semantic search and then falls through to token overlap.
-    // Otherwise, hand the agent the base reader directly — preserving the
-    // pre-Stream-O behavior bit-for-bit when either binding is missing.
-    wikiReader =
-      vectorize && openAiEmbeddingApiKey
-        ? createVectorWikiReader({
-            db,
-            storage,
-            vectorize,
-            embedder: createOpenAiEmbedder({ apiKey: openAiEmbeddingApiKey }),
-            inner: baseReader,
-          })
-        : baseReader;
+    // Compose-or-fallback: if the Vectorize binding is present, wrap the
+    // base reader so `searchSources` and `searchWiki` (page search) first
+    // try semantic search and then fall through to token overlap. The
+    // embedder reuses the same OpenRouter key the rest of the app
+    // already needs — OpenRouter proxies OpenAI's embeddings endpoint,
+    // so there's no separate provider to provision. Missing the
+    // VECTORIZE binding → unchanged behavior (D1 token overlap).
+    let vectorReader: VectorWikiReader | null = null;
+    if (vectorize) {
+      vectorReader = createVectorWikiReader({
+        db,
+        storage,
+        vectorize,
+        embedder: createOpenRouterEmbedder({ apiKey: openRouterApiKey }),
+        inner: baseReader,
+      });
+    }
+    wikiReader = vectorReader ?? baseReader;
+    // One-shot per Worker isolate: subscribe the auto-indexer to the
+    // shared event bus so `CompileFinished` triggers a Vectorize
+    // backfill of the new wiki. Indexing failures are caught + logged
+    // inside the subscriber so a hiccup never blocks the compile.
+    if (vectorReader) {
+      bootstrapIndexing(eventBus, {
+        vectorReader,
+        db,
+        storage,
+      });
+    }
     // Pin routing to Anthropic-direct. OpenRouter otherwise picks the
     // cheapest provider; Sonnet 4.6 falls back to Amazon Bedrock when
     // Anthropic itself is at capacity, and Bedrock's tool-call validator

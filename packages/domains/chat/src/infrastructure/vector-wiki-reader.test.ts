@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { contentHash, sourceId, wikiId, wikiPageId } from '@package/contracts/shared';
-import type { SourceSearchHit, WikiReader } from '../application/ports.ts';
+import type { SourceSearchHit, WikiPageSummary, WikiReader } from '../application/ports.ts';
 import type {
   D1Database,
   D1PreparedStatement,
@@ -9,14 +9,15 @@ import type {
   VectorizeQueryResult,
   VectorizeVector,
 } from './cf-types.ts';
-import type { Embedder } from './openai-embedder.ts';
-import { EmbedderNotConfiguredError } from './openai-embedder.ts';
+import type { Embedder } from './openrouter-embedder.ts';
+import { EmbedderNotConfiguredError } from './openrouter-embedder.ts';
 import { createVectorWikiReader } from './vector-wiki-reader.ts';
 
 const wid = wikiId('44444444-2222-4333-8444-555555555555');
 const sid = sourceId('11111111-2222-4333-8444-000000000001');
 const hash = contentHash('sha256:abc');
 const citingPid = wikiPageId('dddddddd-1111-4222-8333-444444444444');
+const pid = wikiPageId('eeeeeeee-1111-4222-8333-444444444444');
 
 const fakeInnerHit: SourceSearchHit = {
   sourceId: sid,
@@ -26,18 +27,36 @@ const fakeInnerHit: SourceSearchHit = {
   citingPages: [{ pageId: citingPid, title: 'Citing Page' }],
 };
 
-const innerStub = (
-  searchSourcesImpl?: WikiReader['searchSources'],
-): { reader: WikiReader; calls: { searchSources: number } } => {
-  const calls = { searchSources: 0 };
+const fakePage: WikiPageSummary = {
+  id: pid,
+  wikiId: wid,
+  title: 'Alignment Faking',
+  pageType: 'Paper',
+  body: 'A paper about deceptive alignment in trained models.',
+  citations: [],
+};
+
+const innerStub = (overrides?: {
+  searchSources?: WikiReader['searchSources'];
+  searchPages?: WikiReader['searchPages'];
+  getPage?: WikiReader['getPage'];
+}): {
+  reader: WikiReader;
+  calls: { searchSources: number; searchPages: number; getPage: number };
+} => {
+  const calls = { searchSources: 0, searchPages: 0, getPage: 0 };
   const reader: WikiReader = {
-    async searchPages() {
+    async searchPages(args) {
+      calls.searchPages += 1;
+      if (overrides?.searchPages) return overrides.searchPages(args);
       return [];
     },
     async listSamplePages() {
       return [];
     },
-    async getPage() {
+    async getPage(id) {
+      calls.getPage += 1;
+      if (overrides?.getPage) return overrides.getPage(id);
       return null;
     },
     async listPagesByType() {
@@ -48,7 +67,7 @@ const innerStub = (
     },
     async searchSources(args) {
       calls.searchSources += 1;
-      if (searchSourcesImpl) return searchSourcesImpl(args);
+      if (overrides?.searchSources) return overrides.searchSources(args);
       return [fakeInnerHit];
     },
   };
@@ -176,9 +195,16 @@ describe('createVectorWikiReader · searchSources', () => {
       vectorize: fakeVectorize({
         matches: [
           {
-            id: `${sid}::0`,
+            id: `source:${sid}:0`,
             score: 0.91,
-            metadata: { sourceId: sid, wikiId: wid, chunkStart: 0, chunkEnd: 300, hash },
+            metadata: {
+              kind: 'source',
+              sourceId: sid,
+              wikiId: wid,
+              chunkStart: 0,
+              chunkEnd: 300,
+              hash,
+            },
           },
         ],
       }),
@@ -194,6 +220,33 @@ describe('createVectorWikiReader · searchSources', () => {
     expect(hits[0]?.citingPages[0]?.title).toBe('Alignment Faking');
   });
 
+  it('skips page-kind matches in the source-search path', async () => {
+    const { reader, calls } = innerStub();
+    const fullText = 'source body for the test';
+    const v = createVectorWikiReader({
+      db: fakeDb({
+        allowed: [{ source_id: sid, content_hash: hash }],
+        citing: [{ source_id: sid, page_id: citingPid, title: 'Citing', page_type: 'Paper' }],
+      }),
+      storage: fakeStorage({ [`sources/${sid}/text`]: fullText }),
+      vectorize: fakeVectorize({
+        matches: [
+          {
+            id: `page:${pid}`,
+            score: 0.95,
+            metadata: { kind: 'page', wikiPageId: pid, wikiId: wid, slug: 'alignment-faking' },
+          },
+        ],
+      }),
+      embedder: fixedEmbedder([0.1, 0.2]),
+      inner: reader,
+    });
+    const hits = await v.searchSources({ wikiId: wid, query: 'whatever', limit: 5 });
+    // Only page-kind matches → no source hits → fall through to inner.
+    expect(calls.searchSources).toBe(1);
+    expect(hits).toEqual([fakeInnerHit]);
+  });
+
   it('falls back when matches exist but none belong to the wiki', async () => {
     const { reader, calls } = innerStub();
     const v = createVectorWikiReader({
@@ -202,9 +255,16 @@ describe('createVectorWikiReader · searchSources', () => {
       vectorize: fakeVectorize({
         matches: [
           {
-            id: `${sid}::0`,
+            id: `source:${sid}:0`,
             score: 0.91,
-            metadata: { sourceId: sid, wikiId: 'other-wiki', chunkStart: 0, chunkEnd: 300, hash },
+            metadata: {
+              kind: 'source',
+              sourceId: sid,
+              wikiId: 'other-wiki',
+              chunkStart: 0,
+              chunkEnd: 300,
+              hash,
+            },
           },
         ],
       }),
@@ -217,8 +277,84 @@ describe('createVectorWikiReader · searchSources', () => {
   });
 });
 
+describe('createVectorWikiReader · searchPages (semantic searchWiki)', () => {
+  it('falls back to inner.searchPages when the embedder throws', async () => {
+    const { reader, calls } = innerStub();
+    const v = createVectorWikiReader({
+      db: fakeDb({ allowed: [], citing: [] }),
+      storage: fakeStorage({}),
+      vectorize: fakeVectorize({ matches: [] }),
+      embedder: throwingEmbedder(),
+      inner: reader,
+    });
+    const out = await v.searchPages({ wikiId: wid, query: 'anything', limit: 5 });
+    expect(calls.searchPages).toBe(1);
+    expect(out).toEqual([]);
+  });
+
+  it('returns hydrated wiki pages when Vectorize matches `kind:page` records', async () => {
+    const { reader, calls } = innerStub({
+      getPage: async (id) => (id === pid ? fakePage : null),
+    });
+    const v = createVectorWikiReader({
+      db: fakeDb({ allowed: [], citing: [] }),
+      storage: fakeStorage({}),
+      vectorize: fakeVectorize({
+        matches: [
+          {
+            id: `page:${pid}`,
+            score: 0.92,
+            metadata: {
+              kind: 'page',
+              wikiPageId: pid,
+              wikiId: wid,
+              pageType: 'Paper',
+              slug: 'alignment-faking',
+            },
+          },
+        ],
+      }),
+      embedder: fixedEmbedder([0.1, 0.2]),
+      inner: reader,
+    });
+    const out = await v.searchPages({ wikiId: wid, query: 'deceptive AI', limit: 5 });
+    expect(calls.searchPages).toBe(0);
+    expect(calls.getPage).toBe(1);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.id).toBe(pid);
+    expect(out[0]?.title).toBe('Alignment Faking');
+  });
+
+  it('ignores page matches from other wikis and falls through when nothing remains', async () => {
+    const { reader, calls } = innerStub();
+    const v = createVectorWikiReader({
+      db: fakeDb({ allowed: [], citing: [] }),
+      storage: fakeStorage({}),
+      vectorize: fakeVectorize({
+        matches: [
+          {
+            id: `page:${pid}`,
+            score: 0.92,
+            metadata: {
+              kind: 'page',
+              wikiPageId: pid,
+              wikiId: 'some-other-wiki',
+              slug: 'other-page',
+            },
+          },
+        ],
+      }),
+      embedder: fixedEmbedder([0.1, 0.2]),
+      inner: reader,
+    });
+    const out = await v.searchPages({ wikiId: wid, query: 'q', limit: 5 });
+    expect(calls.searchPages).toBe(1);
+    expect(out).toEqual([]);
+  });
+});
+
 describe('createVectorWikiReader · indexSource', () => {
-  it('chunks text and upserts vectors with chunk metadata', async () => {
+  it('chunks text and upserts vectors with kind:source metadata + namespaced ids', async () => {
     const { reader } = innerStub();
     const upserts: VectorizeVector[][] = [];
     const v = createVectorWikiReader({
@@ -230,14 +366,13 @@ describe('createVectorWikiReader · indexSource', () => {
     });
     const text = 'x'.repeat(2500);
     const out = await v.indexSource({ wikiId: wid, sourceId: sid, contentHash: hash, text });
-    // step=800, size=1000 → chunks at [0..1000), [800..1800), [1600..2500).
-    // Third chunk hits end-of-text and the loop breaks.
     expect(out.chunks).toBe(3);
     expect(upserts).toHaveLength(1);
     expect(upserts[0]).toHaveLength(3);
     const first = upserts[0]?.[0];
-    expect(first?.id).toBe(`${sid}::0`);
+    expect(first?.id).toBe(`source:${sid}:0`);
     expect(first?.metadata).toMatchObject({
+      kind: 'source',
       sourceId: sid,
       wikiId: wid,
       chunkStart: 0,
@@ -259,5 +394,67 @@ describe('createVectorWikiReader · indexSource', () => {
     const out = await v.indexSource({ wikiId: wid, sourceId: sid, contentHash: hash, text: '' });
     expect(out.chunks).toBe(0);
     expect(upserts).toHaveLength(0);
+  });
+});
+
+describe('createVectorWikiReader · indexWikiPage', () => {
+  it('embeds title + body as one vector and upserts under `page:<id>`', async () => {
+    const { reader } = innerStub();
+    const upserts: VectorizeVector[][] = [];
+    const v = createVectorWikiReader({
+      db: fakeDb({ allowed: [], citing: [] }),
+      storage: fakeStorage({}),
+      vectorize: fakeVectorize({ matches: [] }, upserts),
+      embedder: fixedEmbedder([0.5, 0.4, 0.3]),
+      inner: reader,
+    });
+    const out = await v.indexWikiPage({
+      id: pid,
+      wikiId: wid,
+      title: 'Alignment Faking',
+      body: 'A paper about deceptive alignment.',
+      pageType: 'Paper',
+      slug: 'alignment-faking',
+    });
+    expect(out.indexed).toBe(true);
+    expect(upserts).toHaveLength(1);
+    const first = upserts[0]?.[0];
+    expect(first?.id).toBe(`page:${pid}`);
+    expect(first?.metadata).toMatchObject({
+      kind: 'page',
+      wikiPageId: pid,
+      wikiId: wid,
+      pageType: 'Paper',
+      slug: 'alignment-faking',
+    });
+    expect(first?.values).toEqual([0.5, 0.4, 0.3]);
+  });
+
+  it('skips empty pages without calling the embedder', async () => {
+    const { reader } = innerStub();
+    const upserts: VectorizeVector[][] = [];
+    let embedCalls = 0;
+    const v = createVectorWikiReader({
+      db: fakeDb({ allowed: [], citing: [] }),
+      storage: fakeStorage({}),
+      vectorize: fakeVectorize({ matches: [] }, upserts),
+      embedder: {
+        async embed() {
+          embedCalls += 1;
+          return [[]];
+        },
+      },
+      inner: reader,
+    });
+    const out = await v.indexWikiPage({
+      id: pid,
+      wikiId: wid,
+      title: '',
+      body: '',
+      slug: 'empty',
+    });
+    expect(out.indexed).toBe(false);
+    expect(upserts).toHaveLength(0);
+    expect(embedCalls).toBe(0);
   });
 });

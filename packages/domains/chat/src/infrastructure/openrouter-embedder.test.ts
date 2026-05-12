@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { EmbedderNotConfiguredError, createOpenAiEmbedder } from './openai-embedder.ts';
+import { EmbedderNotConfiguredError, createOpenRouterEmbedder } from './openrouter-embedder.ts';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -22,7 +22,7 @@ const stubFetch = (handler: (call: FetchCall) => Response): void => {
   }) as any;
 };
 
-describe('createOpenAiEmbedder', () => {
+describe('createOpenRouterEmbedder', () => {
   let calls: FetchCall[];
   beforeEach(() => {
     calls = [];
@@ -32,7 +32,7 @@ describe('createOpenAiEmbedder', () => {
   });
 
   it('throws EmbedderNotConfiguredError when the api key is missing', async () => {
-    const embedder = createOpenAiEmbedder({ apiKey: undefined });
+    const embedder = createOpenRouterEmbedder({ apiKey: undefined });
     await expect(embedder.embed(['hello'])).rejects.toBeInstanceOf(EmbedderNotConfiguredError);
   });
 
@@ -40,12 +40,12 @@ describe('createOpenAiEmbedder', () => {
     stubFetch(() => {
       throw new Error('should not be called');
     });
-    const embedder = createOpenAiEmbedder({ apiKey: 'sk-test' });
+    const embedder = createOpenRouterEmbedder({ apiKey: 'sk-or-test' });
     const out = await embedder.embed([]);
     expect(out).toEqual([]);
   });
 
-  it('POSTs the batch with model + bearer auth and returns vectors in input order', async () => {
+  it('POSTs the batch with the openai/text-embedding-3-small model + bearer auth to OpenRouter and returns vectors in input order', async () => {
     stubFetch((call) => {
       calls.push(call);
       return new Response(
@@ -58,11 +58,12 @@ describe('createOpenAiEmbedder', () => {
         { status: 200 },
       );
     });
-    const embedder = createOpenAiEmbedder({ apiKey: 'sk-test' });
+    const embedder = createOpenRouterEmbedder({ apiKey: 'sk-or-test' });
     const out = await embedder.embed(['first', 'second']);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.authHeader).toBe('Bearer sk-test');
-    expect((calls[0]?.body as { model: string }).model).toBe('text-embedding-3-small');
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/embeddings');
+    expect(calls[0]?.authHeader).toBe('Bearer sk-or-test');
+    expect((calls[0]?.body as { model: string }).model).toBe('openai/text-embedding-3-small');
     expect((calls[0]?.body as { input: string[] }).input).toEqual(['first', 'second']);
     expect(out).toEqual([
       [0.1, 0.1],
@@ -70,16 +71,16 @@ describe('createOpenAiEmbedder', () => {
     ]);
   });
 
-  it('refuses batches larger than the OpenAI per-call limit', async () => {
+  it('refuses batches larger than the per-call limit', async () => {
     stubFetch(() => new Response('{}', { status: 200 }));
-    const embedder = createOpenAiEmbedder({ apiKey: 'sk-test' });
+    const embedder = createOpenRouterEmbedder({ apiKey: 'sk-or-test' });
     const huge = Array.from({ length: 101 }, (_, i) => String(i));
     await expect(embedder.embed(huge)).rejects.toThrow(/MAX_BATCH/);
   });
 
   it('throws a descriptive error on a non-2xx response', async () => {
     stubFetch(() => new Response('rate limited', { status: 429, statusText: 'Too Many Requests' }));
-    const embedder = createOpenAiEmbedder({ apiKey: 'sk-test' });
+    const embedder = createOpenRouterEmbedder({ apiKey: 'sk-or-test' });
     await expect(embedder.embed(['hi'])).rejects.toThrow(/429/);
   });
 });

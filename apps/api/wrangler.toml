@@ -132,7 +132,7 @@ not_found_handling = "single-page-application"
 # fallback). `/__source/*` serves extracted PDF text + raw bytes for
 # the citation modal; `/__dev/*` hosts the rehash + future ops
 # endpoints; `/__seed/*` is left in for ad-hoc fixture seeding.
-run_worker_first = ["/rpc/*", "/__source/*", "/__dev/*", "/__seed/*"]
+run_worker_first = ["/rpc/*", "/__source/*", "/__dev/*", "/__seed/*", "/__admin/*"]
 
 [[env.prod.d1_databases]]
 binding = "DB"
