@@ -149,6 +149,24 @@ export async function compileFolder(
   deps: CompileRuntimeDeps,
   input: { compileRunId: CompileRunId; folderId: FolderId; perspective?: string },
 ): Promise<{ wikiId: WikiId }> {
+  /*
+   * Pipeline map:
+   * 1. Open the run, emit CompileStarted, and infer the wiki schema.
+   * 2. Create the Wiki record, plan source/page-type work, and research findings.
+   * 3. Draft one Concept page per (PageType, title) bucket with hashed citations.
+   * 4. Resolve backlinks, build/narrate Index pages, then persist pages.
+   * 5. Publish CompileFinished before marking the run/wiki finished.
+   *
+   * Keep the exported entry point readable; the stage mechanics live below in
+   * runCompileFolderPipeline.
+   */
+  return runCompileFolderPipeline(deps, input);
+}
+
+async function runCompileFolderPipeline(
+  deps: CompileRuntimeDeps,
+  input: { compileRunId: CompileRunId; folderId: FolderId; perspective?: string },
+): Promise<{ wikiId: WikiId }> {
   const startedAt = deps.now().toISOString();
   let run: TCompileRun = CompileRun.start({
     id: input.compileRunId,

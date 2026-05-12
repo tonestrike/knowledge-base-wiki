@@ -36,19 +36,18 @@ import type { LanguageModel } from 'ai';
  * the context constructable.
  *
  * BOTH `searchSources` AND `searchWiki` (the agent's primary search
- * tools) have a fall-through chain:
+ * tools) use the same v1 retrieval shape:
  *
  *   1. When the `VECTORIZE` binding is present and `OPEN_ROUTER_API_KEY`
  *      is set (one key, since OpenRouter proxies OpenAI's embeddings
- *      endpoint), we wrap the D1 reader with a `VectorWikiReader` that
- *      embeds the query and hits the index. Source chunks and full
+ *      endpoint), we compose the D1/R2 reader with a `VectorWikiReader`
+ *      that embeds the query and hits the index. Source chunks and full
  *      wiki pages live side-by-side in the same Vectorize index,
  *      discriminated by a `kind: 'source' | 'page'` metadata field.
  *   2. If the embedder throws (missing key, rate limit, network) or the
  *      Vectorize query returns zero matching records of the right kind,
- *      the wrapper delegates to the inner reader's existing token-overlap
- *      implementation. Zero behavior change vs. pre-Stream-O.
- *   3. When either binding is missing, the D1 reader is used directly.
+ *      keyword-overlap search is the resilience path.
+ *   3. When either binding is missing, the D1/R2 reader is used directly.
  *
  * Indexing is event-driven: on every `CompileFinished` domain event we
  * walk the affected wiki and re-embed its sources + pages best-effort.
@@ -180,12 +179,11 @@ export interface BuildChatContextOptions {
     storage: R2Bucket;
     openRouterApiKey?: string;
     /**
-     * Optional Cloudflare Vectorize index for the semantic-search
-     * `searchSources` + `searchWiki` fallback. When present alongside
-     * `openRouterApiKey`, the chat context wraps the D1 reader with
-     * a `VectorWikiReader` that embeds the query and ranks records
-     * (source chunks and full wiki pages) via cosine similarity.
-     * Missing this binding → unchanged behavior (D1 token overlap).
+     * Cloudflare Vectorize index for semantic `searchSources` +
+     * `searchWiki`. When present alongside `openRouterApiKey`, the chat
+     * context composes the D1/R2 reader with a `VectorWikiReader` that embeds
+     * the query and ranks records (source chunks and full wiki pages) via
+     * cosine similarity. Missing this binding -> keyword-overlap search.
      */
     vectorize?: VectorizeIndex;
   };
@@ -270,13 +268,13 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
     const { db, storage, openRouterApiKey, vectorize } = opts.bindings;
     const openrouter = createOpenRouter({ apiKey: openRouterApiKey });
     const baseReader = createDirectWikiReader(db, storage);
-    // Compose-or-fallback: if the Vectorize binding is present, wrap the
-    // base reader so `searchSources` and `searchWiki` (page search) first
-    // try semantic search and then fall through to token overlap. The
-    // embedder reuses the same OpenRouter key the rest of the app
-    // already needs — OpenRouter proxies OpenAI's embeddings endpoint,
-    // so there's no separate provider to provision. Missing the
-    // VECTORIZE binding → unchanged behavior (D1 token overlap).
+    // Compose semantic search with the base D1/R2 reader. `searchSources`
+    // and `searchWiki` (page search) use Vectorize for recall, then hydrate
+    // through D1/R2. Token-overlap search is the resilience path when
+    // semantic search is unavailable or empty. The embedder reuses the same
+    // OpenRouter key the rest of the app already needs — OpenRouter proxies
+    // OpenAI's embeddings endpoint, so there's no separate provider to
+    // provision.
     let vectorReader: VectorWikiReader | null = null;
     if (vectorize) {
       vectorReader = createVectorWikiReader({

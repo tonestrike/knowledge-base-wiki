@@ -39,15 +39,15 @@ GOOGLE_OAUTH_REDIRECT=http://localhost:8787/rpc/ingestion/authCallback
 # OpenRouter API key. The wiki compiler, the chat agent loop, the
 # verification linter, AND the chat embeddings adapter all read from
 # this one key. OpenRouter ships an OpenAI-compatible embeddings
-# endpoint at `/api/v1/embeddings`, so the chat semantic-search fallback
+# endpoint at `/api/v1/embeddings`, so semantic chat search
 # (Vectorize-backed `searchSources` + `searchWiki`) reuses this same
 # key — no separate OpenAI account needed. Get one at
 # https://openrouter.ai/keys.
 #
 # Embedding model: `openai/text-embedding-3-small` (1536-dim, cosine —
 # matches the `tenex-sources` Vectorize index declared in wrangler.toml).
-# Missing the VECTORIZE binding on the account → chat falls back to D1
-# token overlap with zero behavior change.
+# Missing the VECTORIZE binding on the account -> chat uses D1/R2
+# keyword-overlap search.
 OPEN_ROUTER_API_KEY=
 
 # ──────────────────────────────────────────────────────────────────────────────

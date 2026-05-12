@@ -21,7 +21,7 @@ const pid = wikiPageId('eeeeeeee-1111-4222-8333-444444444444');
 
 const fakeInnerHit: SourceSearchHit = {
   sourceId: sid,
-  excerpt: 'token-overlap fallback excerpt',
+  excerpt: 'keyword-overlap resilience excerpt',
   byteRange: { start: 0, end: 30 },
   contentHash: hash,
   citingPages: [{ pageId: citingPid, title: 'Citing Page' }],

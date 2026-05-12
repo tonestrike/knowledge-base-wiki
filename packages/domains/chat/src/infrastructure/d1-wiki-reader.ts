@@ -262,7 +262,7 @@ export const createDirectWikiReader = (db: D1Database, storage: R2Bucket): WikiR
       // pages whose compiled body uses domain vocabulary like "alignment
       // faking" while the underlying PDF text says both. We read the raw
       // source text for every Source cited anywhere in this wiki, score
-      // by token overlap, and hand the agent back the top hits with
+      // by keyword overlap, and hand the agent back the top hits with
       // their citing pages so it can drill into real WikiPages via
       // readWikiPage. New citations are NEVER minted from raw matches
       // — the synth grounds against page citations only, keeping the

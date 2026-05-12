@@ -14,8 +14,8 @@
  * Indexing is best-effort and explicitly NOT in the critical path of the
  * compile:
  *   - Errors are caught + logged so a partial Vectorize state never blocks
- *     the chat path (the `VectorWikiReader` falls through to D1
- *     token-overlap for any missing entries).
+ *     the chat path; the reader can still use D1/R2 keyword-overlap search
+ *     for any missing entries.
  *   - The whole walk is fired-and-forgotten via the optional `waitUntil`
  *     so the Worker's response flush doesn't strand the HTTP fetches mid-
  *     batch.

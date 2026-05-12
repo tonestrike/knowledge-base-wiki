@@ -7,7 +7,7 @@
 #
 # Steps:
 #   1. Best-effort create the `tenex-sources` Vectorize index. Backs
-#      the chat agent's semantic-search fallback for BOTH `searchSources`
+#      the chat agent's semantic search for BOTH `searchSources`
 #      AND `searchWiki`, with 1536-dim cosine embeddings from
 #      `openai/text-embedding-3-small` (reached via OpenRouter's
 #      OpenAI-compatible embeddings endpoint — one `OPEN_ROUTER_API_KEY`

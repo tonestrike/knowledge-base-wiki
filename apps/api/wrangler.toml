@@ -33,12 +33,12 @@ id = "78e3c691a0dd42e8a304a80b26168f55"
 binding = "STORAGE"
 bucket_name = "tenex"
 
-# Vectorize index backing the chat `searchSources` semantic-search
-# fallback (Stream O). Provision once on the account with:
+# Vectorize index backing semantic chat search for both `searchWiki`
+# and `searchSources`. Provision once on the account with:
 #   bunx wrangler vectorize create tenex-sources --dimensions=1536 --metric=cosine
 # Dimensionality matches OpenAI `text-embedding-3-small`; metric is
-# cosine. Missing on an account → chat keeps the existing D1
-# token-overlap behavior. See packages/domains/chat/glossary.md.
+# cosine. If unavailable, chat uses D1/R2 keyword-overlap search.
+# See packages/domains/chat/glossary.md.
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "tenex-sources"
