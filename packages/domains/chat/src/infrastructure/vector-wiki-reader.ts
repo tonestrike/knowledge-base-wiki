@@ -1,7 +1,6 @@
 /**
- * Vectorize-backed `WikiReader` adapter. Wraps the existing token-overlap
- * reader and short-circuits BOTH `searchSources` AND `searchPages` (the
- * agent's `searchWiki` tool) through a semantic-search path:
+ * Vectorize-backed `WikiReader` adapter. Owns semantic search for BOTH
+ * `searchSources` AND `searchPages` (the agent's `searchWiki` tool):
  *
  *   1. Embed the query via `openai/text-embedding-3-small` (1536-dim, via
  *      OpenRouter — see `openrouter-embedder.ts`).
@@ -12,9 +11,9 @@
  *      same `SourceSearchHit` / `WikiPageSummary` shapes the agent loop
  *      already consumes.
  *
- * Compose-or-fallback: if the embedder errors (missing key, network
- * fail, etc.) OR the Vectorize index returns zero matches, the wrapper
- * delegates to the inner reader's existing token-overlap implementation.
+ * Resilience path: if the embedder errors (missing key, network fail,
+ * etc.) OR the Vectorize index returns zero matches, the adapter delegates
+ * to the inner reader's keyword-overlap implementation.
  * Every other `WikiReader` method (`getPage`, `listPagesByType`, …) is
  * a straight passthrough.
  *
@@ -263,7 +262,7 @@ export const createVectorWikiReader = (deps: VectorWikiReaderDeps): VectorWikiRe
       const trimmed = query.trim();
       if (trimmed.length === 0) return inner.searchSources(args);
 
-      // 1) embed the query — fall through to token overlap on any
+      // 1) embed the query; use keyword-overlap search on any
       //    embedder error (missing key, rate limit, network blip).
       let queryVector: readonly number[] | null = null;
       try {

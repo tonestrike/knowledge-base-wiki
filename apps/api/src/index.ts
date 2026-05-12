@@ -86,9 +86,9 @@ type Env = WikiBindings & {
   LANGFUSE_SECRET_KEY?: string;
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   OTEL_EXPORTER_OTLP_HEADERS?: string;
-  // Vectorize binding for the chat semantic-search fallback. Optional —
-  // when the binding is missing, chat falls back to D1 token overlap
-  // with zero behavior change. The embedder reuses `OPEN_ROUTER_API_KEY`
+  // Vectorize binding for semantic chat search. Optional: when the binding
+  // is missing, chat uses D1/R2 keyword-overlap search. The embedder reuses
+  // `OPEN_ROUTER_API_KEY`
   // (OpenRouter proxies OpenAI's embeddings endpoint), so no separate
   // provider key is needed.
   VECTORIZE?: VectorizeIndex;
@@ -295,11 +295,10 @@ const ensureChatContext = (env: Env, tracer: Tracer) => {
       db: env.DB,
       storage: env.STORAGE,
       openRouterApiKey: (env as unknown as { OPEN_ROUTER_API_KEY?: string }).OPEN_ROUTER_API_KEY,
-      // Semantic-search fallback for `WikiReader.searchSources` +
-      // `searchPages`. With the binding present, the chat reader is
-      // wrapped to embed queries via OpenRouter and rank against
-      // pre-embedded source chunks + wiki pages in Vectorize; missing
-      // it leaves chat on the original D1 token-overlap path.
+      // Semantic search for `WikiReader.searchSources` + `searchPages`.
+      // With the binding present, the chat reader embeds queries via
+      // OpenRouter and ranks against pre-embedded source chunks + wiki pages
+      // in Vectorize; without it, chat uses D1/R2 keyword-overlap search.
       // Auto-indexing wires up on the bus inside `buildChatContext`.
       ...(env.VECTORIZE ? { vectorize: env.VECTORIZE } : {}),
     },

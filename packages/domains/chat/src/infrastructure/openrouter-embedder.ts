@@ -18,8 +18,8 @@
  *
  * Not a singleton — the composition root injects it. Returns a typed
  * "no embedder" error when the API key isn't configured so the
- * VectorWikiReader can fall through to the existing token-overlap path
- * instead of hard-failing the whole chat run.
+ * VectorWikiReader can use keyword-overlap search instead of hard-failing
+ * the whole chat run.
  */
 
 export class EmbedderNotConfiguredError extends Error {

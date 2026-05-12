@@ -12,6 +12,7 @@ This is intentionally a living document — every item that ships moves from one
 - **OTel observability with Langfuse-ready OTLP exporter** (`packages/shared-kernel/src/observability/`) — every LLM call and top-level use-case (`compile.run`, `compile.synthesis.page`, `chat.turn`, `chat.tool.*`, `lint.run`, `llm.call`) emits spans following OTel GenAI semantic conventions. Switching to Langfuse is three env vars; no code change.
 - **`llm.call` span lifecycle factored** (`packages/shared-kernel/src/observability/llm-call.ts`) — four LLM adapters previously hand-rolled the same span open/usage/close block. Now they share `startLlmCallSpan(tracer, start)`.
 - **Citation-roundtrip eval** (`evals/citation-roundtrip.ts`) — proves every citation's `contentHash` matches the live source bytes against the deployed api. Currently 57/57 pass on the featured wiki.
+- **Vectorize semantic retrieval** (`packages/domains/chat/src/infrastructure/vector-wiki-reader.ts`) — `searchWiki` searches compiled pages semantically and `searchSources` searches cited source chunks semantically, then hydrates hits back into D1/R2-backed wiki pages and source excerpts.
 - **Playwright E2E** (`e2e/`) — public-path smoke + anonymous-only regression. Runs against the live deploy on push-to-main + `workflow_dispatch`; deliberately skipped on PRs (the live URL lags PR code).
 - **Composition-root cleanup** (`apps/api/src/index.ts`) — typed `c.var.userId` via Hono `Variables` (no `as never` casts), named `buildFlatContext` helper, `keepOnlyFeaturedWiki` extracted with JSDoc, dependency-injected `mountIngestionAuthCallback` + `mountSourceArtifacts` + `mountDevRoutes`.
 - **Cloudflare type stubs consolidated** (`packages/shared-kernel/src/cf-types.ts`) — domain packages no longer duplicate `D1Database` / `R2Bucket` / etc.
@@ -28,7 +29,7 @@ Six background streams launched in parallel; each is in its own worktree with a 
 | **L — Faithfulness eval** | `evals/faithfulness.ts`, `evals/faithfulness-cases.ts` | 10-12 questions scored by Opus 4.7 judge on faithfulness / correctness / citationQuality / hallucination |
 | **M — Failure-mode classifier** | `evals/classify-failure.ts`, `evals/run-with-classifier.ts` | 5 classes (`INGESTION_MISS`, `COMPILE_MISS`, `RETRIEVAL_MISS`, `SYNTHESIS_FAIL`, `VERIFIER_FALSE_NEGATIVE`) — diagnoses why each case fails |
 | **N — DOCX + Markdown extractors** | `packages/domains/ingestion/src/infrastructure/{docx,markdown}-extractor.ts` | mammoth-based DOCX adapter + plain Markdown adapter, wired into `buildIngestionContext` |
-| **O — Vectorize fallback** | `packages/domains/chat/src/infrastructure/{vector-wiki-reader,openai-embeddings-client}.ts` + wrangler binding | Cloudflare Vectorize + OpenAI `text-embedding-3-small` for `searchSources` only; falls back to D1 token-overlap on miss or missing binding |
+| **O — Vectorize semantic retrieval** | `packages/domains/chat/src/infrastructure/{vector-wiki-reader,openrouter-embedder}.ts` + wrangler binding | Cloudflare Vectorize + OpenRouter `openai/text-embedding-3-small` for semantic `searchWiki` and `searchSources`; D1/R2 keyword-overlap keeps chat usable if semantic search is unavailable |
 
 Each agent commits its own branch, opens its own PR, runs `bun run check` green before pushing. Look for PRs prefixed `[Stream <K\|L\|M\|N\|O>]` on the repo.
 
@@ -40,9 +41,8 @@ Ordered by ROI per effort.
 
 1. **Per-source LLM summary at compile time, used for broad-summary queries.** Extends the existing Narrator pass (`packages/domains/wiki/src/application/narrator-pass.ts`) to also produce one paragraph per source doc. The chat agent gets a new tool `getSourceSummary(sourceId)` it can call before deciding whether to drill down. Materially improves "what's in this folder" answers, which are currently the weakest demo path. Effort M. ROI high.
 2. **Drive-delta probe in evals.** Catches Drive-extractor regressions: re-fetch a Drive doc, recompile, assert the wiki's claim set is unchanged. Without this, an upstream Drive API change can silently break ingestion. Effort M. ROI medium-high.
-3. **Wiki page embeddings (full semantic search, not just sources).** Stream O ships source-level fallback; the wiki-page layer still uses token-overlap. Full pipeline would embed every wiki page at compile time, query Vectorize with both sources and pages in the search loop. Larger redesign — leave until source-level fallback proves its value. Effort L. ROI high but compounds with #1.
-4. **Query rewriter for chat follow-ups.** The agentic researcher currently sees only the bare question; pronoun-heavy follow-ups ("what about the next one") retrieve garbage. Add a `rewriteQuery(history, currentQuestion)` step before the first tool call. Has a CRITICAL-RULE constraint: preserve user-explicit identifiers (numbers, names) unchanged. Effort S. ROI high.
-5. **Chat-time citation hash verification tool.** Hash-pinning is already a load-bearing differentiator at compile time. Lifting it into the agent loop — a `verifyCitation` tool the model must call before final answer — turns "we audit every claim once" into "every cited byte range is re-hashed on every answer." Effort M. ROI high.
+3. **Query rewriter for chat follow-ups.** The agentic researcher currently sees only the bare question; pronoun-heavy follow-ups ("what about the next one") retrieve garbage. Add a `rewriteQuery(history, currentQuestion)` step before the first tool call. Has a CRITICAL-RULE constraint: preserve user-explicit identifiers (numbers, names) unchanged. Effort S. ROI high.
+4. **Chat-time citation hash verification tool.** Hash-pinning is already a load-bearing differentiator at compile time. Lifting it into the agent loop — a `verifyCitation` tool the model must call before final answer — turns "we audit every claim once" into "every cited byte range is re-hashed on every answer." Effort M. ROI high.
 
 ### Tier B — UX polish
 
@@ -76,7 +76,7 @@ Ordered by ROI per effort.
 |---|---|---|
 | Per-source LLM summary (A1) | `narrator-pass.ts`, `WikiReader.searchSources` | one prompt + one D1 column + one tool |
 | Drive-delta probe (A2) | `evals/citation-roundtrip.ts` as prior art | one new eval file |
-| Wiki page embeddings (A3) | `vector-wiki-reader.ts` (Stream O ships the foundation) | extend `indexSource` to also index pages |
+| Follow-up query rewriting (A3) | `agentic-researcher.ts` already owns the first research step | one rewrite prompt before the first tool call |
 | Text-selection → ask (B4) | existing wiki-page route + chat dock | one popover component + one extra `targetPageId` field on `chat.open` |
 | Citation-hover source preview (B5) | existing citation chip + `/__source/<id>/text` route | one popover, no new api |
 | Observability dashboard (B6) | spans already emit; OTLP exporter is one of several outputs | aggregator + KV write-through + admin route |

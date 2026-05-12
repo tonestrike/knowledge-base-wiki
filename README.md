@@ -8,7 +8,7 @@ The product is a **folder-grounded wiki**: point it at a Google Drive folder, th
 
 - **Click:** <https://tenex-api.tonyvantur.workers.dev/wiki/cb0b020d-50ab-41cb-91d9-09a5dda547b2>, open chat, ask `alignment faking` or `deceptive AI behavior`.
 - **Judge:** whether the app turns a messy Drive folder into a typed, cited, readable wiki with verifier-backed answers, not whether it has every SaaS setting page.
-- **Built:** ingestion, compiler, wiki UI, span citations, verifier/lint loop, chat over pages + source spans, Cloudflare deploy, eval/probe scripts, and Vectorize semantic fallback.
+- **Built:** ingestion, compiler, wiki UI, span citations, verifier/lint loop, chat over pages + source spans, Cloudflare deploy, eval/probe scripts, and Vectorize semantic search.
 
 ## 90-second reviewer path
 
@@ -21,7 +21,7 @@ Operational proof is intentionally near the top: deployed Worker, live health en
 
 ## Why this is not just RAG
 
-Tenex does not chat over loose chunks first. It compiles the folder into a typed wiki with page schemas, claim records, citations, source byte ranges, and verifier state; retrieval then operates over that structured wiki and falls back to source spans when wording diverges. Embeddings improve recall, but the core artifact is the verified wiki.
+Tenex does not chat over loose chunks first. It compiles the folder into a typed wiki with page schemas, claim records, citations, source byte ranges, and verifier state; retrieval then operates over that structured wiki and can search source spans when wording diverges. Embeddings improve recall, but the core artifact is the verified wiki.
 
 ## Live demo
 
@@ -121,7 +121,7 @@ Open <http://localhost:5173>.
 | `SESSION_SIGNING_KEY` | Secret key signing the `tenex_sid` session cookie used by Drive/admin routes. | `openssl rand -base64 32` |
 | `OPEN_ROUTER_API_KEY` | Routes the wiki compiler + chat + verifier to Anthropic models and embeddings. | <https://openrouter.ai/keys> |
 
-Optional: bind a Cloudflare Vectorize index (`VECTORIZE`, see `apps/api/wrangler.toml`; the deploy script auto-provisions one if it doesn't exist) to switch `chat.searchSources` AND `chat.searchWiki` from token-overlap to `openai/text-embedding-3-small` semantic search. Embeddings reuse `OPEN_ROUTER_API_KEY` since OpenRouter proxies OpenAI's embedding endpoint — there's no separate provider to provision. Without the binding the chat agent falls back to the existing D1 token-overlap path — zero behavior change. Indexing fires automatically on every `CompileFinished` event, so a fresh compile populates Vectorize without operator intervention; to backfill a wiki compiled before this landed, POST to `/__admin/reindex-wiki/:wikiId` while signed in (the route requires a valid `tenex_sid` cookie).
+Cloudflare Vectorize (`VECTORIZE`, see `apps/api/wrangler.toml`; the deploy script auto-provisions the index if it does not exist) powers semantic search for both `chat.searchSources` and `chat.searchWiki` using `openai/text-embedding-3-small`. Embeddings reuse `OPEN_ROUTER_API_KEY` since OpenRouter proxies OpenAI's embedding endpoint — there is no separate provider to provision. Token-overlap search remains as the built-in resilience path when semantic search is unavailable or empty. Indexing fires automatically on every `CompileFinished` event, so a fresh compile populates Vectorize without operator intervention; to backfill a wiki after recreating the Vectorize index, POST to `/__admin/reindex-wiki/:wikiId` while signed in (the route requires a valid `tenex_sid` cookie).
 
 Add `http://localhost:8787/rpc/ingestion/authCallback` to your Google OAuth client's authorized redirect URIs.
 
@@ -261,15 +261,15 @@ Cloudflare login is one-time and runs interactively: `bunx wrangler login` if yo
 
 We made three deliberate scope choices that are worth calling out so reviewers don't read the gaps as oversight.
 
-### We index typed *perspectives*; embeddings live alongside as a transparent fallback
+### We index typed *perspectives*; embeddings improve recall without replacing the wiki
 
 The interesting bet in this take-home is the *wiki*: an LLM-compiled, span-cited, lint-verified knowledge structure over a folder. The retrieval mechanic that powers chat is a secondary concern — once the wiki exists, search-quality improvements stack on top of it cleanly.
 
-The chat agent's research loop today is a tool-using loop over the wiki itself: `searchWiki`, `listPagesByType`, `readWikiPage`, `searchSources`. All four run against D1 + R2 with byte-range citations the synth verifier can re-hash. The typed page schema is what makes browsing (`listPagesByType`, `readWikiPage`) deterministic; the open question is what to do when the user's phrasing doesn't keyword-match the page or source text — `"deceptive AI behavior"` should hit a chunk that talks about *alignment faking* even when no keyword overlaps.
+The chat agent's research loop today is a tool-using loop over the wiki itself: `searchWiki`, `listPagesByType`, `readWikiPage`, `searchSources`. `listPagesByType` and `readWikiPage` are deterministic D1/R2 browse/read tools; `searchWiki` and `searchSources` use semantic Vectorize search with D1/R2 keyword-overlap as a resilience path. Keyword-overlap is the plain text path: split the query and stored text into words, then rank results by shared words. Every hydrated hit still carries byte-range citations the synth verifier can re-hash. The typed page schema is what makes browsing deterministic; the open question is what to do when the user's phrasing doesn't keyword-match the page or source text — `"deceptive AI behavior"` should hit a chunk that talks about *alignment faking* even when no keyword overlaps.
 
-So we ship a semantic fallback for both search tools. When the api's `VECTORIZE` binding is configured, BOTH `searchSources` and `searchWiki` route through a `VectorWikiReader` adapter that: embeds the query with `openai/text-embedding-3-small` via OpenRouter (one key, reused), runs `vectorize.query(topK)` against the shared `tenex-sources` index, filters by a `kind: 'source' | 'page'` metadata discriminator, and hydrates the matches back into the same `SourceSearchHit` / `WikiPageSummary` shapes the agent already consumes. Source chunks are 1000-char windows with 200-char overlap; wiki pages are embedded whole (they're already a compiled magazine layout, 500-2k chars — chunking would just dilute the vector). Ids are deterministic (`source:<sourceId>:<chunkStart>`, `page:<wikiPageId>`) so re-indexing is idempotent.
+Both `searchSources` and `searchWiki` route through a `VectorWikiReader` adapter that: embeds the query with `openai/text-embedding-3-small` via OpenRouter (one key, reused), runs `vectorize.query(topK)` against the shared `tenex-sources` index, filters by a `kind: 'source' | 'page'` metadata discriminator, and hydrates the matches back into the same `SourceSearchHit` / `WikiPageSummary` shapes the agent already consumes. Source chunks are 1000-char windows with 200-char overlap; wiki pages are embedded whole (they're already a compiled magazine layout, 500-2k chars — chunking would just dilute the vector). Ids are deterministic (`source:<sourceId>:<chunkStart>`, `page:<wikiPageId>`) so re-indexing is idempotent.
 
-If the embedder throws, the index returns zero matches of the right kind, or the `VECTORIZE` binding isn't configured, the reader transparently falls through to the existing D1 token-overlap implementation. Zero behavior change on environments without the binding; better recall on environments that have it.
+If the embedder throws, the index returns zero matches of the right kind, or the `VECTORIZE` binding is unavailable, the reader uses the D1/R2 keyword-overlap path. Chat remains usable, and environments with Vectorize get better recall.
 
 Indexing happens automatically: the chat context subscribes to the `CompileFinished` domain event and walks the affected wiki — every page, every cited source — calling `indexWikiPage` / `indexSource` on the reader. Failures are caught and logged so a Vectorize hiccup never blocks a compile. To backfill a wiki that was compiled before this landed (or after a Vectorize index recreate), the operator POSTs to `/__admin/reindex-wiki/:wikiId` with a valid session cookie; the handler walks the wiki and returns a summary of `{ pagesIndexed, sourcesIndexed, errors }`.
 
@@ -342,7 +342,7 @@ Screenshots captured against the live Worker at <https://tenex-api.tonyvantur.wo
 *Lint dashboard. "Run audit" replays every Claim against its cited Span via the Opus 4.7 verifier, surfaces failures inline with a suggested correction, and lets you apply the fix from the page.*
 
 ![Chat dock — wiki-aware research loop with question typed in](docs/images/chat-dock.png)
-*Chat dock. Cmd+K from any wiki route opens the right-side dock; the chat agent uses page-type search, browse-by-section, and source-text fallback over the wiki — every answer cites the Span the verifier can re-hash.*
+*Chat dock. Cmd+K from any wiki route opens the right-side dock; the chat agent uses PageType browsing, semantic page search, and semantic source search over the wiki — every answer cites the Span the verifier can re-hash.*
 
 ![Compile theater — live narration of an in-progress compile](docs/images/compile-theater.png)
 *Compile theater. Live SSE narration of an in-progress Compile Run: schema reveal, source cards flying through extraction, emerging typed pages, and a per-agent thought stream.*
