@@ -34,9 +34,11 @@ import { client } from './orpc.ts';
  *   AnswerFinished         → finish-step, finish
  *   AnswerFailed           → error
  *
- * `reconnectToStream` returns null — we don't currently support resume
- * across page reloads (the D1 turn replay handles re-mount and is the
- * canonical persistence path; mid-stream resume is a separate slice).
+ * If the browser connection drops before AnswerFinished, this transport
+ * resubscribes to the same turn id and de-dupes the Durable Object's replayed
+ * tape so transient edge/network closes don't fail an otherwise healthy turn.
+ * `reconnectToStream` still returns null because page-reload resume is owned
+ * by the persisted conversation replay path.
  */
 
 export interface CreateTenexChatTransportOptions {
@@ -105,16 +107,68 @@ const openAnswerStream = async (
   }
 
   const decoder = new TextDecoder();
-  const reader = response.body.getReader();
+  let reader = response.body.getReader();
   let buffered = '';
   const state = createTranslationState(turnId);
+  const seenEvents = new Set<string>();
+  let reconnects = 0;
+  const maxReconnects = 3;
+
+  const reconnect = async (): Promise<boolean> => {
+    if (reconnects >= maxReconnects) return false;
+    reconnects += 1;
+    try {
+      await reader.cancel().catch(() => {});
+    } catch {
+      // ignore
+    }
+    const next = await fetch('/rpc/chat/streamAnswer', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ json: { turnId } }),
+      signal: abortSignal,
+    });
+    if (!next.ok || !next.body) return false;
+    reader = next.body.getReader();
+    buffered = '';
+    return true;
+  };
+
+  const fingerprint = (evt: AnswerEvent): string => {
+    try {
+      return JSON.stringify(evt);
+    } catch {
+      return `${evt.kind}:${Math.random()}`;
+    }
+  };
+
+  const drainToController = (controller: ReadableStreamDefaultController<UIMessageChunk>) => {
+    const frames = drainFrames(buffered);
+    buffered = frames.remainder;
+    let emitted = false;
+    for (const raw of frames.events) {
+      const evt = parseFrame(raw);
+      if (!evt) continue;
+      const fp = fingerprint(evt);
+      if (seenEvents.has(fp)) continue;
+      seenEvents.add(fp);
+      for (const chunk of translate(evt, state)) controller.enqueue(chunk);
+      emitted = true;
+    }
+    return emitted;
+  };
 
   return new ReadableStream<UIMessageChunk>({
     async pull(controller) {
       try {
         while (true) {
+          if (drainToController(controller)) return; // back-pressure
           const { value, done } = await reader.read();
           if (done) {
+            if (drainToController(controller)) return; // final buffered frame
+            if (!state.messageFinished && (await reconnect())) {
+              continue;
+            }
             // Drain any unflushed translations (text-end for an
             // unfinalized prose part, etc.) so AI Elements doesn't
             // render a perpetually-streaming bubble.
@@ -123,14 +177,6 @@ const openAnswerStream = async (
             return;
           }
           buffered += decoder.decode(value, { stream: true });
-          const frames = drainFrames(buffered);
-          buffered = frames.remainder;
-          for (const raw of frames.events) {
-            const evt = parseFrame(raw);
-            if (!evt) continue;
-            for (const chunk of translate(evt, state)) controller.enqueue(chunk);
-          }
-          if (frames.events.length > 0) return; // back-pressure
         }
       } catch (err) {
         controller.error(err);

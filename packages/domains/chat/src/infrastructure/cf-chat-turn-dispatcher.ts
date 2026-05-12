@@ -8,9 +8,10 @@ import type { DurableObjectNamespace } from './cf-types.ts';
 // SSE frames into typed AnswerEvents.
 
 // SF — bound each frame read so a stalled DO doesn't wedge the iterator
-// forever. 60s is generous enough to span a slow Sonnet turn between events
-// while still surfacing a real hang inside the per-turn 5-minute budget.
-const FRAME_TIMEOUT_MS = 60_000;
+// forever. Researcher + Sonnet synthesis can have long-but-valid gaps on
+// cold provider routes; keep this below the per-turn budget but above the
+// observed 60s reviewer-demo tail.
+const FRAME_TIMEOUT_MS = 180_000;
 
 const doIdFor = (conversationId: string, turnId: string): string => `${conversationId}:${turnId}`;
 

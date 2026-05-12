@@ -1,21 +1,221 @@
-# Tenex — code tour
+# Tenex Code Tour
 
-A walkthrough of how tenex actually works, file-by-file, ordered the way
-a user's request flows through the system. Designed as a companion to
-the `/present` deck — same arc, but with the actual code.
+This is the fastest way to evaluate the repo as a product and as an
+engineering artifact. It follows the real user path first, then opens
+the code behind each screen.
 
-## TL;DR — the bet
+The thing to judge is not "does this call an embedding model?" It does,
+but that is the least interesting part. Tenex turns a Drive folder into
+a typed, cited, verifier-checked wiki, then lets chat operate over that
+artifact with semantic recall as a fallback. The durable product object
+is the wiki, not the chat response.
 
-Most search systems take a user query and run it against a generic index
-of the document. Tenex flips that: **the user supplies a "perspective"
-before indexing**, and the compile pipeline builds a wiki shaped by that
-lens. Three readers of the same book (screenwriter / philosopher /
-linguist) produce three radically different wikis from the same source
-text.
+GitHub Markdown cannot include another source file by reference, so this
+tour uses the next-best pattern: a short excerpt in the doc, immediately
+paired with a line-anchored link to the exact implementation.
 
-The technical bet: **move the agent loop upstream**. Instead of running
-an agentic interpretation per chat question, pay the cost once at
-ingest time. Cheap questions, deeper answers.
+## 90-Second Reviewer Path
+
+1. Open the deployed seeded wiki:
+   <https://tenex-api.tonyvantur.workers.dev/wiki/cb0b020d-50ab-41cb-91d9-09a5dda547b2>
+2. Check that the output has typed sections (`Risk`, `Opportunity`,
+   `Wedge`, `Trend`, `Pain`) instead of a flat list of uploaded files.
+3. Open a wiki page and inspect a citation chip. The claim should point
+   to a stored source span, not a vague document reference.
+4. Open chat and ask `deceptive AI behavior`. The answer should retrieve
+   alignment-faking pages even though that exact phrase is not the page
+   title.
+5. Open the verifier/lint surface from a wiki page. This is where bad
+   claims become visible product state instead of invisible prompt
+   failure.
+
+## What I Built
+
+| Surface | Code to inspect | Why it matters |
+|---|---|---|
+| Public entry + Drive import | [`RootRoute`](../../apps/web/src/routes/root.tsx#L30) + [`ConnectDriveCard`](../../apps/web/src/routes/root.tsx#L262) | Reviewers can read/chat without auth; operators can still connect Drive. |
+| Folder compiler | [`compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L148) | Turns source documents into typed pages, claims, citations, links, and indexes. |
+| Compile runtime | [`createCompileRunDOClass`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts#L39) | Multi-minute work runs in a Durable Object with an event tape that can be replayed. |
+| Chat runtime | [`createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L92) | Per-turn chat state survives Worker isolate changes and reconnects. |
+| Semantic recall | [`createVectorWikiReader`](../../packages/domains/chat/src/infrastructure/vector-wiki-reader.ts#L141) | Vectorize is used for wiki pages and source chunks without replacing structured wiki reads. |
+| Chat agent | [`createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L177) | Tool-using loop browses page types, reads pages, searches wiki text, and falls back to sources. |
+| Citation tripwire | [`synthesizeAnswer`](../../packages/domains/chat/src/application/synthesize-answer.ts#L163) | Answer citations are resolved and hash-checked before emission. |
+| Verifier | [`auditClaim`](../../packages/domains/verification/src/application/audit-claim.ts#L26) | Claims can fail, explain why, and feed a correction workflow. |
+
+## Visual Product Path
+
+### 1. Start With A Real Folder Product
+
+![Homepage with featured wiki and Drive import](../images/homepage.png)
+
+The homepage has two jobs: make the seeded wiki immediately reviewable
+and keep the operator path visible. The relevant code is
+[`RootRoute`](../../apps/web/src/routes/root.tsx#L30) and
+[`ConnectDriveCard`](../../apps/web/src/routes/root.tsx#L262). The
+important detail is that the Drive connector renders before auth;
+clicking sign-in starts OAuth, but the reviewer can ignore that and
+open the featured wiki.
+
+```tsx
+// apps/web/src/routes/root.tsx
+const session = useSessionProbe();
+const isSessioned = session === 'sessioned';
+
+const wikis = useQuery({
+  ...orpc.wiki.listWikis.queryOptions({ input: { limit: 50 } }),
+  enabled: isSessioned,
+});
+
+return (
+  <AppShell>
+    <FeaturedHeroSlot wiki={featured.data} />
+    {isSessioned ? <CompiledWikisGrid wikis={otherWikis} /> : null}
+    <ConnectDriveCard />
+  </AppShell>
+);
+```
+
+### 2. Compile Is Observable
+
+![Compile theater while the folder becomes a wiki](../images/compile-theater.png)
+
+Compile is not a hidden background job. The route subscribes to a
+Durable Object event tape and renders sources, phase progress, drafted
+pages, and live narration. If a run fails, the UI now shows the terminal
+failure instead of looking stuck.
+
+Start with
+[`CompileTheater`](../../apps/web/src/components/compile-theater/compile-theater.tsx#L63),
+[`useCompileStream`](../../apps/web/src/components/compile-theater/use-compile-stream.ts#L13),
+and
+[`createCompileRunDOClass`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts#L39).
+
+```tsx
+// apps/web/src/components/compile-theater/compile-theater.tsx
+const phase = derivePhase(events);
+const compileFailed = events.find((e) => e.kind === 'CompileFailed');
+
+<AnimatePresence mode="wait">
+  {phase === 'failed' && compileFailed?.kind === 'CompileFailed' ? (
+    <CompileFailurePanel message={compileFailed.message} onRetry={onRetry} />
+  ) : phase === 'drafting' ? (
+    <DraftingConstellation drafted={drafted} />
+  ) : (
+    <CompletionHero pageCount={drafted.length + indexBuilt.length} />
+  )}
+</AnimatePresence>;
+```
+
+### 3. The Output Is A Wiki, Not A Search Result
+
+![Compiled wiki overview](../images/wiki-overview.png)
+
+The compiler writes a durable wiki: page rows in D1, markdown bodies in
+R2, typed page sections, claims, citations, backlinks, and index pages.
+The top-level orchestrator is
+[`compileFolder`](../../packages/domains/wiki/src/application/compile-folder.ts#L148).
+
+```ts
+// packages/domains/wiki/src/application/compile-folder.ts
+export async function compileFolder(
+  deps: CompileRuntimeDeps,
+  input: { compileRunId: CompileRunId; folderId: FolderId; perspective?: string },
+): Promise<{ wikiId: WikiId }> {
+  const sourceList = await deps.sources.list(input.folderId);
+  // infer schema, plan work, research findings, draft pages, then emit CompileFinished
+}
+```
+
+### 4. Citations Are Product State
+
+![Wiki page with citation chips](../images/wiki-page.png)
+
+A page is readable prose, but each claim carries citation state. The
+compiler stores citation byte ranges and content hashes; later chat and
+verification can re-open the exact span. Inspect
+[`createD1WikiPageRepository`](../../packages/domains/wiki/src/infrastructure/d1-wiki-page-repo.ts#L65),
+[`createR2WikiPageStorage`](../../packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts#L13),
+and
+[`createMemorySourceHashVerifier`](../../packages/domains/chat/src/application/verify-citation.ts#L20).
+
+```ts
+// packages/domains/chat/src/application/verify-citation.ts
+export const createMemorySourceHashVerifier = (deps: SourceHashVerifierDeps) => ({
+  async verify(citation) {
+    const text = await deps.readSourceText(citation.span.sourceId);
+    const { start, end } = citation.span.byteRange;
+    const hash = await deps.sha256Hex(text.slice(start, end));
+    return hash === citation.span.contentHash ? { ok: true } : { ok: false };
+  },
+});
+```
+
+### 5. Chat Works Over The Wiki
+
+![Chat dock answering from the wiki](../images/chat-dock.png)
+
+Chat does not start from anonymous chunks. It opens a conversation on a
+wiki, uses a tool loop to browse/search/read pages and source spans,
+then streams a cited answer. Vectorize improves recall when the user's
+phrasing diverges from page titles or body text.
+
+Start with
+[`createTenexChatTransport`](../../apps/web/src/lib/chat-transport.ts#L49),
+[`createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L92),
+[`createAgenticResearcher`](../../packages/domains/chat/src/infrastructure/agentic-researcher.ts#L177),
+and the production Vectorize wiring in
+[`build-chat-turn-deps.ts`](../../apps/api/src/build-chat-turn-deps.ts#L53).
+
+```ts
+// packages/domains/chat/src/infrastructure/vector-wiki-reader.ts
+async indexWikiPage(page) {
+  const text = `${page.title}\n\n${page.body}`.trim();
+  const vectors = await embedder.embed([text]);
+  const v = vectors[0];
+  await vectorize.upsert([
+    {
+      id: pageRecordId(page.id),
+      values: [...v],
+      metadata: { kind: 'page', wikiPageId: page.id, wikiId: page.wikiId, slug: page.slug },
+    },
+  ]);
+}
+```
+
+```ts
+// packages/domains/chat/src/infrastructure/index-on-events.ts
+export const subscribeIndexing = (bus, deps) =>
+  bus.subscribe('CompileFinished', async (event) => {
+    const wikiId = event.payload.wikiId;
+    const work = indexWiki(deps, wikiId);
+    deps.waitUntil ? deps.waitUntil(work) : await work;
+  });
+```
+
+### 6. The Verifier Is Visible
+
+![Verifier lint dashboard](../images/lint-dashboard.png)
+
+The verifier turns grounding failures into visible findings. That is
+the product difference between "the answer has citations" and "the
+system can tell when a citation does not support the claim." The core
+use case is
+[`auditClaim`](../../packages/domains/verification/src/application/audit-claim.ts#L26).
+
+```ts
+// packages/domains/verification/src/application/audit-claim.ts
+export async function auditClaim(deps, input) {
+  const slices = [];
+  for (const c of input.claim.citations) {
+    const slice = await deps.sourceText.readSlice({
+      sourceId: c.span.sourceId,
+      byteRange: c.span.byteRange,
+    });
+    slices.push({ citationId: c.id, sliceText: slice });
+  }
+  return deps.verifier.audit({ claim: input.claim, citedSlices: slices });
+}
+```
 
 ---
 
@@ -41,6 +241,7 @@ flowchart LR
     ChatDO --> OpenRouter
     ChatDO --> D1W
     ChatDO --> R2W
+    ChatDO --> Vectorize[("Vectorize<br/>page + source embeddings")]
 
     click Web "../../apps/web/src/App.tsx" "App.tsx — wraps router + ChatDock in flex layout"
     click API "../../apps/api/src/index.ts" "api entrypoint"
@@ -55,7 +256,7 @@ flowchart LR
     classDef do_ fill:#3d2a1f,stroke:#d89878,color:#fff;
     class User,Web,API edge;
     class Wiki,Chat ctx;
-    class R2W,D1W store;
+    class R2W,D1W,Vectorize store;
     class CompileDO,ChatDO do_;
 ```
 
@@ -95,7 +296,7 @@ After ingest finishes, the route pauses on a `'choosing-perspective'`
 phase and renders the picker:
 
 - **State machine + page chrome:**
-  [`ingest.tsx`](../../apps/web/src/routes/ingest.tsx) — the route component
+  [`IngestRoute`](../../apps/web/src/routes/ingest.tsx#L29) — the route component
 - **Picker component:**
   [`ingest.tsx:246` `PerspectivePicker`](../../apps/web/src/routes/ingest.tsx#L246) — left-column radio list + right-column textarea
 - **Preset bodies:**
@@ -123,9 +324,9 @@ procedure). That's wired in:
 - **Handler:**
   [`interface/index.ts:59` `startCompile`](../../packages/domains/wiki/src/interface/index.ts#L59) — thin oRPC wrapper that mints a `compileRunId` and hands off to the dispatcher
 - **DO dispatcher client:**
-  [`cf-compile-run-dispatcher.ts`](../../packages/domains/wiki/src/infrastructure/cf-compile-run-dispatcher.ts) — POSTs `/start` to the CompileRunDO, anchors via `waitUntil` so the run outlives the response
+  [`createCfCompileRunDispatcher`](../../packages/domains/wiki/src/infrastructure/cf-compile-run-dispatcher.ts#L19) — POSTs `/start` to the CompileRunDO, anchors via `waitUntil` so the run outlives the response
 
-**The CompileRunDO** ([`compile-run-do.ts`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts))
+**The CompileRunDO** ([`createCompileRunDOClass`](../../packages/domains/wiki/src/infrastructure/durable_objects/compile-run-do.ts#L39))
 hosts the multi-minute compile. Its `/start` calls
 `state.waitUntil(this.run(cmd))` and its `/subscribe` streams the
 event tape as SSE. This is necessary because Workers terminate after
@@ -287,9 +488,9 @@ short of fine-tuning.
 ## 4. Storage — D1 + R2
 
 **Tables** (full schema in
-[`001_init.sql`](../../packages/domains/wiki/src/infrastructure/migrations/001_init.sql)
+[`001_init.sql`](../../packages/domains/wiki/src/infrastructure/migrations/001_init.sql#L1)
 plus the perspective column from
-[`002_perspective.sql`](../../packages/domains/wiki/src/infrastructure/migrations/002_perspective.sql)):
+[`002_perspective.sql`](../../packages/domains/wiki/src/infrastructure/migrations/002_perspective.sql#L9)):
 
 - `wikis` — id, folder_id, schema_json, perspective (added in `002`)
 - `wiki_pages` — id, wiki_id, subtype (Concept/Summary/Answer/Index), page_type, slug, title, body_r2_key
@@ -305,13 +506,13 @@ plus the perspective column from
 
 **Repos:**
 
-- [`d1-wiki-page-repo.ts`](../../packages/domains/wiki/src/infrastructure/d1-wiki-page-repo.ts)
+- [`createD1WikiPageRepository`](../../packages/domains/wiki/src/infrastructure/d1-wiki-page-repo.ts#L65)
   — `insertMany` writes R2 first, then D1 in one batch; rolls back R2
   if D1 fails
-- [`r2-wiki-page-storage.ts`](../../packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts)
+- [`createR2WikiPageStorage`](../../packages/domains/wiki/src/infrastructure/r2-wiki-page-storage.ts#L13)
   — the canonical key contract: `wiki_pages/<id>.md` (the bare-id read
   bug story below — search "R2 key bug")
-- [`d1-wiki-repo.ts`](../../packages/domains/wiki/src/infrastructure/d1-wiki-repo.ts)
+- [`createD1WikiRepository`](../../packages/domains/wiki/src/infrastructure/d1-wiki-repo.ts#L41)
   — wiki record CRUD, including the `perspective` column
 
 ---
@@ -361,7 +562,7 @@ the implementation index for each one:
 
 | Step | Implementation |
 |---|---|
-| Web · chat-dock + transport | [`chat-dock.tsx`](../../apps/web/src/components/chat-dock/chat-dock.tsx) · [`chat-transport.ts`](../../apps/web/src/lib/chat-transport.ts) |
+| Web · chat-dock + transport | [`ChatDock`](../../apps/web/src/components/chat-dock/chat-dock.tsx#L99) · [`createTenexChatTransport`](../../apps/web/src/lib/chat-transport.ts#L49) |
 | ChatTurnDO factory | [`chat-turn-do.ts:87` `createChatTurnDOClass`](../../packages/domains/chat/src/infrastructure/durable_objects/chat-turn-do.ts#L87) |
 | Dispatcher client (Worker → DO) | [`cf-chat-turn-dispatcher.ts:17` `createCfChatTurnDispatcher`](../../packages/domains/chat/src/infrastructure/cf-chat-turn-dispatcher.ts#L17) |
 | Runner | [`run-chat-turn.ts:82` `runChatTurn`](../../packages/domains/chat/src/application/run-chat-turn.ts#L82) |
@@ -476,9 +677,8 @@ citation. The tripwire:
 
 Source bodies live at `sources/<id>/text` in R2; the verifier reads
 them via the bindings the api already holds (no oRPC round-trip).
-Wired in
-[`build-chat-context.ts`](../../apps/api/src/build-chat-context.ts) at
-the `createMemorySourceHashVerifier({ readSourceText, sha256Hex })`
+Wired in [`build-chat-context.ts`](../../apps/api/src/build-chat-context.ts#L249)
+at the `createMemorySourceHashVerifier({ readSourceText, sha256Hex })`
 call.
 
 ---
@@ -487,13 +687,13 @@ call.
 
 - [`App.tsx:9` `App`](../../apps/web/src/App.tsx#L9) — wraps router + `<ChatDock>` in a horizontal flex row
 - [`chat-dock.tsx:100` `ChatDock`](../../apps/web/src/components/chat-dock/chat-dock.tsx#L100) — `sticky top-0 h-screen` aside; drag handle resizes; width persists to localStorage; closing animates width to 0
-- [`chat-transport.ts`](../../apps/web/src/lib/chat-transport.ts) — parses oRPC SSE frames and translates each AnswerEvent into the AI Elements `UIMessageChunk` shape:
+- [`createTenexChatTransport`](../../apps/web/src/lib/chat-transport.ts#L49) — parses oRPC SSE frames and translates each AnswerEvent into the AI Elements `UIMessageChunk` shape:
   - `WikiPageRetrieved` → `reasoning-delta` + `data-wiki-page-retrieved`
   - `AnswerThinking` → `reasoning-delta` (live train-of-thought from synth)
   - `AnswerProseDelta` → `text-delta`
   - `AnswerSegment(citation)` → `data-citation`
   - `AnswerSegment(artifact)` → `data-artifact`
-- [`present.tsx`](../../apps/web/src/routes/present.tsx) — the 14-slide non-technical talk at `/present`. Arrow keys to navigate, F for fullscreen.
+- [`PresentRoute`](../../apps/web/src/routes/present.tsx#L336) — the 14-slide non-technical talk at `/present`. Arrow keys to navigate, F for fullscreen.
 
 ---
 

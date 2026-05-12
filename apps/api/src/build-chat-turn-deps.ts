@@ -2,6 +2,7 @@ import {
   type Researcher,
   type RunChatTurnDeps,
   type Synthesizer,
+  type VectorWikiReader,
   type WikiReader,
   createAgenticResearcher,
   createAiSdkSynthesizer,
@@ -9,15 +10,18 @@ import {
   createD1TurnRepository,
   createDirectWikiReader,
   createMemorySourceHashVerifier,
+  createOpenRouterEmbedder,
+  createVectorWikiReader,
 } from '@domain/chat';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { InMemoryEventBus, resolveTracer } from '@package/shared-kernel';
+import { InMemoryEventBus, type VectorizeIndex, resolveTracer } from '@package/shared-kernel';
 import type { LanguageModel } from 'ai';
 
 export interface ChatTurnBindings extends Record<string, unknown> {
   DB: D1Database;
   STORAGE: R2Bucket;
   OPEN_ROUTER_API_KEY: string;
+  VECTORIZE?: VectorizeIndex;
   // Observability — see `resolveTracer`. All optional; defaults to console.
   LANGFUSE_HOST?: string;
   LANGFUSE_PUBLIC_KEY?: string;
@@ -46,7 +50,18 @@ export interface ChatTurnBindings extends Record<string, unknown> {
  * (D1) so the UI never depends on AnswerProduced fanning out.
  */
 export const buildChatTurnRuntimeDeps = (env: ChatTurnBindings): RunChatTurnDeps => {
-  const wikiReader: WikiReader = createDirectWikiReader(env.DB, env.STORAGE);
+  const baseReader = createDirectWikiReader(env.DB, env.STORAGE);
+  let vectorReader: VectorWikiReader | null = null;
+  if (env.VECTORIZE) {
+    vectorReader = createVectorWikiReader({
+      db: env.DB,
+      storage: env.STORAGE,
+      vectorize: env.VECTORIZE,
+      embedder: createOpenRouterEmbedder({ apiKey: env.OPEN_ROUTER_API_KEY }),
+      inner: baseReader,
+    });
+  }
+  const wikiReader: WikiReader = vectorReader ?? baseReader;
   const openrouter = createOpenRouter({ apiKey: env.OPEN_ROUTER_API_KEY });
   const sonnet = openrouter.chat('anthropic/claude-sonnet-4.6', {
     provider: { order: ['anthropic'], allow_fallbacks: false },
@@ -60,6 +75,8 @@ export const buildChatTurnRuntimeDeps = (env: ChatTurnBindings): RunChatTurnDeps
     model: sonnet,
     wikiReader,
     modelName: 'anthropic/claude-sonnet-4.6',
+    searchLimit: 4,
+    maxSteps: 5,
     tracer,
   });
   const synthesizer: Synthesizer = createAiSdkSynthesizer({

@@ -322,6 +322,8 @@ export const buildChatContext = (opts: BuildChatContextOptions = {}): ChatContex
       model: sonnet,
       wikiReader,
       modelName: 'anthropic/claude-sonnet-4.6',
+      searchLimit: 4,
+      maxSteps: 5,
       ...(opts.tracer ? { tracer: opts.tracer } : {}),
     });
     researcherName = 'agent-loop · anthropic/claude-sonnet-4.6';

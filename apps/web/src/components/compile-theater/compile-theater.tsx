@@ -30,10 +30,12 @@ const PHASES = [
   { id: 'linking', label: 'Resolving links', Icon: LinkIcon },
   { id: 'indexing', label: 'Building indexes', Icon: FilesIcon },
   { id: 'finished', label: 'Compiled', Icon: CheckCircle2Icon },
+  { id: 'failed', label: 'Compile failed', Icon: BrainIcon },
 ] as const;
 type PhaseId = (typeof PHASES)[number]['id'];
 
 const derivePhase = (events: CompileEvent[]): PhaseId => {
+  if (events.some((e) => e.kind === 'CompileFailed')) return 'failed';
   if (events.some((e) => e.kind === 'CompileFinished')) return 'finished';
   if (events.some((e) => e.kind === 'IndexBuilt')) return 'indexing';
   // The Linker's BacklinkResolved is the strongest "linking" signal.
@@ -71,6 +73,7 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
   const drafted = events.filter((e) => e.kind === 'PageDrafted');
   const compileStarted = events.find((e) => e.kind === 'CompileStarted');
   const compileFinished = events.find((e) => e.kind === 'CompileFinished');
+  const compileFailed = events.find((e) => e.kind === 'CompileFailed');
   const indexBuilt = events.filter((e) => e.kind === 'IndexBuilt');
   const thoughts = events.filter((e) => e.kind === 'AgentThought');
   const lastThoughts = thoughts.slice(-MAX_VISIBLE_THOUGHTS);
@@ -239,10 +242,16 @@ export function CompileTheater({ compileRunId = null, onRetry }: CompileTheaterP
           {/* Center: stage with phase-aware visual. No fixed height — the
             stage itself decides how much vertical room it needs, so the
             page is compact while reading/schema (just the orb) and only
-            grows during drafting when there's actual content to show. */}
+          grows during drafting when there's actual content to show. */}
           <div className="relative flex flex-col items-center justify-start pt-8 lg:pt-20">
             <AnimatePresence mode="wait">
-              {phase === 'starting' || phase === 'reading' || phase === 'schema' ? (
+              {phase === 'failed' && compileFailed?.kind === 'CompileFailed' ? (
+                <CompileFailurePanel
+                  key="failed"
+                  message={compileFailed.message}
+                  onRetry={onRetry}
+                />
+              ) : phase === 'starting' || phase === 'reading' || phase === 'schema' ? (
                 <CoreOrb
                   key="core"
                   phase={phase}
@@ -376,7 +385,11 @@ function PhaseRibbon({
         </motion.div>
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent/80">
-            Compile in progress
+            {phase === 'failed'
+              ? 'Compile stopped'
+              : phase === 'finished'
+                ? 'Compile complete'
+                : 'Compile in progress'}
           </p>
           <p className="font-serif text-2xl tracking-tight">{PHASES[currentIdx]?.label ?? '—'}</p>
         </div>
@@ -392,12 +405,18 @@ function PhaseRibbon({
             <motion.div
               key={p.id}
               className={`relative h-1 flex-1 overflow-hidden rounded-full ${
-                past ? 'bg-accent/70' : active ? 'bg-accent/30' : 'bg-border/40'
+                phase === 'failed' && active
+                  ? 'bg-destructive/50'
+                  : past
+                    ? 'bg-accent/70'
+                    : active
+                      ? 'bg-accent/30'
+                      : 'bg-border/40'
               }`}
               initial={false}
               animate={{ opacity: active ? 1 : past ? 0.9 : 0.6 }}
             >
-              {active ? (
+              {active && phase !== 'failed' ? (
                 <motion.div
                   aria-hidden
                   className="absolute inset-y-0 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-accent to-transparent"
@@ -422,6 +441,46 @@ function LaneLabel({ icon, label }: { icon: ReactNode; label: string }) {
       <span className="text-accent">{icon}</span>
       {label}
     </div>
+  );
+}
+
+function CompileFailurePanel({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <motion.div
+      key="compile-failed-panel"
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 190, damping: 22 }}
+      className="w-full max-w-md rounded-lg border border-destructive/40 bg-destructive/10 p-5 text-left shadow-[0_22px_80px_-48px_var(--destructive)]"
+    >
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-destructive/40 bg-background text-destructive">
+          <BrainIcon className="size-4" />
+        </div>
+        <div className="min-w-0 space-y-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-destructive">
+            Compile failed
+          </p>
+          <p className="text-sm leading-6 text-foreground">{message}</p>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-1 inline-flex items-center rounded-md border border-destructive/40 bg-background px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-destructive transition-colors hover:bg-destructive/10"
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
